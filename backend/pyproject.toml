@@ -1,0 +1,110 @@
+[tool.poetry]
+name = "patent-agents-backend"
+version = "1.0.0"
+description = "AI驱动的专利申请多智能体系统 - 后端服务"
+authors = ["Patent Agents Team"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+fastapi = "^0.109.0"
+uvicorn = {extras = ["standard"], version = "^0.27.0"}
+pydantic = "^2.5.3"
+pydantic-settings = "^2.1.0"
+openai = "^1.10.0"
+langchain = "^0.1.4"
+langchain-openai = "^0.0.5"
+sqlalchemy = "^2.0.25"
+aiosqlite = "^0.19.0"
+httpx = "^0.26.0"
+beautifulsoup4 = "^4.12.3"
+requests = "^2.31.0"
+playwright = { version = "^1.40.0", optional = true }
+python-multipart = "^0.0.6"
+passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+python-dotenv = "^1.0.0"
+loguru = "^0.7.2"
+tenacity = "^8.2.3"
+jinja2 = "^3.1.3"
+python-docx = { version = "^1.1.0", optional = true }
+reportlab = { version = "^4.0.9", optional = true }
+markdown = "^3.5.2"
+structlog = "^24.1.0"
+dependency-injector = { version = "^4.41.0", extras = ["fastapi"] }
+celery = "^5.3.6"
+redis = "^5.0.1"
+asyncpg = "^0.29.0"
+alembic = "^1.13.1"
+slowapi = "^0.1.9"
+minio = "^7.2.7"
+pgvector = "^0.2.5"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.4"
+pytest-asyncio = "^0.23.3"
+pytest-cov = "^4.1.0"
+black = "^23.12.1"
+isort = "^5.13.2"
+flake8 = "^7.0.0"
+mypy = "^1.8.0"
+
+[tool.poetry.extras]
+browser = ["playwright"]
+export = ["python-docx", "reportlab"]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+follow_imports = "normal"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-v --cov=src --cov-report=term-missing"
+filterwarnings = [
+    # httpx/pydantic unclosed sockets during GC teardown (third-party lib internals)
+    "ignore:Exception ignored in.*socket.socket.*:pytest.PytestUnraisableExceptionWarning",
+    "ignore:unclosed transport .*SelectorSocketTransport.*:ResourceWarning",
+]

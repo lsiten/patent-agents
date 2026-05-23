@@ -1,0 +1,313 @@
+export type WorkflowState =
+  | 'initial'
+  | 'requirement'
+  | 'retrieval'
+  | 'writing'
+  | 'reviewing'
+  | 'iteration'
+  | 'completed'
+  | 'failed';
+
+export type PatentType = 'invention' | 'utility' | 'design';
+
+export type Severity = 'critical' | 'high' | 'medium' | 'low';
+
+export interface KeyFeature {
+  name: string;
+  description: string;
+  is_innovative: boolean;
+}
+
+export interface PatentTypeRecommendation {
+  type: PatentType;
+  rationale: string;
+}
+
+export interface RequirementDoc {
+  tech_field: string;
+  core_principle: string;
+  application_scenarios: string[];
+  technical_problem: string;
+  key_features: KeyFeature[];
+  patent_type_recommendation: PatentTypeRecommendation;
+  beneficial_effects: string[];
+  information_gaps: string[];
+}
+
+export interface Assessment {
+  rating: 'high' | 'medium' | 'low';
+  rationale: string;
+}
+
+export interface NoveltyAssessment extends Assessment {
+  related_prior_art: string[];
+}
+
+export interface InventiveStepAssessment extends Assessment {
+  distinguishing_features: string[];
+}
+
+export interface SimilarPatent {
+  patent_id: string;
+  title: string;
+  similarity_score: number;
+  key_differences: string[];
+}
+
+export interface RetrievalReport {
+  novelty_assessment: NoveltyAssessment;
+  inventive_step_assessment: InventiveStepAssessment;
+  utility_assessment: Assessment;
+  similar_patents: SimilarPatent[];
+  writing_recommendations: string[];
+  overall_patentability: 'high' | 'medium' | 'low';
+  risk_factors: string[];
+}
+
+export interface Claims {
+  independent_claim: string;
+  dependent_claims: string[];
+}
+
+export interface Description {
+  technical_field: string;
+  background_art: string;
+  summary_of_invention: string;
+  description_of_drawings: string;
+  detailed_description: string;
+}
+
+export interface PatentDraft {
+  claims: Claims;
+  description: Description;
+  abstract: string;
+  key_terms_dictionary: Record<string, string>;
+}
+
+export interface Issue {
+  severity: Severity;
+  location: string;
+  description: string;
+  suggestion: string;
+}
+
+export interface ReviewResult {
+  passed: boolean;
+  issues: Issue[];
+}
+
+export interface ClaimsReview extends ReviewResult {
+  clarity_score: number;
+  support_score: number;
+}
+
+export interface DescriptionReview extends ReviewResult {
+  sufficiency_score: number;
+  completeness_score: number;
+}
+
+export interface ExaminationRisk {
+  risk_type: string;
+  likelihood: Severity;
+  mitigation_suggestion: string;
+}
+
+export interface ReviewReport {
+  formal_compliance: ReviewResult;
+  claims_review: ClaimsReview;
+  description_review: DescriptionReview;
+  consistency_review: ReviewResult;
+  examination_risks: ExaminationRisk[];
+  overall_score: number;
+  recommendation: 'approve' | 'revise' | 'reject';
+  revision_priority: Severity;
+}
+
+export interface PatentTask {
+  task_id: string;
+  user_id: string;
+  tech_description: string;
+  patent_type_preference?: PatentType;
+  current_state: WorkflowState;
+  requirement_doc?: RequirementDoc;
+  retrieval_report?: RetrievalReport;
+  draft_doc?: PatentDraft;
+  review_report?: ReviewReport;
+  iteration_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateTaskRequest {
+  tech_description: string;
+  patent_type_preference?: PatentType;
+  user_id: string;
+}
+
+export interface WorkflowEvent {
+  task_id: string;
+  timestamp: string;
+  agent: string;
+  message: string;
+  type: 'info' | 'progress' | 'success' | 'warning' | 'error';
+  data?: Record<string, unknown>;
+}
+
+export interface AgentInfo {
+  id: string;
+  name: string;
+  role: string;
+  description: string;
+  status: 'idle' | 'working' | 'completed' | 'error';
+  icon: string;
+}
+
+// ============ 对话相关类型 ============
+export type MessageRole = 'user' | 'assistant' | 'system' | 'agent';
+
+export interface ChatMessage {
+  id: string;
+  task_id?: string;
+  role: MessageRole;
+  agent_name?: string;
+  content: string;
+  timestamp: string;
+  type?: 'text' | 'json' | 'file' | 'progress';
+  metadata?: Record<string, unknown>;
+}
+
+export interface ChatSession {
+  session_id: string;
+  task_id?: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  status: 'draft' | 'in_progress' | 'completed';
+  patent_title?: string;
+}
+
+// ============ Agent管理相关类型 ============
+export interface AgentTool {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  category: 'search' | 'file' | 'analysis' | 'external';
+  config?: Record<string, string>;
+}
+
+export interface AgentSkill {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  version: string;
+  tags: string[];
+}
+
+export interface AgentTimer {
+  id: string;
+  name: string;
+  enabled: boolean;
+  cron_expression: string;
+  action: string;
+  last_run?: string;
+  next_run?: string;
+}
+
+export interface AgentMemory {
+  id: string;
+  type: 'short_term' | 'long_term' | 'knowledge_base';
+  name: string;
+  size: number;
+  item_count: number;
+  last_updated: string;
+}
+
+export interface AgentConfig {
+  id: string;
+  name: string;
+  description: string;
+  role: 'orchestrator' | 'specialist' | 'assistant' | 'critic';
+  system_prompt: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  working_directory: string;
+  tools?: AgentTool[];
+  skills?: AgentSkill[];
+  timers?: AgentTimer[];
+  memories?: AgentMemory[];
+  parent_id?: string | null;
+  child_ids: string[];
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// ============ 组织架构相关类型 ============
+export interface OrgNode {
+  id: string;
+  name: string;
+  type: 'agent' | 'group' | 'team';
+  description?: string;
+  children: OrgNode[];
+  parent_id?: string | null;
+  agent_config?: AgentConfig;
+  expanded?: boolean;
+}
+
+export type OrgAction = 'move' | 'copy' | 'delete' | 'edit' | 'add_child';
+
+// ============ 专利管理扩展类型 ============
+export interface PatentSummary {
+  task_id: string;
+  title: string;
+  patent_type: PatentType;
+  tech_field: string;
+  current_state: WorkflowState;
+  progress: number;
+  created_at: string;
+  updated_at: string;
+  assignee?: string;
+  inventors?: string[];
+  application_number?: string;
+  filing_date?: string;
+}
+
+export interface PatentFile {
+  file_id: string;
+  task_id: string;
+  file_type: 'claims' | 'description' | 'abstract' | 'full_document' | 'drawing';
+  format: 'docx' | 'pdf' | 'json' | 'md';
+  version: string;
+  file_name: string;
+  file_size: number;
+  created_at: string;
+  download_url: string;
+}
+
+export interface PatentDetail extends PatentSummary {
+  requirement_doc?: RequirementDoc;
+  retrieval_report?: RetrievalReport;
+  draft_doc?: PatentDraft;
+  review_report?: ReviewReport;
+  files: PatentFile[];
+  events: WorkflowEvent[];
+}
+
+// ============ API响应类型 ============
+export interface ListResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface ApiResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
+}

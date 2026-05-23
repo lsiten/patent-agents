@@ -1,0 +1,528 @@
+/**
+ * API Client for Patent Multi-Agent System
+ */
+
+import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory, OrgNode } from '@/types';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+
+// ============ Helper Functions ============
+async function request<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const url = `${API_BASE_URL}${endpoint}`;
+
+  const defaultHeaders = {
+    'Content-Type': 'application/json',
+  };
+
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...defaultHeaders,
+      ...options.headers,
+    },
+  });
+
+  if (!response.ok) {
+    let message = `API Error: ${response.status} ${response.statusText}`;
+    try {
+      const errorBody = await response.json();
+      if (isRecord(errorBody)) {
+        const detail = errorBody.detail || errorBody.error || errorBody.message;
+        if (typeof detail === 'string') {
+          message = detail;
+        }
+      }
+    } catch {
+      // Keep the HTTP status fallback when the response body is not JSON.
+    }
+    throw new Error(message);
+  }
+
+  // 204 No Content — no body to parse
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json();
+}
+
+// ============ Task API ============
+export interface CreateTaskRequest {
+  tech_description: string;
+  patent_type_preference?: 'invention' | 'utility' | 'design';
+  user_id?: string;
+}
+
+export interface TaskResponse {
+  task_id: string;
+  user_id: string;
+  current_state: string;
+  created_at: string;
+  updated_at: string;
+  iteration_count: number;
+  error_message?: string;
+}
+
+export interface TaskDetailResponse extends TaskResponse {
+  requirement_doc?: any;
+  retrieval_report?: any;
+  draft_doc?: any;
+  review_report?: any;
+  final_patent?: any;
+}
+
+export interface TaskListResponse {
+  total: number;
+  tasks: TaskResponse[];
+}
+
+export const taskApi = {
+  create: (data: CreateTaskRequest) =>
+    request<TaskResponse>('/tasks', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  list: (user_id?: string, limit = 20, offset = 0) =>
+    request<TaskListResponse>(
+      `/tasks?${user_id ? `user_id=${encodeURIComponent(user_id)}&` : ''}limit=${limit}&offset=${offset}`
+    ),
+
+  get: (task_id: string) =>
+    request<TaskDetailResponse>(`/tasks/${encodeURIComponent(task_id)}`),
+
+  getEvents: (task_id: string) =>
+    request<any[]>(`/tasks/${encodeURIComponent(task_id)}/events`),
+
+  cancel: (task_id: string) =>
+    request(`/tasks/${encodeURIComponent(task_id)}/cancel`, { method: 'POST' }),
+};
+
+// ============ Workflow API ============
+export interface WorkflowPhaseResult {
+  phase: string;
+  success: boolean;
+  duration_seconds: number;
+  issues: string[];
+  warnings: string[];
+}
+
+export interface WorkflowResponse {
+  task_id: string;
+  user_id: string;
+  current_state: string;
+  created_at: string;
+  updated_at?: string;
+  iteration_count: number;
+  message_count: number;
+  phase_history: WorkflowPhaseResult[];
+  outputs: {
+    brainstorming: Record<string, unknown>;
+    requirement_analysis: Record<string, unknown>;
+    retrieval_report: Record<string, unknown>;
+    patent_draft: Record<string, unknown>;
+    review_report: Record<string, unknown>;
+  };
+}
+
+export interface WorkflowChatResponse {
+  role: 'assistant';
+  content: string;
+  timestamp: string;
+  task_id: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requireString(value: unknown, field: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`Invalid workflow response: ${field} must be a string`);
+  }
+  return value;
+}
+
+function requireNumber(value: unknown, field: string): number {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    throw new Error(`Invalid workflow response: ${field} must be a number`);
+  }
+  return value;
+}
+
+function requireBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new Error(`Invalid workflow response: ${field} must be a boolean`);
+  }
+  return value;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function safeRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function parseWorkflowPhaseResult(value: unknown): WorkflowPhaseResult {
+  if (!isRecord(value)) {
+    throw new Error('Invalid workflow response: phase_history item must be an object');
+  }
+
+  return {
+    phase: requireString(value.phase, 'phase_history.phase'),
+    success: requireBoolean(value.success, 'phase_history.success'),
+    duration_seconds: requireNumber(value.duration_seconds, 'phase_history.duration_seconds'),
+    issues: stringArray(value.issues),
+    warnings: stringArray(value.warnings),
+  };
+}
+
+function parseWorkflowResponse(value: unknown): WorkflowResponse {
+  if (!isRecord(value)) {
+    throw new Error('Invalid workflow response: response must be an object');
+  }
+
+  const outputs = safeRecord(value.outputs);
+
+  return {
+    task_id: requireString(value.task_id, 'task_id'),
+    user_id: requireString(value.user_id, 'user_id'),
+    current_state: requireString(value.current_state, 'current_state'),
+    created_at: requireString(value.created_at, 'created_at'),
+    updated_at: typeof value.updated_at === 'string' ? value.updated_at : undefined,
+    iteration_count: requireNumber(value.iteration_count, 'iteration_count'),
+    message_count: requireNumber(value.message_count, 'message_count'),
+    phase_history: Array.isArray(value.phase_history)
+      ? value.phase_history.map(parseWorkflowPhaseResult)
+      : [],
+    outputs: {
+      brainstorming: safeRecord(outputs.brainstorming),
+      requirement_analysis: safeRecord(outputs.requirement_analysis),
+      retrieval_report: safeRecord(outputs.retrieval_report),
+      patent_draft: safeRecord(outputs.patent_draft),
+      review_report: safeRecord(outputs.review_report),
+    },
+  };
+}
+
+export interface WorkflowListResponse {
+  total: number;
+  items: WorkflowResponse[];
+}
+
+function parseWorkflowListResponse(value: unknown): WorkflowListResponse {
+  if (!isRecord(value)) {
+    throw new Error('Invalid workflow list response: response must be an object');
+  }
+
+  return {
+    total: requireNumber(value.total, 'total'),
+    items: Array.isArray(value.items) ? value.items.map(parseWorkflowResponse) : [],
+  };
+}
+
+export const workflowApi = {
+  create: async (techDescription: string, userId = 'default_user', patentTypePreference?: 'invention' | 'utility' | 'design') =>
+    parseWorkflowResponse(await request<unknown>('/workflows', {
+      method: 'POST',
+      body: JSON.stringify({
+        tech_description: techDescription,
+        user_id: userId,
+        ...(patentTypePreference ? { patent_type_preference: patentTypePreference } : {}),
+      }),
+    })),
+
+  chat: (taskId: string, content: string, userId = 'default_user') =>
+    request<WorkflowChatResponse>(`/workflows/${encodeURIComponent(taskId)}/chat`, {
+      method: 'POST',
+      body: JSON.stringify({ content, user_id: userId, task_id: taskId }),
+    }),
+
+  start: (taskId: string) =>
+    request<{ task_id: string; status: string }>(`/workflows/${encodeURIComponent(taskId)}/start`, { method: 'POST' }),
+
+  list: async (userId = 'default_user', limit = 50, offset = 0) =>
+    parseWorkflowListResponse(
+      await request<unknown>(`/workflows?user_id=${encodeURIComponent(userId)}&limit=${limit}&offset=${offset}`)
+    ),
+
+  get: async (taskId: string) =>
+    parseWorkflowResponse(await request<unknown>(`/workflows/${encodeURIComponent(taskId)}`)),
+
+  getMessages: (taskId: string) =>
+    request<{ messages: ChatMessage[]; count: number }>(`/workflows/${encodeURIComponent(taskId)}/messages`),
+};
+
+// ============ Chat API ============
+export interface ChatMessage {
+  id: string;
+  task_id?: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: string;
+  type?: 'text' | 'json' | 'file' | 'progress';
+  metadata?: Record<string, unknown>;
+}
+
+export const chatApi = {
+  sendMessage: (content: string, task_id?: string) =>
+    request<{ user_message: ChatMessage; assistant_message: ChatMessage }>('/chat/messages', {
+      method: 'POST',
+      body: JSON.stringify({ content, task_id }),
+    }),
+
+  getMessages: (session_id = 'default') =>
+    request<{ messages: ChatMessage[]; count: number }>(`/chat/messages?session_id=${encodeURIComponent(session_id)}`),
+};
+
+// ============ Agent Management API ============
+export interface AgentDetailResponse {
+  config: AgentConfig;
+  tools: AgentTool[];
+  skills: AgentSkill[];
+  timers: AgentTimer[];
+  memories: AgentMemory[];
+}
+
+export const agentApi = {
+  list: () =>
+    request<{ agents: AgentConfig[]; total: number }>('/agents'),
+
+  get: (agent_id: string) =>
+    request<AgentDetailResponse>(`/agents/${encodeURIComponent(agent_id)}`),
+
+  update: (agent_id: string, config: Partial<AgentConfig>) =>
+    request(`/agents/${encodeURIComponent(agent_id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
+
+  toggleTool: (agent_id: string, tool_id: string, enabled: boolean) =>
+    request(`/agents/${encodeURIComponent(agent_id)}/tools/${encodeURIComponent(tool_id)}/toggle?enabled=${enabled}`, { method: 'POST' }),
+
+  toggleSkill: (agent_id: string, skill_id: string, enabled: boolean) =>
+    request(`/agents/${encodeURIComponent(agent_id)}/skills/${encodeURIComponent(skill_id)}/toggle?enabled=${enabled}`, { method: 'POST' }),
+
+  toggleTimer: (agent_id: string, timer_id: string, enabled: boolean) =>
+    request(`/agents/${encodeURIComponent(agent_id)}/timers/${encodeURIComponent(timer_id)}/toggle?enabled=${enabled}`, { method: 'POST' }),
+
+  clearMemory: (agent_id: string, memory_id: string) =>
+    request(`/agents/${encodeURIComponent(agent_id)}/memory/${encodeURIComponent(memory_id)}/clear`, { method: 'POST' }),
+
+  // Helper: update full tools/skills/timers arrays via PUT agents/{id}
+  updateTools: (agent_id: string, tools: AgentTool[]) =>
+    request(`/agents/${encodeURIComponent(agent_id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ tools }),
+    }),
+
+  updateSkills: (agent_id: string, skills: AgentSkill[]) =>
+    request(`/agents/${encodeURIComponent(agent_id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ skills }),
+    }),
+
+  updateTimers: (agent_id: string, timers: AgentTimer[]) =>
+    request(`/agents/${encodeURIComponent(agent_id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ timers }),
+    }),
+};
+
+// ============ Organization API ============
+export const organizationApi = {
+  getTree: () =>
+    request<OrgNode>('/organization/tree'),
+
+  updateTree: (tree: OrgNode) =>
+    request('/organization/tree', {
+      method: 'PUT',
+      body: JSON.stringify(tree),
+    }),
+};
+
+// ============ Search API ============
+export interface SearchPatentRequest {
+  query: string;
+  sources?: string[];
+  limit?: number;
+}
+
+export interface SearchResult {
+  id: string;
+  title: string;
+  abstract?: string;
+  applicant?: string;
+  publication_date?: string;
+  similarity_score?: number;
+  source: string;
+}
+
+export interface SearchResponse {
+  total: number;
+  results: SearchResult[];
+  query: string;
+  search_time: number;
+}
+
+export const searchApi = {
+  patents: (data: SearchPatentRequest) =>
+    request<SearchResponse>('/search/patents', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  knowledgeBase: (query: string, top_k = 5) =>
+    request<{ total: number; patents: any[]; query: string }>(`/knowledge/search?query=${encodeURIComponent(query)}&top_k=${top_k}`),
+};
+
+// ============ System API ============
+export interface SystemStatusResponse {
+  status: string;
+  active_tasks: number;
+  agents: { name: string; description: string; status: string }[];
+  knowledge_base_count: number;
+  data_sources: string[];
+}
+
+export interface DashboardStats {
+  total_tasks: number;
+  completed_tasks: number;
+  in_progress_tasks: number;
+  failed_tasks: number;
+  active_agents: number;
+  avg_completion_time: string;
+  success_rate: number;
+}
+
+export const systemApi = {
+  status: () =>
+    request<SystemStatusResponse>('/system/status'),
+
+  health: () =>
+    request<{ status: string; timestamp: string }>('/health'),
+
+  dashboardStats: () =>
+    request<DashboardStats>('/stats/dashboard'),
+};
+
+// ============ SSE Event Stream ============
+export function createEventStream(task_id: string, onEvent: (event: any) => void, onDone: (state: string) => void) {
+  const eventSource = new EventSource(`${API_BASE_URL}/tasks/${task_id}/stream`);
+
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      onEvent(data);
+    } catch (e) {
+      console.error('Failed to parse SSE event:', e);
+    }
+  };
+
+  eventSource.addEventListener('done', (event: any) => {
+    onDone(event.data);
+    eventSource.close();
+  });
+
+  eventSource.onerror = (error) => {
+    console.error('SSE Error:', error);
+    eventSource.close();
+  };
+
+  return () => eventSource.close();
+}
+
+// ============ React Query Hooks (Optional) ============
+// These can be used with @tanstack/react-query for caching and state management
+
+// ============ Conversation API ============
+export interface ConversationSummary {
+  id: string;
+  user_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  workflow_task_id?: string;
+  workflow_state?: string;
+}
+
+export interface ConversationDetail extends ConversationSummary {
+  messages: ChatMessage[];
+}
+
+export interface CreateConversationRequest {
+  user_id: string;
+  title?: string;
+}
+
+export interface ConversationChatRequest {
+  content: string;
+}
+
+export interface ConversationChatResponse {
+  message: ChatMessage;
+  has_recommendation: boolean;
+  conversation_id: string;
+}
+
+export const conversationApi = {
+  create: (data: CreateConversationRequest) =>
+    request<ConversationDetail>('/conversations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  list: async (user_id = 'default_user') => {
+    const raw = await request<{ total: number; items: ConversationSummary[] }>(
+      `/conversations?user_id=${encodeURIComponent(user_id)}`
+    );
+    // Backend returns { items, total, page, page_size }; normalize to { conversations, total }
+    return {
+      total: raw.total,
+      conversations: raw.items ?? [],
+    };
+  },
+
+  get: (conv_id: string) =>
+    request<ConversationDetail>(`/conversations/${encodeURIComponent(conv_id)}`),
+
+  delete: (conv_id: string) =>
+    request<void>(`/conversations/${encodeURIComponent(conv_id)}`, {
+      method: 'DELETE',
+    }),
+
+  chat: (conv_id: string, data: ConversationChatRequest) =>
+    request<ConversationChatResponse>(`/conversations/${encodeURIComponent(conv_id)}/chat`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  createWorkflow: (conv_id: string) =>
+    request<{ task_id: string; status: string; redirect_url: string }>(
+      `/conversations/${encodeURIComponent(conv_id)}/create-workflow`,
+      { method: 'POST' }
+    ),
+};
+
+// ============ React Query Hooks (Optional) ============
+// These can be used with @tanstack/react-query for caching and state management
+
+export const queryKeys = {
+  tasks: ['tasks'],
+  task: (id: string) => ['task', id],
+  taskEvents: (id: string) => ['task-events', id],
+  chat: (session_id: string) => ['chat', session_id],
+  agents: ['agents'],
+  agent: (id: string) => ['agent', id],
+  organization: ['organization'],
+  systemStatus: ['system-status'],
+  dashboardStats: ['dashboard-stats'],
+  conversations: ['conversations'],
+  conversation: (id: string) => ['conversation', id],
+};

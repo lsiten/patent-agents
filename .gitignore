@@ -1,0 +1,83 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# === Node.js / Frontend ===
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# === IDE / Editors ===
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+*.sublime-workspace
+
+# === OS ===
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# === Environment & Secrets ===
+.env
+.env.local
+.env.*.local
+*.pem
+credentials.json
+service-account.json
+
+# === Project-Specific ===
+# SQLite database (dev artifact)
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated patent exports
+backend/exports/
+backend/finalized_patents/
+
+# Celery beat schedule
+celerybeat-schedule*
+
+# Logs
+*.log
+*.log.*
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# === OpenCode / Claude Code session data ===
+.omo/
+.omo/*
+!.omo/.gitkeep
+
+# === Playwright MCP debug artifacts ===
+.playwright-mcp/
+
+# === VCS ===
+.agit

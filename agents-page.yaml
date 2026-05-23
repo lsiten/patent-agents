@@ -1,0 +1,213 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e5]:
+        - link "专利智脑" [ref=e6] [cursor=pointer]:
+          - /url: /
+          - img [ref=e8]
+          - generic [ref=e16]: 专利智脑
+        - navigation [ref=e17]:
+          - link "对话" [ref=e18] [cursor=pointer]:
+            - /url: /chat
+            - img [ref=e19]
+            - text: 对话
+          - link "专利管理" [ref=e21] [cursor=pointer]:
+            - /url: /patents
+            - img [ref=e22]
+            - text: 专利管理
+          - link "Agent管理" [ref=e24] [cursor=pointer]:
+            - /url: /agents
+            - img [ref=e25]
+            - text: Agent管理
+          - link "组织架构" [ref=e28] [cursor=pointer]:
+            - /url: /organization
+            - img [ref=e29]
+            - text: 组织架构
+        - button "开始申请" [ref=e34] [cursor=pointer]
+    - main [ref=e35]:
+      - generic [ref=e37]:
+        - generic [ref=e39]:
+          - generic [ref=e40]:
+            - heading "Agent管理" [level=1] [ref=e41]
+            - paragraph [ref=e42]: 管理多智能体系统中的所有Agent配置、工具、技能与资源
+          - button "刷新" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+            - text: 刷新
+        - generic [ref=e49]:
+          - generic [ref=e51]:
+            - generic [ref=e54]:
+              - img [ref=e56]
+              - textbox "搜索Agent..." [ref=e59]
+            - generic [ref=e60]:
+              - generic [ref=e62] [cursor=pointer]:
+                - generic [ref=e63]:
+                  - generic [ref=e64]:
+                    - heading "专利申请 CEO" [level=3] [ref=e65]
+                    - generic [ref=e66]: 运行中
+                  - paragraph [ref=e67]: 专利申请全流程统筹协调者，负责任务分解、Agent 调度、质量把控、结果整合
+                  - generic [ref=e68]:
+                    - generic [ref=e69]: 统筹者
+                    - generic [ref=e70]: default
+                - img [ref=e71]
+              - generic [ref=e74] [cursor=pointer]:
+                - generic [ref=e75]:
+                  - generic [ref=e76]:
+                    - heading "需求分析师" [level=3] [ref=e77]
+                    - generic [ref=e78]: 运行中
+                  - paragraph [ref=e79]: 技术发明需求分析专家，负责将非结构化技术描述转化为标准化的专利需求文档
+                  - generic [ref=e80]:
+                    - generic [ref=e81]: 专业Agent
+                    - generic [ref=e82]: default
+                - img [ref=e83]
+              - generic [ref=e86] [cursor=pointer]:
+                - generic [ref=e87]:
+                  - generic [ref=e88]:
+                    - heading "检索分析师" [level=3] [ref=e89]
+                    - generic [ref=e90]: 运行中
+                  - paragraph [ref=e91]: 专利检索与分析专家，负责现有技术调研、专利性评估和风险识别
+                  - generic [ref=e92]:
+                    - generic [ref=e93]: 专业Agent
+                    - generic [ref=e94]: default
+                - img [ref=e95]
+              - generic [ref=e98] [cursor=pointer]:
+                - generic [ref=e99]:
+                  - generic [ref=e100]:
+                    - heading "专利撰写师" [level=3] [ref=e101]
+                    - generic [ref=e102]: 运行中
+                  - paragraph [ref=e103]: 资深专利文件撰写专家，负责撰写符合专利法规范的高质量申请文件
+                  - generic [ref=e104]:
+                    - generic [ref=e105]: 专业Agent
+                    - generic [ref=e106]: default
+                - img [ref=e107]
+              - generic [ref=e110] [cursor=pointer]:
+                - generic [ref=e111]:
+                  - generic [ref=e112]:
+                    - heading "质量审查师" [level=3] [ref=e113]
+                    - generic [ref=e114]: 运行中
+                  - paragraph [ref=e115]: 专利申请文件质量审查专家，负责形式合规、权利要求质量、说明书质量等全面审查
+                  - generic [ref=e116]:
+                    - generic [ref=e117]: 评审
+                    - generic [ref=e118]: default
+                - img [ref=e119]
+              - generic [ref=e122] [cursor=pointer]:
+                - generic [ref=e123]:
+                  - generic [ref=e124]:
+                    - heading "头脑风暴伙伴" [level=3] [ref=e125]
+                    - generic [ref=e126]: 运行中
+                  - paragraph [ref=e127]: 专利申请前的创意探讨伙伴，帮助用户梳理发明思路，拓展保护方向
+                  - generic [ref=e128]:
+                    - generic [ref=e129]: 助手
+                    - generic [ref=e130]: default
+                - img [ref=e131]
+          - generic [ref=e133]:
+            - generic [ref=e135]:
+              - generic [ref=e136]:
+                - generic [ref=e137]:
+                  - img [ref=e139]
+                  - generic [ref=e142]:
+                    - generic [ref=e143]:
+                      - heading "专利申请 CEO" [level=2] [ref=e144]
+                      - generic [ref=e145]: 统筹者
+                    - paragraph [ref=e146]: 专利申请全流程统筹协调者，负责任务分解、Agent 调度、质量把控、结果整合
+                - generic [ref=e147]:
+                  - generic [ref=e148]:
+                    - text: "模型:"
+                    - code [ref=e149]: default
+                  - generic [ref=e150]: "Temperature: 0.3"
+                  - generic [ref=e151]: "Max Tokens: 8192"
+              - button "停用" [ref=e153] [cursor=pointer]:
+                - img [ref=e154]
+                - text: 停用
+            - generic [ref=e157]:
+              - tablist [ref=e158]:
+                - tab "工具管理" [selected] [ref=e159] [cursor=pointer]:
+                  - img [ref=e160]
+                  - text: 工具管理
+                - tab "技能管理" [ref=e162] [cursor=pointer]:
+                  - img [ref=e163]
+                  - text: 技能管理
+                - tab "定时器" [ref=e165] [cursor=pointer]:
+                  - img [ref=e166]
+                  - text: 定时器
+                - tab "记忆管理" [ref=e169] [cursor=pointer]:
+                  - img [ref=e170]
+                  - text: 记忆管理
+                - tab "配置" [ref=e174] [cursor=pointer]:
+                  - img [ref=e175]
+                  - text: 配置
+              - tabpanel [ref=e178]:
+                - generic [ref=e179]:
+                  - generic [ref=e180]:
+                    - generic [ref=e181]:
+                      - heading "工具列表" [level=3] [ref=e182]
+                      - paragraph [ref=e183]: 管理此Agent可用的工具集
+                    - button "添加工具" [ref=e184] [cursor=pointer]:
+                      - img [ref=e185]
+                      - text: 添加工具
+                  - generic [ref=e187]:
+                    - generic [ref=e189]:
+                      - generic [ref=e190]:
+                        - generic [ref=e191]:
+                          - heading "task_planner" [level=4] [ref=e192]
+                          - generic [ref=e193]: analysis
+                        - paragraph [ref=e194]: Hermes Profile 启用工具：task_planner
+                      - generic [ref=e195]:
+                        - button [ref=e196] [cursor=pointer]:
+                          - img [ref=e197]
+                        - button [ref=e200] [cursor=pointer]:
+                          - img [ref=e201]
+                        - button [ref=e204] [cursor=pointer]:
+                          - img [ref=e205]
+                    - generic [ref=e209]:
+                      - generic [ref=e210]:
+                        - generic [ref=e211]:
+                          - heading "agent_selector" [level=4] [ref=e212]
+                          - generic [ref=e213]: analysis
+                        - paragraph [ref=e214]: Hermes Profile 启用工具：agent_selector
+                      - generic [ref=e215]:
+                        - button [ref=e216] [cursor=pointer]:
+                          - img [ref=e217]
+                        - button [ref=e220] [cursor=pointer]:
+                          - img [ref=e221]
+                        - button [ref=e224] [cursor=pointer]:
+                          - img [ref=e225]
+                    - generic [ref=e229]:
+                      - generic [ref=e230]:
+                        - generic [ref=e231]:
+                          - heading "quality_assessor" [level=4] [ref=e232]
+                          - generic [ref=e233]: analysis
+                        - paragraph [ref=e234]: Hermes Profile 启用工具：quality_assessor
+                      - generic [ref=e235]:
+                        - button [ref=e236] [cursor=pointer]:
+                          - img [ref=e237]
+                        - button [ref=e240] [cursor=pointer]:
+                          - img [ref=e241]
+                        - button [ref=e244] [cursor=pointer]:
+                          - img [ref=e245]
+                    - generic [ref=e249]:
+                      - generic [ref=e250]:
+                        - generic [ref=e251]:
+                          - heading "risk_analyzer" [level=4] [ref=e252]
+                          - generic [ref=e253]: analysis
+                        - paragraph [ref=e254]: Hermes Profile 启用工具：risk_analyzer
+                      - generic [ref=e255]:
+                        - button [ref=e256] [cursor=pointer]:
+                          - img [ref=e257]
+                        - button [ref=e260] [cursor=pointer]:
+                          - img [ref=e261]
+                        - button [ref=e264] [cursor=pointer]:
+                          - img [ref=e265]
+                    - generic [ref=e269]:
+                      - generic [ref=e270]:
+                        - generic [ref=e271]:
+                          - heading "report_generator" [level=4] [ref=e272]
+                          - generic [ref=e273]: analysis
+                        - paragraph [ref=e274]: Hermes Profile 启用工具：report_generator
+                      - generic [ref=e275]:
+                        - button [ref=e276] [cursor=pointer]:
+                          - img [ref=e277]
+                        - button [ref=e280] [cursor=pointer]:
+                          - img [ref=e281]
+                        - button [ref=e284] [cursor=pointer]:
+                          - img [ref=e285]
+  - alert [ref=e186]

@@ -1,0 +1,518 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
+import {
+  Brain,
+  Search,
+  FileEdit,
+  CheckSquare,
+  User,
+  ChevronRight,
+  Clock,
+  AlertCircle,
+  RefreshCw,
+} from 'lucide-react';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
+import { CodeBlock } from '@/components/ui/CodeBlock';
+import { workflowApi, type WorkflowResponse } from '@/lib/api';
+import type { WorkflowState, WorkflowEvent, AgentInfo } from '@/types';
+
+const workflowSteps: { state: WorkflowState; label: string; icon: typeof Brain }[] = [
+  { state: 'initial', label: '已提交', icon: User },
+  { state: 'requirement', label: '需求分析', icon: Brain },
+  { state: 'retrieval', label: '检索分析', icon: Search },
+  { state: 'writing', label: '文件撰写', icon: FileEdit },
+  { state: 'reviewing', label: '质量审查', icon: CheckSquare },
+  { state: 'completed', label: '完成', icon: CheckSquare },
+];
+
+const stateMap: Record<string, WorkflowState> = {
+  initialized: 'initial',
+  brainstorming: 'initial',
+  requirement_analysis: 'requirement',
+  retrieval_analysis: 'retrieval',
+  patent_writing: 'writing',
+  quality_review: 'reviewing',
+  iteration: 'reviewing',
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'failed',
+};
+
+const phaseAgentMap: Record<string, string> = {
+  brainstorming: '专利头脑风暴 Agent',
+  requirement_analysis: '需求分析 Agent',
+  retrieval_analysis: '检索分析 Agent',
+  patent_writing: '专利撰写 Agent',
+  quality_review: '质量审查 Agent',
+};
+
+const terminalStates = new Set(['completed', 'failed', 'cancelled']);
+
+function getWorkflowState(workflow: WorkflowResponse | null): WorkflowState {
+  if (!workflow) return 'initial';
+  return stateMap[workflow.current_state] ?? 'initial';
+}
+
+function hasOutput(output: Record<string, unknown> | undefined): boolean {
+  return Boolean(output && Object.keys(output).length > 0);
+}
+
+function getAgentStatus(
+  agentState: WorkflowState,
+  currentState: WorkflowState,
+  workflow: WorkflowResponse | null
+): AgentInfo['status'] {
+  if (!workflow) return 'idle';
+  if (workflow.current_state === 'failed' || workflow.current_state === 'cancelled') {
+    return agentState === currentState ? 'error' : 'idle';
+  }
+
+  const currentIndex = workflowSteps.findIndex((step) => step.state === currentState);
+  const agentIndex = workflowSteps.findIndex((step) => step.state === agentState);
+
+  if (agentIndex < currentIndex || currentState === 'completed') return 'completed';
+  if (agentIndex === currentIndex) return 'working';
+  return 'idle';
+}
+
+function createAgents(currentState: WorkflowState, workflow: WorkflowResponse | null): AgentInfo[] {
+  return [
+    {
+      id: 'ceo',
+      name: 'CEO Agent',
+      role: '统筹调度',
+      description: '负责全局流程调度、冲突协调和质量把控',
+      status: workflow && terminalStates.has(workflow.current_state) ? 'completed' : 'working',
+      icon: '👨‍💼',
+    },
+    {
+      id: 'requirement',
+      name: '需求分析 Agent',
+      role: '技术分析',
+      description: '解析技术描述，提取关键创新点',
+      status: getAgentStatus('requirement', currentState, workflow),
+      icon: '🧠',
+    },
+    {
+      id: 'retrieval',
+      name: '检索分析 Agent',
+      role: '专利性评估',
+      description: '检索现有技术，评估专利性',
+      status: getAgentStatus('retrieval', currentState, workflow),
+      icon: '🔍',
+    },
+    {
+      id: 'writing',
+      name: '专利撰写 Agent',
+      role: '文件生成',
+      description: '生成符合规范的专利申请文件',
+      status: getAgentStatus('writing', currentState, workflow),
+      icon: '✍️',
+    },
+    {
+      id: 'review',
+      name: '质量审查 Agent',
+      role: '合规校验',
+      description: '审查文件质量，预判审查风险',
+      status: getAgentStatus('reviewing', currentState, workflow),
+      icon: '✅',
+    },
+  ];
+}
+
+function createEvents(workflow: WorkflowResponse | null, taskId: string): WorkflowEvent[] {
+  if (!workflow) return [];
+
+  const createdAt = new Date(workflow.created_at).getTime();
+  const events: WorkflowEvent[] = [
+    {
+      task_id: taskId,
+      timestamp: workflow.created_at,
+      agent: 'CEO Agent',
+      message: '任务创建成功，等待或执行专利申请流程',
+      type: 'info',
+    },
+    ...workflow.phase_history.map((phaseResult, index) => ({
+      task_id: taskId,
+      timestamp: new Date(createdAt + (index + 1) * 1000).toISOString(),
+      agent: phaseAgentMap[phaseResult.phase] ?? 'Workflow Engine',
+      message: phaseResult.success
+        ? `${phaseAgentMap[phaseResult.phase] ?? phaseResult.phase} 已完成，用时 ${phaseResult.duration_seconds.toFixed(2)} 秒`
+        : `${phaseAgentMap[phaseResult.phase] ?? phaseResult.phase} 执行失败`,
+      type: phaseResult.success ? 'success' as const : 'error' as const,
+      data: {
+        issues: phaseResult.issues,
+        warnings: phaseResult.warnings,
+      },
+    })),
+  ];
+
+  if (!terminalStates.has(workflow.current_state)) {
+    events.push({
+      task_id: taskId,
+      timestamp: new Date().toISOString(),
+      agent: 'Workflow Engine',
+      message: `当前阶段：${workflowSteps.find((step) => step.state === getWorkflowState(workflow))?.label ?? workflow.current_state}`,
+      type: 'progress',
+    });
+  }
+
+  return events.reverse();
+}
+
+function getStatusLabel(workflow: WorkflowResponse | null): string {
+  if (!workflow) return '加载中...';
+
+  switch (workflow.current_state) {
+    case 'completed':
+      return '已完成';
+    case 'failed':
+      return '已失败';
+    case 'cancelled':
+      return '已取消';
+    default:
+      return '处理中...';
+  }
+}
+
+function EmptyOutput({ icon: Icon, message }: { icon: typeof Brain; message: string }) {
+  return (
+    <div className="text-center py-xxl text-muted">
+      <Icon className="w-12 h-12 mx-auto mb-md opacity-50" />
+      <p>{message}</p>
+    </div>
+  );
+}
+
+export default function WorkflowPage() {
+  const params = useParams();
+  const taskId = params.taskId as string;
+  const [workflow, setWorkflow] = useState<WorkflowResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pollIntervalMs, setPollIntervalMs] = useState(3000);
+
+  const currentState = getWorkflowState(workflow);
+  const currentStepIndex = useMemo(() => {
+    return workflowSteps.findIndex((step) => step.state === currentState);
+  }, [currentState]);
+  const agents = useMemo(() => createAgents(currentState, workflow), [currentState, workflow]);
+  const events = useMemo(() => createEvents(workflow, taskId), [workflow, taskId]);
+  const isTerminal = workflow ? terminalStates.has(workflow.current_state) : false;
+
+  const loadWorkflow = useCallback(async (showLoading = false) => {
+    if (showLoading) {
+      setIsLoading(true);
+    } else {
+      setIsRefreshing(true);
+    }
+
+    try {
+      const data = await workflowApi.get(taskId);
+      setWorkflow(data);
+      setError(null);
+      setPollIntervalMs(3000);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '获取工作流状态失败');
+      setPollIntervalMs((currentInterval) => Math.min(currentInterval * 2, 30000));
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, [taskId]);
+
+  useEffect(() => {
+    loadWorkflow(true).catch((requestError) => {
+      setError(requestError instanceof Error ? requestError.message : '获取工作流状态失败');
+    });
+  }, [loadWorkflow]);
+
+  useEffect(() => {
+    if (isTerminal) return;
+
+    const timer = window.setInterval(() => {
+      loadWorkflow(false).catch((requestError) => {
+        setError(requestError instanceof Error ? requestError.message : '获取工作流状态失败');
+      });
+    }, pollIntervalMs);
+
+    return () => window.clearInterval(timer);
+  }, [isTerminal, loadWorkflow, pollIntervalMs]);
+
+  const getStatusBadge = (status: AgentInfo['status']) => {
+    switch (status) {
+      case 'working':
+        return <Badge variant="green-soft">进行中</Badge>;
+      case 'completed':
+        return <Badge variant="green">已完成</Badge>;
+      case 'error':
+        return <Badge variant="orange">错误</Badge>;
+      default:
+        return <Badge variant="gray">等待中</Badge>;
+    }
+  };
+
+  const getEventIcon = (type: WorkflowEvent['type']) => {
+    switch (type) {
+      case 'success':
+        return <CheckSquare className="w-4 h-4 text-brand-green-dark" />;
+      case 'warning':
+        return <AlertCircle className="w-4 h-4 text-accent-orange" />;
+      case 'error':
+        return <AlertCircle className="w-4 h-4 text-red-500" />;
+      case 'progress':
+        return <RefreshCw className="w-4 h-4 text-brand-green animate-spin" />;
+      default:
+        return <Clock className="w-4 h-4 text-muted" />;
+    }
+  };
+
+  const renderJsonOutput = (output: Record<string, unknown> | undefined, icon: typeof Brain, emptyMessage: string) => {
+    if (!hasOutput(output)) {
+      return <EmptyOutput icon={icon} message={emptyMessage} />;
+    }
+
+    return (
+      <CodeBlock language="json">
+        {JSON.stringify(output, null, 2)}
+      </CodeBlock>
+    );
+  };
+
+  return (
+    <div className="py-section-lg bg-surface min-h-screen">
+      <div className="container mx-auto px-md">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-md mb-xl">
+          <div>
+            <h1 className="text-heading-3 font-euclid font-medium text-ink mb-xs">
+              专利申请流程
+            </h1>
+            <p className="text-body-sm text-steel">
+              任务 ID: {taskId}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Badge variant={error ? 'orange' : 'green-soft'} className="text-sm">
+              {error ? '获取失败' : getStatusLabel(workflow)}
+            </Badge>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                loadWorkflow(false).catch((requestError) => {
+                  setError(requestError instanceof Error ? requestError.message : '获取工作流状态失败');
+                });
+              }}
+              disabled={isRefreshing}
+            >
+              <RefreshCw className={`w-4 h-4 mr-1 ${isRefreshing ? 'animate-spin' : ''}`} />
+              刷新
+            </Button>
+          </div>
+        </div>
+
+        {error && (
+          <Card className="mb-xl border-red-200 bg-red-50">
+            <CardContent className="pt-lg">
+              <div className="flex items-center gap-2 text-red-700">
+                <AlertCircle className="w-5 h-5" />
+                <span className="text-body-sm-medium">{error}</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Progress Stepper */}
+        <Card className="mb-xl">
+          <CardContent className="pt-xl">
+            <div className="flex items-center justify-between overflow-x-auto pb-md">
+              {workflowSteps.map((step, index) => {
+                const Icon = step.icon;
+                const isCompleted = index < currentStepIndex || currentState === 'completed';
+                const isCurrent = index === currentStepIndex && currentState !== 'completed';
+
+                return (
+                  <div key={step.state} className="flex items-center">
+                    <div className="flex flex-col items-center min-w-[100px]">
+                      <div
+                        className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                          isCompleted
+                            ? 'bg-brand-green text-ink'
+                            : isCurrent
+                            ? 'bg-brand-green-soft text-brand-green-dark ring-4 ring-brand-green/20'
+                            : 'bg-hairline-soft text-muted'
+                        }`}
+                      >
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <span
+                        className={`mt-xs text-caption font-medium whitespace-nowrap ${
+                          isCompleted || isCurrent ? 'text-ink' : 'text-muted'
+                        }`}
+                      >
+                        {step.label}
+                      </span>
+                    </div>
+                    {index < workflowSteps.length - 1 && (
+                      <ChevronRight
+                        className={`w-5 h-5 mx-sm ${
+                          isCompleted ? 'text-brand-green' : 'text-hairline-strong'
+                        }`}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        {isLoading ? (
+          <Card>
+            <CardContent className="py-xxl text-center text-muted">
+              <RefreshCw className="w-8 h-8 mx-auto mb-md animate-spin" />
+              <p>正在加载工作流状态...</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid lg:grid-cols-3 gap-xl">
+            {/* Agent Status Cards */}
+            <div className="lg:col-span-1 space-y-md">
+              <h2 className="text-heading-5 font-euclid font-medium text-ink mb-md">
+                Agent 工作状态
+              </h2>
+              {agents.map((agent) => (
+                <Card key={agent.id} hoverable>
+                  <CardContent className="pt-lg">
+                    <div className="flex items-start justify-between gap-md">
+                      <div className="flex items-center gap-md">
+                        <span className="text-2xl">{agent.icon}</span>
+                        <div>
+                          <h3 className="text-body-md-medium font-medium text-ink">
+                            {agent.name}
+                          </h3>
+                          <p className="text-caption text-steel">{agent.role}</p>
+                        </div>
+                      </div>
+                      {getStatusBadge(agent.status)}
+                    </div>
+                    <p className="mt-md text-body-sm text-steel">
+                      {agent.description}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Main Content - Event Log and Data Preview */}
+            <div className="lg:col-span-2 space-y-xl">
+              {/* Event Log */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>实时工作日志</CardTitle>
+                  <CardDescription>
+                    各 Agent 的工作进展和输出记录
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="bg-canvas-dark rounded-lg p-lg max-h-[500px] overflow-y-auto">
+                    <div className="space-y-md">
+                      {events.map((event, index) => (
+                        <div
+                          key={`${event.timestamp}-${index}`}
+                          className="flex items-start gap-md text-on-dark"
+                        >
+                          <div className="mt-0.5">{getEventIcon(event.type)}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-xs">
+                              <span className="text-body-sm-medium font-medium">
+                                {event.agent}
+                              </span>
+                              <span className="text-micro text-on-dark-muted">
+                                {new Date(event.timestamp).toLocaleTimeString()}
+                              </span>
+                            </div>
+                            <p className="text-body-sm text-on-dark-muted">
+                              {event.message}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Data Preview Tabs */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>阶段输出预览</CardTitle>
+                  <CardDescription>
+                    查看各阶段生成的结构化数据和文档
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Tabs defaultValue="requirement">
+                    <TabsList variant="pill" className="mb-lg">
+                      <TabsTrigger value="requirement" variant="pill">
+                        需求分析
+                      </TabsTrigger>
+                      <TabsTrigger value="retrieval" variant="pill" disabled={currentStepIndex < 2}>
+                        检索报告
+                      </TabsTrigger>
+                      <TabsTrigger value="draft" variant="pill" disabled={currentStepIndex < 3}>
+                        申请文件
+                      </TabsTrigger>
+                      <TabsTrigger value="review" variant="pill" disabled={currentStepIndex < 4}>
+                        审查意见
+                      </TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="requirement">
+                      {renderJsonOutput(
+                        workflow?.outputs.requirement_analysis,
+                        Brain,
+                        '需求分析尚未完成，请稍候...'
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="retrieval">
+                      {renderJsonOutput(
+                        workflow?.outputs.retrieval_report,
+                        Search,
+                        '检索分析进行中，请稍候...'
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="draft">
+                      {renderJsonOutput(
+                        workflow?.outputs.patent_draft,
+                        FileEdit,
+                        '等待检索完成后开始撰写...'
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="review">
+                      {renderJsonOutput(
+                        workflow?.outputs.review_report,
+                        CheckSquare,
+                        '等待文件撰写完成后开始审查...'
+                      )}
+                    </TabsContent>
+                  </Tabs>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

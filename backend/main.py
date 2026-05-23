@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""
+专利申请多智能体系统 - 后端入口
+"""
+import asyncio
+import uvicorn
+from fastapi import FastAPI
+
+from src.core import (
+    settings,
+    configure_logging,
+    get_logger,
+    init_container,
+    cleanup_container,
+    register_middleware,
+    register_exception_handlers,
+    init_event_bus,
+    container,
+)
+from src.api.routes import router as api_router
+
+# 配置日志
+configure_logging()
+logger = get_logger(__name__)
+
+# 初始化FastAPI应用
+app = FastAPI(
+    title="专利智脑 - AI驱动的专利申请多智能体系统",
+    description="基于CEO Agent统筹的分层多智能体架构，自动化完成专利申请全流程",
+    version="1.0.0",
+    docs_url="/docs" if not settings.is_production else None,
+    redoc_url="/redoc" if not settings.is_production else None,
+    openapi_url="/openapi.json" if not settings.is_production else None,
+    root_path=settings.root_path,
+)
+
+# 注册中间件
+register_middleware(app)
+
+# 注册异常处理器
+register_exception_handlers(app)
+
+# 注册API路由
+app.include_router(api_router, prefix=settings.api_version)
+
+
+# 启动事件
+@app.on_event("startup")
+async def startup_event():
+    logger.info("正在启动专利智脑服务...", environment=settings.environment.value)
+
+    try:
+        # 初始化依赖注入容器
+        await init_container()
+
+        # 初始化事件总线
+        # container.redis_client is a Factory(redis_provider.provided.get_client)
+        # — calling it returns the bound get_client method, not the client value itself.
+        # Double-call to resolve: first gets the method, second invokes it.
+        redis_client = container.redis_client()()
+        await init_event_bus(redis_client)
+
+        logger.info("专利智脑服务启动成功!", port=settings.port)
+
+    except Exception as e:
+        logger.critical("服务启动失败", error=str(e), exc_info=True)
+        raise
+
+
+# 关闭事件
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("专利智脑服务正在关闭...")
+
+    try:
+        # 清理容器资源
+        await cleanup_container()
+        logger.info("资源清理完成")
+    except Exception as e:
+        logger.error("关闭过程中出错", error=str(e))
+
+    logger.info("专利智脑服务已关闭")
+
+
+# 根路径
+@app.get("/")
+async def root():
+    return {
+        "name": "专利智脑 - AI驱动的专利申请多智能体系统",
+        "version": "1.0.0",
+        "status": "running",
+        "environment": settings.environment.value,
+        "docs": "/docs" if not settings.is_production else None,
+        "api_base": settings.api_version,
+    }
+
+
+# 健康检查
+@app.get("/health")
+async def health_check_endpoint():
+    return {
+        "status": "healthy",
+        "timestamp": settings.db.url,
+        "environment": settings.environment.value,
+    }
+
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app",
+        host=settings.host,
+        port=settings.port,
+        reload=settings.is_development,
+        log_level=settings.log_level.value.lower(),
+        workers=1 if settings.is_development else 4,
+    )

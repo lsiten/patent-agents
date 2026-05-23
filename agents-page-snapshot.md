@@ -1,0 +1,27 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e5]:
+        - link "专利智脑" [ref=e6] [cursor=pointer]:
+          - /url: /
+          - img [ref=e8]
+          - generic [ref=e16]: 专利智脑
+        - navigation [ref=e17]:
+          - link "对话" [ref=e18] [cursor=pointer]:
+            - /url: /chat
+          - link "专利管理" [ref=e21] [cursor=pointer]:
+            - /url: /patents
+          - link "Agent管理" [ref=e24] [cursor=pointer]:
+            - /url: /agents
+          - link "组织架构" [ref=e28] [cursor=pointer]:
+            - /url: /organization
+        - button "开始申请" [ref=e34] [cursor=pointer]
+    - main [ref=e35]:
+      - generic [ref=e37]:
+        - generic [ref=e39]:
+          - generic [ref=e40]
+          - button "刷新" [ref=e43] [cursor=pointer]
+        - generic [ref=e49]:
+          - generic [ref=e51]
+          - generic [ref=e133]
+  - alert [ref=e186]

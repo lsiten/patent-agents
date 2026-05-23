@@ -1,0 +1,359 @@
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Optional, List, Dict, Any, Literal
+from datetime import datetime
+
+from ..models.enums import WorkflowState, PatentType, Severity
+
+
+# ==================== 请求模型 ====================
+
+class CreateTaskRequest(BaseModel):
+    """创建专利申请任务请求"""
+    tech_description: str = Field(..., min_length=50, description="技术发明描述")
+    patent_type_preference: Optional[PatentType] = Field(None, description="偏好的专利类型")
+    user_id: str = Field(..., description="用户ID")
+    title: Optional[str] = Field(None, description="发明标题")
+    reference_urls: List[str] = Field(default_factory=list, description="参考资料URL")
+
+
+class UpdateTaskRequest(BaseModel):
+    """更新任务请求"""
+    task_id: str
+    user_feedback: Optional[str] = None
+    supplementary_info: Optional[Dict[str, Any]] = None
+
+
+class ChatMessageRequest(BaseModel):
+    """头脑风暴聊天消息请求"""
+    content: str = Field(..., min_length=1, description="用户消息内容")
+    user_id: str = Field(default="default_user", description="用户ID")
+    task_id: Optional[str] = Field(None, description="已有工作流任务ID")
+
+
+class WorkflowStartRequest(BaseModel):
+    """启动专利申请工作流请求"""
+    tech_description: str = Field(..., min_length=20, description="技术发明描述")
+    user_id: str = Field(default="default_user", description="用户ID")
+    patent_type_preference: Optional[PatentType] = Field(None, description="偏好的专利类型")
+    task_id: Optional[str] = Field(None, description="可选：已有头脑风暴任务ID")
+
+
+class SearchPatentRequest(BaseModel):
+    """专利检索请求"""
+    query: str
+    tech_field: Optional[str] = None
+    max_results: int = 20
+    databases: List[str] = Field(default_factory=list)
+
+
+# ==================== 响应模型 ====================
+
+class TaskResponse(BaseModel):
+    """任务基本信息响应"""
+    task_id: str
+    user_id: str
+    title: Optional[str] = None
+    current_state: WorkflowState
+    created_at: datetime
+    updated_at: datetime
+    iteration_count: int
+    error_message: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TaskDetailResponse(TaskResponse):
+    """任务详情响应"""
+    # 各阶段输出（根据进度返回对应数据
+    requirement_doc: Optional[Dict[str, Any]] = None
+    retrieval_report: Optional[Dict[str, Any]] = None
+    draft_doc: Optional[Dict[str, Any]] = None
+    review_report: Optional[Dict[str, Any]] = None
+    final_patent: Optional[Dict[str, Any]] = None
+
+
+class TaskListResponse(BaseModel):
+    """任务列表响应"""
+    total: int
+    tasks: List[TaskResponse]
+
+
+class WorkflowPhaseResultResponse(BaseModel):
+    """Hermes/Profile 工作流阶段结果响应"""
+    phase: str
+    success: bool
+    duration_seconds: float
+    issues: List[str]
+    warnings: List[str]
+
+
+class WorkflowResponse(BaseModel):
+    """Hermes/Profile 工作流响应"""
+    task_id: str
+    user_id: str
+    current_state: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    iteration_count: int
+    message_count: int
+    phase_history: List[WorkflowPhaseResultResponse]
+    outputs: Dict[str, Dict[str, Any]]
+
+
+class WorkflowListResponse(BaseModel):
+    """Hermes/Profile 工作流列表响应"""
+    total: int
+    items: List[WorkflowResponse]
+
+
+class WorkflowEventResponse(BaseModel):
+    """工作流事件响应"""
+    task_id: str
+    timestamp: datetime
+    agent: str
+    message: str
+    event_type: str
+    data: Optional[Dict[str, Any]] = None
+
+
+class PriorArtReferenceResponse(BaseModel):
+    """现有技术参考响应"""
+    reference_id: str
+    title: str
+    publication_date: Optional[str] = None
+    applicant: Optional[str] = None
+    abstract: str = ""
+    similarity_score: float = 0.0
+    source: str = ""
+    url: Optional[str] = None
+
+
+class SearchResponse(BaseModel):
+    """检索响应"""
+    total: int
+    results: List[PriorArtReferenceResponse]
+    query: str
+    search_time: float
+
+
+class DownloadResponse(BaseModel):
+    """下载响应"""
+    task_id: str
+    file_type: str
+    download_url: str
+    file_size: int
+    generated_at: datetime
+
+
+class AgentStatusResponse(BaseModel):
+    """Agent状态响应"""
+    name: str
+    description: str
+    status: str
+    current_task: Optional[str] = None
+
+
+class AgentConfigResponse(BaseModel):
+    """Agent 配置响应"""
+    id: str
+    name: str
+    description: str
+    role: Literal["orchestrator", "specialist", "assistant", "critic"]
+    system_prompt: str
+    model: str
+    temperature: float
+    max_tokens: int
+    working_directory: str
+    enabled: bool
+    created_at: str
+    updated_at: str
+    parent_id: Optional[str] = None
+    child_ids: List[str]
+
+
+class AgentToolResponse(BaseModel):
+    """Agent 工具响应"""
+    id: str
+    name: str
+    description: str
+    enabled: bool
+    category: Literal["search", "file", "analysis", "external"]
+    config: Dict[str, str] = Field(default_factory=dict)
+
+
+class AgentSkillResponse(BaseModel):
+    """Agent 技能响应"""
+    id: str
+    name: str
+    description: str
+    enabled: bool
+    version: str
+    tags: List[str]
+
+
+class AgentTimerResponse(BaseModel):
+    """Agent 定时器响应"""
+    id: str
+    name: str
+    enabled: bool
+    cron_expression: str
+    action: str
+    last_run: Optional[str] = None
+    next_run: Optional[str] = None
+
+
+class AgentMemoryResponse(BaseModel):
+    """Agent 记忆响应"""
+    id: str
+    type: Literal["short_term", "long_term", "knowledge_base"]
+    name: str
+    size: int
+    item_count: int
+    last_updated: str
+
+
+class AgentListResponse(BaseModel):
+    """Agent 列表响应"""
+    agents: List[AgentConfigResponse]
+    total: int
+
+
+class AgentDetailResponse(BaseModel):
+    """Agent 详情响应"""
+    config: AgentConfigResponse
+    tools: List[AgentToolResponse]
+    skills: List[AgentSkillResponse]
+    timers: List[AgentTimerResponse]
+    memories: List[AgentMemoryResponse]
+
+
+class AgentUpdateResponse(BaseModel):
+    """Agent 更新响应"""
+    agent_id: str
+    updated_fields: List[str]
+    message: str
+
+
+class AgentToggleResponse(BaseModel):
+    """Agent 开关响应"""
+    agent_id: str
+    enabled: Optional[bool] = None
+    tool_id: Optional[str] = None
+    skill_id: Optional[str] = None
+    timer_id: Optional[str] = None
+    memory_id: Optional[str] = None
+    cleared: Optional[bool] = None
+
+
+class OrgNodeResponse(BaseModel):
+    """组织架构节点响应"""
+    id: str
+    name: str
+    type: Literal["team", "group", "agent"]
+    description: Optional[str] = None
+    children: List["OrgNodeResponse"] = Field(default_factory=list)
+    expanded: Optional[bool] = None
+    agent_config: Optional[AgentConfigResponse] = None
+
+
+class OrganizationUpdateResponse(BaseModel):
+    """组织架构更新响应"""
+    status: str
+    message: str
+    tree: OrgNodeResponse
+
+
+OrgNodeResponse.model_rebuild()
+
+
+# ==================== 知识库响应 ====================
+
+class FinalizedPatentResponse(BaseModel):
+    """已定稿专利响应"""
+    patent_id: str
+    title: str
+    tech_field: str
+    quality_score: Optional[float] = None
+    is_exemplar: bool = False
+    created_at: datetime
+
+
+class KnowledgeBaseSearchResponse(BaseModel):
+    """知识库搜索响应"""
+    total: int
+    patents: List[FinalizedPatentResponse]
+    query: str
+
+
+# ==================== 对话系统 ====================
+
+class ConversationSummary(BaseModel):
+    """对话会话摘要"""
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    message_count: int
+    status: str
+    linked_workflow_id: Optional[str] = None
+
+
+class ConversationMessage(BaseModel):
+    """对话消息"""
+    id: str
+    role: str
+    content: str
+    timestamp: str
+    type: str = "text"
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ConversationDetail(BaseModel):
+    """对话会话详情"""
+    id: str
+    title: str
+    messages: List[ConversationMessage]
+    created_at: str
+    updated_at: str
+    status: str
+    linked_workflow_id: Optional[str] = None
+
+
+class ConversationListResponse(BaseModel):
+    """对话列表响应"""
+    items: List[ConversationSummary]
+    total: int
+    page: int = 1
+    page_size: int = 50
+
+
+class ConversationChatResponse(BaseModel):
+    """对话聊天响应"""
+    message: ConversationMessage
+    has_recommendation: bool = False
+    conversation_id: str
+
+
+class CreateConversationRequest(BaseModel):
+    """创建对话请求"""
+    title: str = "新的对话"
+
+
+class ConversationChatRequest(BaseModel):
+    """对话聊天请求"""
+    content: str = Field(..., min_length=1, description="用户消息内容")
+
+
+class CreateWorkflowFromConversationRequest(BaseModel):
+    """从对话创建工作流请求"""
+    user_id: str = "default_user"
+
+# ==================== 系统状态 ====================
+
+class SystemStatusResponse(BaseModel):
+    """系统状态响应"""
+    status: str
+    active_tasks: int
+    agents: List[AgentStatusResponse]
+    knowledge_base_count: int
+    data_sources: List[str]
