@@ -1,0 +1,14 @@
+{
+  "patent.ceo.v1": {
+    "tools": {
+      "task_planner": {
+        "enabled": false
+      }
+    },
+    "skills": {
+      "任务分解": {
+        "enabled": false
+      }
+    }
+  }
+}
