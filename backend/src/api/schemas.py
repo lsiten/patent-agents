@@ -179,6 +179,9 @@ class AgentToolResponse(BaseModel):
     enabled: bool
     category: Literal["search", "file", "analysis", "external"]
     config: Dict[str, str] = Field(default_factory=dict)
+    source_code: Optional[str] = None
+    is_hermes: Optional[bool] = None
+    related_files: List[str] = Field(default_factory=list)
 
 
 class AgentSkillResponse(BaseModel):
@@ -189,6 +192,9 @@ class AgentSkillResponse(BaseModel):
     enabled: bool
     version: str
     tags: List[str]
+    source_code: Optional[str] = None
+    source_markdown: Optional[str] = None
+    related_files: List[str] = Field(default_factory=list)
 
 
 class AgentTimerResponse(BaseModel):
@@ -202,6 +208,18 @@ class AgentTimerResponse(BaseModel):
     next_run: Optional[str] = None
 
 
+class MemoryEntryResponse(BaseModel):
+    """记忆条目响应"""
+    id: str
+    type: Literal["fact", "context", "preference", "knowledge", "event"]
+    key: str
+    value: str
+    score: Optional[float] = None
+    created_at: str
+    updated_at: str
+    tags: Optional[List[str]] = None
+
+
 class AgentMemoryResponse(BaseModel):
     """Agent 记忆响应"""
     id: str
@@ -210,6 +228,8 @@ class AgentMemoryResponse(BaseModel):
     size: int
     item_count: int
     last_updated: str
+    content: Optional[str] = None
+    entries: Optional[List[MemoryEntryResponse]] = None
 
 
 class AgentListResponse(BaseModel):
@@ -232,6 +252,14 @@ class AgentUpdateResponse(BaseModel):
     agent_id: str
     updated_fields: List[str]
     message: str
+
+
+class CreateTimerRequest(BaseModel):
+    """创建定时器请求"""
+    name: str = "未命名定时器"
+    enabled: bool = True
+    cron_expression: str = "0 0 * * *"
+    action: str = ""
 
 
 class AgentToggleResponse(BaseModel):

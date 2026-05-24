@@ -40,7 +40,7 @@ from .schemas import (
 )
 from ..models.domain import PatentTask
 from ..models.enums import WorkflowState
-from ..agents import AgentProfile, AgentRole, get_profile_registry, register_default_profiles
+from ..agents import AgentProfile, AgentRole, AgentSkill, get_profile_registry, register_default_profiles
 from ..agents.ceo import CEOAgent
 from ..core.workflow_engine import PatentWorkflowEngine, WorkflowContext
 from ..knowledge.base import get_knowledge_base
@@ -127,7 +127,7 @@ def _agent_config_from_profile(profile: AgentProfile) -> Dict[str, Any]:
         "name": profile.name,
         "description": profile.description,
         "role": _agent_ui_role(profile.role),
-        "system_prompt": "",
+        "system_prompt": profile.get_system_prompt(),
         "model": profile.model or "default",
         "temperature": profile.temperature,
         "max_tokens": profile.max_tokens,
@@ -1188,3 +1188,375 @@ async def get_dashboard_stats():
         "avg_completion_time": "2.5 hours",
         "success_rate": 94.5,
     }
+
+
+# ============ Agent 文件浏览与相关文件查看 ============
+import os as _os
+import stat as _stat
+
+_KNOWN_TOOL_IMPL_FILES: dict[str, str] = {
+    "task_planner": "backend/src/agents/hermes/tools/base.py",
+    "quality_assessor": "backend/src/agents/hermes/tools/base.py",
+    "report_generator": "backend/src/agents/hermes/tools/base.py",
+    "risk_analyzer": "backend/src/agents/hermes/tools/base.py",
+}
+
+
+@router.get("/agents/{agent_id}/related-files")
+async def get_agent_related_files(
+    agent_id: str,
+    tool_id: str = None,
+    skill_id: str = None,
+):
+    """获取 Agent 特定工具或技能的相关文件列表及内容"""
+    if (tool_id is None and skill_id is None) or (tool_id is not None and skill_id is not None):
+        raise HTTPException(
+            status_code=400,
+            detail="必须且只能提供 tool_id 或 skill_id 参数之一",
+        )
+
+    profile = profile_registry.get(agent_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail=f"Agent 未找到: {agent_id}")
+
+    _project_root = _os.path.dirname(
+        _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    )
+
+    def _read_file(rel_path: str) -> str | None:
+        """安全读取项目内文件"""
+        abs_path = _os.path.normpath(_os.path.join(_project_root, rel_path))
+        if not abs_path.startswith(_project_root):
+            return None
+        if not _os.path.isfile(abs_path):
+            return None
+        try:
+            with open(abs_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception:
+            return None
+
+    if tool_id is not None:
+        if tool_id not in profile.tool_config.enabled_tools:
+            raise HTTPException(status_code=404, detail=f"工具未找到: {tool_id}")
+
+        tools = _agent_tools_from_profile(profile)
+        tool = next((t for t in tools if t["id"] == tool_id), None)
+
+        rel_path = _KNOWN_TOOL_IMPL_FILES.get(tool_id)
+        source_code = _read_file(rel_path) if rel_path else None
+
+        return {
+            "type": "tool",
+            "name": tool["name"] if tool else tool_id,
+            "source_code": source_code,
+            "source_markdown": None,
+            "files": [{"path": rel_path, "content": source_code}] if rel_path and source_code else [],
+        }
+
+    else:
+        skills = _agent_skills_from_profile(profile)
+        skill_meta = next((s for s in skills if s["id"] == skill_id), None)
+        if skill_meta is None:
+            raise HTTPException(status_code=404, detail=f"技能未找到: {skill_id}")
+
+        # 找到原始的 AgentSkill 对象以获取完整信息（熟练度、关键词等）
+        profile_skill: AgentSkill | None = next(
+            (s for s in profile.skills if s.name == skill_id), None
+        )
+
+        markdown_lines = [
+            f"# {skill_meta['name']}",
+            "",
+            f"**熟练度**: {profile_skill.proficiency if profile_skill else 0.8}",
+            "",
+            "## 描述",
+            "",
+            skill_meta["description"],
+            "",
+        ]
+        tags = skill_meta.get("tags", [])
+        if tags:
+            markdown_lines.append("## 关键词")
+            markdown_lines.append("")
+            for tag in tags:
+                markdown_lines.append(f"- {tag}")
+            markdown_lines.append("")
+
+        source_markdown = "\n".join(markdown_lines)
+
+        profile_file_rel = "backend/src/agents/profiles/default_profiles.py"
+        source_code = _read_file(profile_file_rel)
+
+        return {
+            "type": "skill",
+            "name": skill_meta["name"],
+            "source_code": source_code,
+            "source_markdown": source_markdown,
+            "files": [
+                {
+                    "path": f"skills/{skill_meta['name']}.md",
+                    "content": source_markdown,
+                },
+                {"path": profile_file_rel, "content": source_code},
+            ],
+        }
+
+
+# ============ Agent 工具/技能生成与热插拔 ============
+import textwrap as _textwrap
+
+
+@router.post("/agents/{agent_id}/tools/chat-generate")
+async def chat_generate_tool(agent_id: str, body: dict):
+    """通过LLM生成Hermes工具代码（返回模板代码）"""
+    _require_agent_profile(agent_id)
+    name = body.get("name", "").strip()
+    description = body.get("description", "").strip()
+    parameters = body.get("parameters") or {}
+
+    # 根据参数生成工具函数签名
+    func_params = ", ".join(
+        f'{k}: str = None' for k in parameters.keys()
+    ) or "**kwargs"
+
+    param_lines = ""
+    for k, v in parameters.items():
+        param_lines += f"    {k}: {v or '参数描述'}\n"
+
+    param_json_lines = ""
+    for k in parameters:
+        param_json_lines += f'        "{k}": {k},\n'
+
+    code = f'''\"\"\"
+{description}
+
+Args:
+{param_lines}"""
+import json
+from typing import Any, Dict
+
+
+async def run({func_params}) -> Dict[str, Any]:
+    """
+    {description}
+    """
+    # --- 在此实现工具逻辑 ---
+    result = {{
+        "success": True,
+        "message": f"工具 {name} 执行成功",
+        "data": {{
+{param_json_lines}        }},
+    }}
+    return result
+'''
+
+    return {
+        "success": True,
+        "name": name,
+        "code": code,
+        "message": "工具代码已生成",
+    }
+
+
+@router.post("/agents/{agent_id}/skills/chat-generate")
+async def chat_generate_skill(agent_id: str, body: dict):
+    """通过LLM生成Hermes技能数据"""
+    _require_agent_profile(agent_id)
+    name = body.get("name", "").strip() or "auto_skill"
+    description = body.get("description", "").strip()
+    parameters = body.get("parameters") or {}
+
+    # 生成技能元数据
+    skill_data = {
+        "name": name,
+        "description": description,
+        "proficiency": 5,
+        "keywords": [w.strip() for w in description.replace(",", " ").split() if len(w.strip()) > 1][:5],
+    }
+
+    # 生成技能内容
+    generated_content = f'''# {name}
+
+## 概述
+{description}
+
+## 配置
+- 名称: {name}
+- 熟练度: 5
+- 关键词: {", ".join(skill_data["keywords"])}
+
+## 参数
+{chr(10).join(f'- {k}: {v}' for k, v in parameters.items()) if parameters else "（无参数）"}
+
+## 实现说明
+该技能通过AI对话自动生成，请在Agent配置中进一步编辑完善。
+'''
+
+    return {
+        "success": True,
+        "name": name,
+        "skill_data": skill_data,
+        "generated_content": generated_content,
+        "message": "技能已生成",
+    }
+
+
+@router.post("/agents/{agent_id}/tools/validate")
+async def validate_agent_tool(agent_id: str, body: dict):
+    """验证Hermes工具代码语法"""
+    _require_agent_profile(agent_id)
+    code = body.get("code", "")
+    if not code.strip():
+        return {"valid": False, "name": None, "error": "代码为空"}
+
+    # Python语法检查
+    try:
+        compile(code, "<hermes_tool>", "exec")
+    except SyntaxError as e:
+        return {"valid": False, "name": None, "error": str(e)}
+
+    # 提取函数名
+    import ast
+    try:
+        tree = ast.parse(code)
+        func_name = None
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                func_name = node.name
+                break
+        return {"valid": True, "name": func_name or "run", "error": None}
+    except SyntaxError as e:
+        return {"valid": False, "name": None, "error": str(e)}
+
+
+@router.post("/agents/{agent_id}/tools/hot-plug")
+async def hot_plug_agent_tool(agent_id: str, body: dict):
+    """热插拔注册新的Hermes工具"""
+    profile = _require_agent_profile(agent_id)
+    name = body.get("name", "").strip()
+    description = body.get("description", "").strip()
+    code = body.get("code", "")
+
+    if not name:
+        raise HTTPException(status_code=400, detail="工具名称不能为空")
+    if not code:
+        raise HTTPException(status_code=400, detail="工具代码不能为空")
+
+    # 验证代码语法
+    try:
+        compile(code, "<hermes_tool>", "exec")
+    except SyntaxError as e:
+        raise HTTPException(status_code=400, detail=f"代码语法错误: {e}")
+
+    # 确保工具在启用列表中
+    if name not in profile.tool_config.enabled_tools:
+        profile.tool_config.enabled_tools.append(name)
+
+    # 确保工具配置存在
+    if name not in profile.tool_config.tool_configs:
+        profile.tool_config.tool_configs[name] = {}
+
+    profile.tool_config.tool_configs[name].update({
+        "description": description,
+        "enabled": True,
+        "source_code": code,
+        "is_hermes": True,
+    })
+
+    return {
+        "success": True,
+        "name": name,
+        "message": f"工具 {name} 已通过热插拔注册",
+    }
+
+
+@router.get("/agents/{agent_id}/browse")
+async def browse_agent_directory(agent_id: str, path: str = ""):
+    """浏览Agent工作目录（支持子目录导航）"""
+    profile = _require_agent_profile(agent_id)
+
+    _project_root = _os.path.dirname(
+        _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    )
+
+    working_dir = f"./workspace/{profile.profile_id.replace('.', '-')}"
+    abs_base = _os.path.normpath(_os.path.join(_project_root, working_dir))
+
+    if not _os.path.isdir(abs_base):
+        return {
+            "path": path or "/",
+            "absolute_path": abs_base,
+            "entries": [],
+        }
+
+    clean_path = _os.path.normpath(_os.path.join(abs_base, path.lstrip("/")))
+    if not clean_path.startswith(abs_base):
+        raise HTTPException(status_code=403, detail="路径越权访问")
+
+    if not _os.path.isdir(clean_path):
+        raise HTTPException(status_code=404, detail="目录不存在")
+
+    entries = []
+    try:
+        for name in sorted(_os.listdir(clean_path)):
+            full = _os.path.join(clean_path, name)
+            is_dir = _os.path.isdir(full)
+            size = _os.path.getsize(full) if not is_dir else 0
+            entries.append({
+                "name": name,
+                "path": _os.path.relpath(full, abs_base),
+                "type": "directory" if is_dir else "file",
+                "size": size,
+            })
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=f"无权限访问目录: {e}")
+
+    entries.sort(key=lambda e: (0 if e["type"] == "directory" else 1, e["name"].lower()))
+    return {
+        "path": path or "/",
+        "absolute_path": abs_base,
+        "entries": entries,
+    }
+
+
+@router.get("/agents/{agent_id}/file")
+async def read_agent_file(agent_id: str, path: str = Query(...)):
+    """读取Agent工作目录下的文件内容"""
+    profile = _require_agent_profile(agent_id)
+
+    _project_root = _os.path.dirname(
+        _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    )
+
+    working_dir = f"./workspace/{profile.profile_id.replace('.', '-')}"
+    abs_base = _os.path.normpath(_os.path.join(_project_root, working_dir))
+
+    clean_path = _os.path.normpath(_os.path.join(abs_base, path.lstrip("/")))
+    if not clean_path.startswith(abs_base):
+        raise HTTPException(status_code=403, detail="路径越权访问")
+
+    if not _os.path.isfile(clean_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    try:
+        import codecs
+
+        for enc in ("utf-8", "utf-8-sig", "gbk", "latin-1"):
+            try:
+                with codecs.open(clean_path, "r", encoding=enc) as f:
+                    content = f.read()
+                return {"path": path, "content": content}
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+
+        # Binary fallback — read as base64
+        with open(clean_path, "rb") as f:
+            import base64
+
+            raw = f.read()
+        return {"path": path, "content": base64.b64encode(raw).decode("ascii"), "encoding": "base64"}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=f"无权限读取文件: {e}")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"读取文件失败: {e}")

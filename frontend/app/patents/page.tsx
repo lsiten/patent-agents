@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Plus,
   Search,
@@ -21,6 +22,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/Tabs';
+import { PatentListSkeleton } from '@/components/ui/Skeleton';
 import { clsx } from 'clsx';
 import { workflowApi, type WorkflowResponse } from '@/lib/api';
 import type { PatentSummary, WorkflowState } from '@/types';
@@ -152,6 +154,7 @@ function getProgressColor(progress: number) {
 }
 
 export default function PatentsPage() {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
   const [selectedPatent, setSelectedPatent] = useState<string | null>(null);
@@ -159,6 +162,10 @@ export default function PatentsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [patentTypeFilter, setPatentTypeFilter] = useState<string>('all_types');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const filterRef = useRef<HTMLDivElement>(null);
 
   const filters = [
     { id: 'all', label: '全部' },
@@ -196,21 +203,44 @@ export default function PatentsPage() {
     });
   }, [loadPatents]);
 
-  const filteredPatents = useMemo(() => patents.filter((patent) => {
-    const normalizedSearch = searchQuery.toLowerCase();
-    const matchesSearch =
-      patent.title.toLowerCase().includes(normalizedSearch) ||
-      patent.tech_field.toLowerCase().includes(normalizedSearch) ||
-      patent.task_id.toLowerCase().includes(normalizedSearch);
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (filterRef.current && !filterRef.current.contains(event.target as Node)) {
+        setShowAdvancedFilters(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
-    const matchesFilter =
-      activeFilter === 'all' ||
-      (activeFilter === 'in_progress' && !['completed', 'failed'].includes(patent.current_state)) ||
-      (activeFilter === 'completed' && patent.current_state === 'completed') ||
-      (activeFilter === 'failed' && patent.current_state === 'failed');
+  const filteredPatents = useMemo(() => {
+    let result = patents.filter((patent) => {
+      const normalizedSearch = searchQuery.toLowerCase();
+      const matchesSearch =
+        patent.title.toLowerCase().includes(normalizedSearch) ||
+        patent.tech_field.toLowerCase().includes(normalizedSearch) ||
+        patent.task_id.toLowerCase().includes(normalizedSearch);
 
-    return matchesSearch && matchesFilter;
-  }), [activeFilter, patents, searchQuery]);
+      const matchesType =
+        patentTypeFilter === 'all_types' || patent.patent_type === patentTypeFilter;
+
+      const matchesFilter =
+        activeFilter === 'all' ||
+        (activeFilter === 'in_progress' && !['completed', 'failed'].includes(patent.current_state)) ||
+        (activeFilter === 'completed' && patent.current_state === 'completed') ||
+        (activeFilter === 'failed' && patent.current_state === 'failed');
+
+      return matchesSearch && matchesFilter && matchesType;
+    });
+
+    if (sortOrder === 'newest') {
+      result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    } else {
+      result.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    }
+
+    return result;
+  }, [activeFilter, patents, searchQuery, patentTypeFilter, sortOrder]);
 
   const inProgressCount = patents.filter((patent) => !['completed', 'failed'].includes(patent.current_state)).length;
   const completedCount = patents.filter((patent) => patent.current_state === 'completed').length;
@@ -240,7 +270,7 @@ export default function PatentsPage() {
                 <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                 刷新
               </Button>
-              <Button onClick={() => window.location.href = '/'}>
+              <Button onClick={() => router.push('/')}>
                 <Plus className="w-4 h-4 mr-2" />
                 新建专利申请
               </Button>
@@ -306,20 +336,68 @@ export default function PatentsPage() {
               onChange={(event) => setSearchQuery(event.target.value)}
               className="w-64"
             />
-            <Button variant="ghost" size="sm">
-              <Filter className="w-4 h-4 mr-1" />
-              高级筛选
-            </Button>
+            <div className="relative" ref={filterRef}>
+              <Button variant="ghost" size="sm" onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}>
+                <Filter className="w-4 h-4 mr-1" />
+                高级筛选
+              </Button>
+              {showAdvancedFilters && (
+                <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-hairline p-4 z-50">
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-xs font-medium text-slate mb-2">专利类型</p>
+                      <div className="space-y-1">
+                        {[
+                          { id: 'all_types', label: '全部' },
+                          { id: 'invention', label: '发明专利' },
+                          { id: 'utility', label: '实用新型' },
+                          { id: 'design', label: '外观设计' },
+                        ].map((type) => (
+                          <button
+                            key={type.id}
+                            onClick={() => { setPatentTypeFilter(type.id); }}
+                            className={`block w-full text-left px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                              patentTypeFilter === type.id
+                                ? 'bg-brand-green/10 text-brand-green-dark font-medium'
+                                : 'text-slate hover:bg-slate-50'
+                            }`}
+                          >
+                            {type.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="border-t border-hairline pt-3">
+                      <p className="text-xs font-medium text-slate mb-2">排序方式</p>
+                      <div className="space-y-1">
+                        {[
+                          { id: 'newest' as const, label: '最新创建' },
+                          { id: 'oldest' as const, label: '最早创建' },
+                        ].map((order) => (
+                          <button
+                            key={order.id}
+                            onClick={() => { setSortOrder(order.id); }}
+                            className={`block w-full text-left px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                              sortOrder === order.id
+                                ? 'bg-brand-green/10 text-brand-green-dark font-medium'
+                                : 'text-slate hover:bg-slate-50'
+                            }`}
+                          >
+                            {order.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         <div className="space-y-4">
           {isLoading ? (
-            <Card className="p-12 text-center">
-              <RefreshCw className="w-10 h-10 text-slate mx-auto mb-4 animate-spin" />
-              <h3 className="text-lg font-medium text-ink mb-2">正在加载专利申请</h3>
-              <p className="text-sm text-slate">请稍候...</p>
-            </Card>
+            <PatentListSkeleton count={4} />
           ) : filteredPatents.length > 0 ? filteredPatents.map((patent) => (
             <Card
               key={patent.task_id}
@@ -377,7 +455,7 @@ export default function PatentsPage() {
                     size="sm"
                     onClick={(event) => {
                       event.stopPropagation();
-                      window.location.href = `/chat?task_id=${patent.task_id}`;
+                      router.push(`/chat?task_id=${patent.task_id}`);
                     }}
                   >
                     <MessageSquare className="w-4 h-4 mr-1.5" />
@@ -388,7 +466,7 @@ export default function PatentsPage() {
                     size="sm"
                     onClick={(event) => {
                       event.stopPropagation();
-                      window.location.href = `/workflow/${patent.task_id}`;
+                      router.push(`/workflow/${patent.task_id}`);
                     }}
                   >
                     <Sparkles className="w-4 h-4 mr-1.5" />
@@ -400,7 +478,7 @@ export default function PatentsPage() {
                       size="sm"
                       onClick={(event) => {
                         event.stopPropagation();
-                        window.location.href = `/result/${patent.task_id}`;
+                        router.push(`/result/${patent.task_id}`);
                       }}
                     >
                       <Download className="w-4 h-4 mr-1.5" />
@@ -412,7 +490,7 @@ export default function PatentsPage() {
                     size="sm"
                     onClick={(event) => {
                       event.stopPropagation();
-                      window.location.href = `/result/${patent.task_id}`;
+                      router.push(`/result/${patent.task_id}`);
                     }}
                   >
                     <Eye className="w-4 h-4 mr-1.5" />
@@ -440,16 +518,16 @@ export default function PatentsPage() {
 
                   <div className="mt-5 flex items-center gap-3">
                     <span className="text-sm text-slate mr-2">快捷操作：</span>
-                    <Button variant="ghost" size="sm" onClick={() => window.location.href = `/workflow/${patent.task_id}`}>
+                    <Button variant="ghost" size="sm" onClick={() => router.push(`/workflow/${patent.task_id}`)}>
                       <FileText className="w-4 h-4 mr-1.5" />
                       查看阶段输出
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => window.location.href = `/result/${patent.task_id}`}>
+                    <Button variant="ghost" size="sm" onClick={() => router.push(`/result/${patent.task_id}`)}>
                       <Search className="w-4 h-4 mr-1.5" />
                       查看分析结果
                     </Button>
                     {patent.progress >= 60 && (
-                      <Button variant="ghost" size="sm" onClick={() => window.location.href = `/result/${patent.task_id}`}>
+                      <Button variant="ghost" size="sm" onClick={() => router.push(`/result/${patent.task_id}`)}>
                         <FileText className="w-4 h-4 mr-1.5" />
                         查看专利草稿
                       </Button>
@@ -463,7 +541,7 @@ export default function PatentsPage() {
               <FileText className="w-12 h-12 text-slate mx-auto mb-4" />
               <h3 className="text-lg font-medium text-ink mb-2">暂无专利申请</h3>
               <p className="text-sm text-slate mb-4">开始您的第一个专利申请吧</p>
-              <Button onClick={() => window.location.href = '/'}>
+              <Button onClick={() => router.push('/')}>
                 <Plus className="w-4 h-4 mr-2" />
                 新建专利申请
               </Button>

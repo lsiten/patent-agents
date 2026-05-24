@@ -19,15 +19,87 @@ import {
   Bot,
   AlertCircle,
   RefreshCw,
+  Code,
+  Eye,
+  FileText,
+  Search,
+  Upload,
+  Wand2,
+  Info,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { Skeleton, AgentCardSkeleton } from '@/components/ui/Skeleton';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { Textarea } from '@/components/ui/Textarea';
-import { agentApi } from '@/lib/api';
-import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory } from '@/types';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { agentApi, hermesApi } from '@/lib/api';
+import { CodeBlock } from '@/components/ui/CodeBlock';
+import RelatedDetailModal from '@/components/RelatedDetailModal';
+import HermesToolChatModal from '@/components/HermesToolChatModal';
+import HermesSkillChatModal from '@/components/HermesSkillChatModal';
+import SkillUploadModal from '@/components/SkillUploadModal';
+import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory, MemoryEntry, DirEntry } from '@/types';
+
+/** Parse a 5-field cron expression into its parts */
+function parseCron(expr: string): { minute: string; hour: string; day: string; month: string; weekday: string } {
+  const parts = expr.split(/\s+/);
+  return {
+    minute: parts[0] || '*',
+    hour: parts[1] || '*',
+    day: parts[2] || '*',
+    month: parts[3] || '*',
+    weekday: parts[4] || '*',
+  };
+}
+
+/** Build a 5-field cron expression from its parts */
+function buildCron(minute: string, hour: string, day: string, month: string, weekday: string): string {
+  return `${minute} ${hour} ${day} ${month} ${weekday}`;
+}
+
+/** Generate options for a cron field: [{value, label}, ...] */
+function rangeOptions(from: number, to: number, pad = false): { value: string; label: string }[] {
+  return Array.from({ length: to - from + 1 }, (_, i) => {
+    const v = pad ? String(i + from).padStart(2, '0') : String(i + from);
+    return { value: v, label: v };
+  });
+}
+const minuteOptions = rangeOptions(0, 59, true);
+const hourOptions = rangeOptions(0, 23, true);
+const dayOptions = rangeOptions(1, 31);
+const monthOptions = rangeOptions(1, 12);
+const weekdayOptions = [
+  { value: '0', label: '日' }, { value: '1', label: '一' }, { value: '2', label: '二' },
+  { value: '3', label: '三' }, { value: '4', label: '四' }, { value: '5', label: '五' }, { value: '6', label: '六' },
+];
+
+/** A small select element for one cron field */
+function CronSelect({ label, value, onChange, options, children }: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options?: { value: string; label: string }[];
+  children?: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="block text-xs text-slate mb-1">{label}</label>
+      <select
+        className="w-full px-2 py-2 border rounded text-sm bg-white"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+      >
+        <option value="*">任意</option>
+        {options
+          ? options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)
+          : children}
+      </select>
+    </div>
+  );
+}
 
 const roleLabels: Record<string, string> = {
   orchestrator: '统筹者',
@@ -98,7 +170,36 @@ export default function AgentsPage() {
   const [newToolForm, setNewToolForm] = useState({ name: '', description: '', category: 'search' as AgentTool['category'] });
   const [newSkillForm, setNewSkillForm] = useState({ name: '', description: '', tags: '' });
   const [newTimerForm, setNewTimerForm] = useState({ name: '', cron_expression: '0 * * * *', action: '' });
+  // Cron field parts for add form
+  const [newCron, setNewCron] = useState({ minute: '0', hour: '*', day: '*', month: '*', weekday: '*' });
+  // Cron field parts for edit form
+  const [editCron, setEditCron] = useState({ minute: '*', hour: '*', day: '*', month: '*', weekday: '*' });
   const [viewMemory, setViewMemory] = useState<AgentMemory | null>(null);
+  const [viewToolSource, setViewToolSource] = useState<AgentTool | null>(null);
+  const [viewSkillSource, setViewSkillSource] = useState<AgentSkill | null>(null);
+  const [viewMemoryEntry, setViewMemoryEntry] = useState<MemoryEntry | null>(null);
+  const [showHermesChat, setShowHermesChat] = useState(false);
+  const [showHermesSkillChat, setShowHermesSkillChat] = useState(false);
+  const [showRelatedDetail, setShowRelatedDetail] = useState<{
+    open: boolean;
+    type: 'tool' | 'skill';
+    itemId: string;
+    name: string;
+  } | null>(null);
+  const [showSkillUpload, setShowSkillUpload] = useState(false);
+  const [viewSystemPrompt, setViewSystemPrompt] = useState(false);
+  const [browseEntries, setBrowseEntries] = useState<DirEntry[] | null>(null);
+  const [browseCurrentPath, setBrowseCurrentPath] = useState('');
+  const [browsePathStack, setBrowsePathStack] = useState<string[]>([]);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  const [fileContent, setFileContent] = useState<{path: string; content: string} | null>(null);
+  const [isLoadingFileContent, setIsLoadingFileContent] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ open: false, title: '', message: '', onConfirm: () => {} });
 
   const currentAgent = selectedAgent ? agents.find(a => a.id === selectedAgent) : undefined;
   const currentTools = selectedAgent ? tools[selectedAgent] || [] : [];
@@ -301,6 +402,106 @@ export default function AgentsPage() {
       .finally(() => setPendingAction((current) => current === actionKey ? null : current));
   };
 
+  const deleteMemoryEntry = (memoryId: string, entryId: string) => {
+    if (!selectedAgent) return;
+    const actionKey = `memory_entry:${selectedAgent}:${memoryId}:${entryId}`;
+    setPendingAction(actionKey);
+    agentApi.deleteMemoryEntry(selectedAgent, memoryId, entryId)
+      .then(() => {
+        setMemories(prev => {
+          const agentMemories = (prev[selectedAgent] || []).map(m => {
+            if (m.id !== memoryId) return m;
+            return {
+              ...m,
+              entries: (m.entries || []).filter(e => e.id !== entryId),
+              item_count: Math.max(0, m.item_count - 1),
+            };
+          });
+          return { ...prev, [selectedAgent]: agentMemories };
+        });
+        setViewMemory(prev => {
+          if (!prev || prev.id !== memoryId) return prev;
+          return {
+            ...prev,
+            entries: (prev.entries || []).filter(e => e.id !== entryId),
+            item_count: Math.max(0, prev.item_count - 1),
+          };
+        });
+      })
+      .catch((requestError) => {
+        setError(requestError instanceof Error ? requestError.message : '删除记忆条目失败');
+      })
+      .finally(() => setPendingAction((current) => current === actionKey ? null : current));
+  };
+
+  const browseWorkingDir = async () => {
+    if (!selectedAgent || !currentAgent?.working_directory) return;
+    setIsLoadingFiles(true);
+    setBrowsePathStack([]);
+    try {
+      const result = await agentApi.browseDirectory(selectedAgent, '');
+      setBrowseEntries(result.entries);
+      setBrowseCurrentPath(result.path);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '浏览目录失败');
+      setBrowseEntries([]);
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  };
+
+  const navigateToDir = async (dirPath: string) => {
+    if (!selectedAgent) return;
+    setIsLoadingFiles(true);
+    setBrowsePathStack(prev => [...prev, browseCurrentPath]);
+    try {
+      const result = await agentApi.browseDirectory(selectedAgent, dirPath);
+      setBrowseEntries(result.entries);
+      setBrowseCurrentPath(result.path);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '浏览目录失败');
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  };
+
+  const navigateUp = async () => {
+    if (!selectedAgent || browsePathStack.length === 0) return;
+    setIsLoadingFiles(true);
+    const prevPath = browsePathStack[browsePathStack.length - 1];
+    setBrowsePathStack(prev => prev.slice(0, -1));
+    try {
+      const result = await agentApi.browseDirectory(selectedAgent, prevPath === '/' ? '' : prevPath);
+      setBrowseEntries(result.entries);
+      setBrowseCurrentPath(result.path);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '返回上级目录失败');
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  };
+
+  const openFileContent = async (filePath: string) => {
+    if (!selectedAgent) return;
+    setIsLoadingFileContent(true);
+    try {
+      const result = await agentApi.getAgentFileContent(selectedAgent, filePath);
+      setFileContent(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '读取文件失败');
+      setFileContent(null);
+    } finally {
+      setIsLoadingFileContent(false);
+    }
+  };
+
+  function formatBytes(bytes?: number): string {
+    if (bytes === undefined || bytes === null) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
   // Tool/Skill/Timer CRUD handlers
   const startEditTool = (tool: AgentTool) => {
     setEditingToolId(tool.id);
@@ -308,15 +509,40 @@ export default function AgentsPage() {
   };
   const cancelEditTool = () => { setEditingToolId(null); setEditToolForm({}); };
   const saveEditTool = () => {
-    if (!selectedAgent) return;
+    if (!selectedAgent || !editingToolId) return;
+    const actionKey = `edit_tool:${selectedAgent}:${editingToolId}`;
+    setPendingAction(actionKey);
     const updated = currentTools.map(t => t.id === editingToolId ? { ...t, ...editToolForm } as AgentTool : t);
     setTools(prev => ({ ...prev, [selectedAgent]: updated }));
     setEditingToolId(null);
     setEditToolForm({});
+    agentApi.updateTools(selectedAgent, updated)
+      .catch((requestError) => {
+        setError(requestError instanceof Error ? requestError.message : '保存工具失败');
+        void loadAgentDetail(selectedAgent);
+      })
+      .finally(() => setPendingAction((current) => current === actionKey ? null : current));
   };
   const deleteTool = (toolId: string) => {
-    if (!selectedAgent || !window.confirm('确定要删除此工具吗？')) return;
-    setTools(prev => ({ ...prev, [selectedAgent]: (prev[selectedAgent] || []).filter(t => t.id !== toolId) }));
+    if (!selectedAgent) return;
+    setConfirmDialog({
+      open: true,
+      title: '删除工具',
+      message: '确定要删除此工具吗？',
+      onConfirm: () => {
+        setConfirmDialog(prev => ({ ...prev, open: false }));
+    const actionKey = `delete_tool:${selectedAgent}:${toolId}`;
+    setPendingAction(actionKey);
+    const updated = (tools[selectedAgent] || []).filter(t => t.id !== toolId);
+    setTools(prev => ({ ...prev, [selectedAgent]: updated }));
+    agentApi.updateTools(selectedAgent, updated)
+      .catch((requestError) => {
+        setError(requestError instanceof Error ? requestError.message : '删除工具失败');
+        void loadAgentDetail(selectedAgent);
+      })
+      .finally(() => setPendingAction((current) => current === actionKey ? null : current));
+      },
+    });
   };
 
   const startEditSkill = (skill: AgentSkill) => {
@@ -325,67 +551,176 @@ export default function AgentsPage() {
   };
   const cancelEditSkill = () => { setEditingSkillId(null); setEditSkillForm({}); };
   const saveEditSkill = () => {
-    if (!selectedAgent) return;
+    if (!selectedAgent || !editingSkillId) return;
+    const actionKey = `edit_skill:${selectedAgent}:${editingSkillId}`;
+    setPendingAction(actionKey);
     const updated = currentSkills.map(s => s.id === editingSkillId ? { ...s, ...editSkillForm } as AgentSkill : s);
     setSkills(prev => ({ ...prev, [selectedAgent]: updated }));
     setEditingSkillId(null);
     setEditSkillForm({});
+    agentApi.updateSkills(selectedAgent, updated)
+      .catch((requestError) => {
+        setError(requestError instanceof Error ? requestError.message : '保存技能失败');
+        void loadAgentDetail(selectedAgent);
+      })
+      .finally(() => setPendingAction((current) => current === actionKey ? null : current));
   };
   const deleteSkill = (skillId: string) => {
-    if (!selectedAgent || !window.confirm('确定要删除此技能吗？')) return;
-    setSkills(prev => ({ ...prev, [selectedAgent]: (prev[selectedAgent] || []).filter(s => s.id !== skillId) }));
+    if (!selectedAgent) return;
+    setConfirmDialog({
+      open: true,
+      title: '删除技能',
+      message: '确定要删除此技能吗？',
+      onConfirm: () => {
+        setConfirmDialog(prev => ({ ...prev, open: false }));
+    const actionKey = `delete_skill:${selectedAgent}:${skillId}`;
+    setPendingAction(actionKey);
+    const updated = (skills[selectedAgent] || []).filter(s => s.id !== skillId);
+    setSkills(prev => ({ ...prev, [selectedAgent]: updated }));
+    agentApi.updateSkills(selectedAgent, updated)
+      .catch((requestError) => {
+        setError(requestError instanceof Error ? requestError.message : '删除技能失败');
+        void loadAgentDetail(selectedAgent);
+      })
+      .finally(() => setPendingAction((current) => current === actionKey ? null : current));
+      },
+    });
   };
 
   const startEditTimer = (timer: AgentTimer) => {
     setEditingTimerId(timer.id);
     setEditTimerForm({ ...timer });
+    const parts = parseCron(timer.cron_expression || '');
+    setEditCron({ minute: parts.minute, hour: parts.hour, day: parts.day, month: parts.month, weekday: parts.weekday });
   };
-  const cancelEditTimer = () => { setEditingTimerId(null); setEditTimerForm({}); };
+  const cancelEditTimer = () => { setEditingTimerId(null); setEditTimerForm({}); setEditCron({ minute: '*', hour: '*', day: '*', month: '*', weekday: '*' }); };
   const saveEditTimer = () => {
-    if (!selectedAgent) return;
-    const updated = currentTimers.map(t => t.id === editingTimerId ? { ...t, ...editTimerForm } as AgentTimer : t);
+    if (!selectedAgent || !editingTimerId) return;
+    const actionKey = `edit_timer:${selectedAgent}:${editingTimerId}`;
+    setPendingAction(actionKey);
+    const editCronExpr = buildCron(editCron.minute, editCron.hour, editCron.day, editCron.month, editCron.weekday);
+    const updatedTimer = { ...editTimerForm, cron_expression: editCronExpr } as AgentTimer;
+    const updated = currentTimers.map(t => t.id === editingTimerId ? { ...t, ...updatedTimer } : t);
     setTimers(prev => ({ ...prev, [selectedAgent]: updated }));
     setEditingTimerId(null);
     setEditTimerForm({});
+    agentApi.updateTimers(selectedAgent, updated)
+      .catch((requestError) => {
+        setError(requestError instanceof Error ? requestError.message : '保存定时器失败');
+        void loadAgentDetail(selectedAgent);
+      })
+      .finally(() => setPendingAction((current) => current === actionKey ? null : current));
   };
   const deleteTimer = (timerId: string) => {
-    if (!selectedAgent || !window.confirm('确定要删除此定时器吗？')) return;
-    setTimers(prev => ({ ...prev, [selectedAgent]: (prev[selectedAgent] || []).filter(t => t.id !== timerId) }));
+    if (!selectedAgent) return;
+    setConfirmDialog({
+      open: true,
+      title: '删除定时器',
+      message: '确定要删除此定时器吗？',
+      onConfirm: () => {
+        setConfirmDialog(prev => ({ ...prev, open: false }));
+    const actionKey = `delete_timer:${selectedAgent}:${timerId}`;
+    setPendingAction(actionKey);
+    const updated = (timers[selectedAgent] || []).filter(t => t.id !== timerId);
+    setTimers(prev => ({ ...prev, [selectedAgent]: updated }));
+    agentApi.updateTimers(selectedAgent, updated)
+      .catch((requestError) => {
+        setError(requestError instanceof Error ? requestError.message : '删除定时器失败');
+        void loadAgentDetail(selectedAgent);
+      })
+      .finally(() => setPendingAction((current) => current === actionKey ? null : current));
+      },
+    });
   };
 
   const addTool = () => {
     if (!selectedAgent) return;
+    const actionKey = `add_tool:${selectedAgent}`;
+    setPendingAction(actionKey);
     const newTool: AgentTool = { id: `tool_${Date.now()}`, ...newToolForm, enabled: true };
-    setTools(prev => ({ ...prev, [selectedAgent]: [...(prev[selectedAgent] || []), newTool] }));
+    const updated = [...(tools[selectedAgent] || []), newTool];
+    setTools(prev => ({ ...prev, [selectedAgent]: updated }));
     setShowAddTool(false);
     setNewToolForm({ name: '', description: '', category: 'search' });
+    agentApi.updateTools(selectedAgent, updated)
+      .catch((requestError) => {
+        setError(requestError instanceof Error ? requestError.message : '添加工具失败');
+        void loadAgentDetail(selectedAgent);
+      })
+      .finally(() => setPendingAction((current) => current === actionKey ? null : current));
   };
   const addSkill = () => {
     if (!selectedAgent) return;
+    const actionKey = `add_skill:${selectedAgent}`;
+    setPendingAction(actionKey);
     const newSkill: AgentSkill = {
       id: `skill_${Date.now()}`, name: newSkillForm.name, description: newSkillForm.description,
       tags: newSkillForm.tags ? newSkillForm.tags.split(',').map(t => t.trim()) : [], version: '1.0.0', enabled: true,
     };
-    setSkills(prev => ({ ...prev, [selectedAgent]: [...(prev[selectedAgent] || []), newSkill] }));
+    const updated = [...(skills[selectedAgent] || []), newSkill];
+    setSkills(prev => ({ ...prev, [selectedAgent]: updated }));
     setShowAddSkill(false);
     setNewSkillForm({ name: '', description: '', tags: '' });
+    agentApi.updateSkills(selectedAgent, updated)
+      .catch((requestError) => {
+        setError(requestError instanceof Error ? requestError.message : '添加技能失败');
+        void loadAgentDetail(selectedAgent);
+      })
+      .finally(() => setPendingAction((current) => current === actionKey ? null : current));
   };
   const addTimer = () => {
     if (!selectedAgent) return;
-    const newTimer: AgentTimer = { id: `timer_${Date.now()}`, ...newTimerForm, enabled: true };
-    setTimers(prev => ({ ...prev, [selectedAgent]: [...(prev[selectedAgent] || []), newTimer] }));
+    const actionKey = `add_timer:${selectedAgent}`;
+    setPendingAction(actionKey);
+    const cronExpr = buildCron(newCron.minute, newCron.hour, newCron.day, newCron.month, newCron.weekday);
+    const newTimer: AgentTimer = { id: `timer_${Date.now()}`, name: newTimerForm.name, cron_expression: cronExpr, action: newTimerForm.action, enabled: true };
+    const updated = [...(timers[selectedAgent] || []), newTimer];
+    setTimers(prev => ({ ...prev, [selectedAgent]: updated }));
     setShowAddTimer(false);
     setNewTimerForm({ name: '', cron_expression: '0 * * * *', action: '' });
+    setNewCron({ minute: '0', hour: '*', day: '*', month: '*', weekday: '*' });
+    agentApi.updateTimers(selectedAgent, updated)
+      .catch((requestError) => {
+        setError(requestError instanceof Error ? requestError.message : '添加定时器失败');
+        void loadAgentDetail(selectedAgent);
+      })
+      .finally(() => setPendingAction((current) => current === actionKey ? null : current));
   };
 
   if (isLoadingAgents) {
     return (
-      <div className="min-h-screen bg-surface p-6">
-        <Card className="p-12 text-center">
-          <RefreshCw className="w-10 h-10 text-slate mx-auto mb-4 animate-spin" />
-          <h3 className="text-lg font-medium text-ink mb-2">正在加载 Agent 配置</h3>
-          <p className="text-sm text-slate">正在读取 Hermes Profile 注册表...</p>
-        </Card>
+      <div className="min-h-screen bg-surface">
+        <div className="max-w-7xl mx-auto p-6">
+          <div className="mb-6">
+            <Skeleton className="h-8 w-48 mb-2" />
+            <Skeleton className="h-4 w-72" />
+          </div>
+          <div className="flex gap-6">
+            <div className="w-80 flex-shrink-0 space-y-3">
+              <Skeleton className="h-10 w-full rounded-lg" />
+              {Array.from({ length: 3 }).map((_, i) => (
+                <AgentCardSkeleton key={i} />
+              ))}
+            </div>
+            <div className="flex-1">
+              <Card className="p-6">
+                <div className="flex items-center gap-4 mb-6">
+                  <Skeleton className="w-12 h-12 rounded-xl" />
+                  <div className="flex-1">
+                    <Skeleton className="h-6 w-40 mb-2" />
+                    <Skeleton className="h-4 w-56" />
+                  </div>
+                </div>
+                <Skeleton className="h-10 w-full rounded-lg mb-6" />
+                <div className="space-y-4">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-5/6" />
+                </div>
+              </Card>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -411,6 +746,7 @@ export default function AgentsPage() {
   }
 
   return (
+    <>
     <div className="min-h-screen bg-surface">
       <div className="max-w-7xl mx-auto p-6">
         {/* Header */}
@@ -577,30 +913,14 @@ export default function AgentsPage() {
                       <h3 className="text-lg font-semibold text-ink">工具列表</h3>
                       <p className="text-sm text-slate mt-1">管理此Agent可用的工具集</p>
                     </div>
-                    <Button size="sm" onClick={() => setShowAddTool(true)}>
-                      <Plus className="w-4 h-4 mr-1" />
-                      添加工具
-                    </Button>
-                  </div>
-                  {showAddTool && (
-                    <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                      <h4 className="font-medium text-blue-800 mb-3">添加新工具</h4>
-                      <div className="space-y-3">
-                        <input className="w-full px-3 py-2 border rounded text-sm" placeholder="工具名称" value={newToolForm.name} onChange={e => setNewToolForm(f => ({ ...f, name: e.target.value }))} />
-                        <input className="w-full px-3 py-2 border rounded text-sm" placeholder="工具描述" value={newToolForm.description} onChange={e => setNewToolForm(f => ({ ...f, description: e.target.value }))} />
-                        <select className="w-full px-3 py-2 border rounded text-sm" value={newToolForm.category} onChange={e => setNewToolForm(f => ({ ...f, category: e.target.value as AgentTool['category'] }))}>
-                          <option value="search">Search</option>
-                          <option value="analysis">Analysis</option>
-                          <option value="generation">Generation</option>
-                          <option value="utility">Utility</option>
-                        </select>
-                        <div className="flex gap-2">
-                          <Button size="sm" onClick={addTool}>确认添加</Button>
-                          <Button variant="ghost" size="sm" onClick={() => setShowAddTool(false)}>取消</Button>
-                        </div>
-                      </div>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="secondary" onClick={() => setShowHermesChat(true)}>
+                        <Wand2 className="w-4 h-4 mr-1" />
+                        Hermes 生成
+                      </Button>
                     </div>
-                  )}
+                  </div>
+
                   <div className="space-y-4">
                       {currentTools.map((tool) => (
                         <div
@@ -655,6 +975,37 @@ export default function AgentsPage() {
                                 <p className="text-sm text-slate">{tool.description}</p>
                               </div>
                               <div className="flex items-center gap-2 ml-4">
+                                {tool.source_code && (
+                                  <Button variant="ghost" size="sm" onClick={() => setViewToolSource(tool)}>
+                                    <Code className="w-4 h-4 mr-1" />
+                                    查看代码
+                                  </Button>
+                                )}
+                                {selectedAgent && (
+                                  <Button variant="ghost" size="sm" onClick={() => setShowRelatedDetail({
+                                    open: true,
+                                    type: 'tool',
+                                    itemId: tool.id,
+                                    name: tool.name,
+                                  })}>
+                                    <Info className="w-4 h-4 mr-1" />
+                                    详情
+                                  </Button>
+                                )}
+                                {tool.related_files && tool.related_files.length > 0 && selectedAgent && (
+                                  <Button variant="ghost" size="sm" onClick={() => setShowRelatedDetail({
+                                    open: true,
+                                    type: 'tool',
+                                    itemId: tool.id,
+                                    name: tool.name,
+                                  })}>
+                                    <FolderOpen className="w-4 h-4 mr-1" />
+                                    相关文件 ({tool.related_files.length})
+                                  </Button>
+                                )}
+                                {tool.is_hermes && (
+                                  <Badge variant="soft" className="bg-cyan-100 text-cyan-700 text-xs">Hermes</Badge>
+                                )}
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -690,10 +1041,16 @@ export default function AgentsPage() {
                       <h3 className="text-lg font-semibold text-ink">技能列表</h3>
                       <p className="text-sm text-slate mt-1">管理此Agent的专业技能与版本</p>
                     </div>
-                    <Button size="sm" onClick={() => setShowAddSkill(true)}>
-                      <Plus className="w-4 h-4 mr-1" />
-                      安装技能
-                    </Button>
+<div className="flex items-center gap-2">
+                       <Button size="sm" variant="secondary" onClick={() => setShowSkillUpload(true)}>
+                         <Upload className="w-4 h-4 mr-1" />
+                         上传技能包
+                       </Button>
+                        <Button size="sm" onClick={() => setShowHermesSkillChat(true)}>
+                         <Sparkles className="w-4 h-4 mr-1" />
+                         聊天生成
+                       </Button>
+                     </div>
                   </div>
                   <div className="space-y-4">
                     {currentSkills.map((skill) => (
@@ -756,6 +1113,34 @@ export default function AgentsPage() {
                               </div>
                             </div>
                             <div className="flex items-center gap-2 ml-4">
+                              {(skill.source_code || skill.source_markdown) && (
+                                <Button variant="ghost" size="sm" onClick={() => setViewSkillSource(skill)}>
+                                  <Code className="w-4 h-4 mr-1" />
+                                  查看代码
+                                </Button>
+                              )}
+                              {selectedAgent && (
+                                <Button variant="ghost" size="sm" onClick={() => setShowRelatedDetail({
+                                  open: true,
+                                  type: 'skill',
+                                  itemId: skill.id,
+                                  name: skill.name,
+                                })}>
+                                  <Info className="w-4 h-4 mr-1" />
+                                  详情
+                                </Button>
+                              )}
+                              {skill.related_files && skill.related_files.length > 0 && selectedAgent && (
+                                <Button variant="ghost" size="sm" onClick={() => setShowRelatedDetail({
+                                  open: true,
+                                  type: 'skill',
+                                  itemId: skill.id,
+                                  name: skill.name,
+                                })}>
+                                  <FolderOpen className="w-4 h-4 mr-1" />
+                                  相关文件 ({skill.related_files.length})
+                                </Button>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -780,20 +1165,6 @@ export default function AgentsPage() {
                       </div>
                     ))}
                   </div>
-                  {showAddSkill && (
-                    <div className="mt-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
-                      <h4 className="font-medium text-purple-800 mb-3">安装新技能</h4>
-                      <div className="space-y-3">
-                        <input className="w-full px-3 py-2 border rounded text-sm" placeholder="技能名称" value={newSkillForm.name} onChange={e => setNewSkillForm(f => ({ ...f, name: e.target.value }))} />
-                        <input className="w-full px-3 py-2 border rounded text-sm" placeholder="技能描述" value={newSkillForm.description} onChange={e => setNewSkillForm(f => ({ ...f, description: e.target.value }))} />
-                        <input className="w-full px-3 py-2 border rounded text-sm" placeholder="标签（逗号分隔）" value={newSkillForm.tags} onChange={e => setNewSkillForm(f => ({ ...f, tags: e.target.value }))} />
-                        <div className="flex gap-2">
-                          <Button size="sm" onClick={addSkill}>确认安装</Button>
-                          <Button variant="ghost" size="sm" onClick={() => setShowAddSkill(false)}>取消</Button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </Card>
               </TabsContent>
 
@@ -815,7 +1186,14 @@ export default function AgentsPage() {
                       <h4 className="font-medium text-orange-800 mb-3">添加定时器</h4>
                       <div className="space-y-3">
                         <input className="w-full px-3 py-2 border rounded text-sm" placeholder="定时器名称" value={newTimerForm.name} onChange={e => setNewTimerForm(f => ({ ...f, name: e.target.value }))} />
-                        <input className="w-full px-3 py-2 border rounded text-sm" placeholder="Cron 表达式" value={newTimerForm.cron_expression} onChange={e => setNewTimerForm(f => ({ ...f, cron_expression: e.target.value }))} />
+                        <div className="grid grid-cols-5 gap-2">
+                          <CronSelect label="分钟" value={newCron.minute} onChange={v => setNewCron(c => ({ ...c, minute: v }))} options={minuteOptions} />
+                          <CronSelect label="小时" value={newCron.hour} onChange={v => setNewCron(c => ({ ...c, hour: v }))} options={hourOptions} />
+                          <CronSelect label="日" value={newCron.day} onChange={v => setNewCron(c => ({ ...c, day: v }))} options={dayOptions} />
+                          <CronSelect label="月" value={newCron.month} onChange={v => setNewCron(c => ({ ...c, month: v }))} options={monthOptions} />
+                          <CronSelect label="星期" value={newCron.weekday} onChange={v => setNewCron(c => ({ ...c, weekday: v }))} options={weekdayOptions} />
+                        </div>
+                        <p className="text-xs text-slate-500 font-mono">Cron 表达式: {buildCron(newCron.minute, newCron.hour, newCron.day, newCron.month, newCron.weekday)}</p>
                         <input className="w-full px-3 py-2 border rounded text-sm" placeholder="执行动作" value={newTimerForm.action} onChange={e => setNewTimerForm(f => ({ ...f, action: e.target.value }))} />
                         <div className="flex gap-2">
                           <Button size="sm" onClick={addTimer}>确认添加</Button>
@@ -840,12 +1218,14 @@ export default function AgentsPage() {
                                 value={editTimerForm.name || ''}
                                 onChange={e => setEditTimerForm(f => ({ ...f, name: e.target.value }))}
                               />
-                              <input
-                                className="w-full px-3 py-2 border rounded text-sm font-mono"
-                                placeholder="Cron 表达式"
-                                value={editTimerForm.cron_expression || ''}
-                                onChange={e => setEditTimerForm(f => ({ ...f, cron_expression: e.target.value }))}
-                              />
+                              <div className="grid grid-cols-5 gap-2">
+                                <CronSelect label="分钟" value={editCron.minute} onChange={v => setEditCron(c => ({ ...c, minute: v }))} options={minuteOptions} />
+                                <CronSelect label="小时" value={editCron.hour} onChange={v => setEditCron(c => ({ ...c, hour: v }))} options={hourOptions} />
+                                <CronSelect label="日" value={editCron.day} onChange={v => setEditCron(c => ({ ...c, day: v }))} options={dayOptions} />
+                                <CronSelect label="月" value={editCron.month} onChange={v => setEditCron(c => ({ ...c, month: v }))} options={monthOptions} />
+                                <CronSelect label="星期" value={editCron.weekday} onChange={v => setEditCron(c => ({ ...c, weekday: v }))} options={weekdayOptions} />
+                              </div>
+                              <p className="text-xs text-slate-500 font-mono">Cron 表达式: {buildCron(editCron.minute, editCron.hour, editCron.day, editCron.month, editCron.weekday)}</p>
                               <input
                                 className="w-full px-3 py-2 border rounded text-sm"
                                 placeholder="执行动作"
@@ -994,10 +1374,10 @@ export default function AgentsPage() {
                   </div>
                 </Card>
 
-                {/* Memory Detail Dialog */}
+                  {/* Memory Detail Dialog */}
                 {viewMemory && (
                   <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-                    <Card className="w-full max-w-lg p-6 relative animate-in fade-in zoom-in-95">
+                    <Card className="w-full max-w-2xl p-6 relative animate-in fade-in zoom-in-95 max-h-[85vh] flex flex-col">
                       <button
                         onClick={() => setViewMemory(null)}
                         className="absolute top-4 right-4 p-1 hover:bg-slate-100 rounded transition-colors"
@@ -1015,7 +1395,7 @@ export default function AgentsPage() {
                           </Badge>
                         </div>
                       </div>
-                      <div className="space-y-4">
+                      <div className="space-y-4 overflow-auto flex-1">
                         <div className="grid grid-cols-2 gap-4">
                           <div className="p-4 bg-slate-50 rounded-lg">
                             <p className="text-xs text-slate mb-1">存储大小</p>
@@ -1030,7 +1410,6 @@ export default function AgentsPage() {
                           <p className="text-xs text-slate mb-1">最后更新</p>
                           <p className="text-sm text-ink">{new Date(viewMemory.last_updated).toLocaleString('zh-CN')}</p>
                         </div>
-                        {/* Progress Bar */}
                         <div>
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs text-slate">存储使用率</span>
@@ -1043,6 +1422,54 @@ export default function AgentsPage() {
                             />
                           </div>
                         </div>
+                        {/* Memory Content */}
+                        {viewMemory.content && (
+                          <div>
+                            <h4 className="text-sm font-medium text-ink mb-2">内容预览</h4>
+                            <CodeBlock language="json">{viewMemory.content}</CodeBlock>
+                          </div>
+                        )}
+                        {/* Memory Entries */}
+                        {viewMemory.entries && viewMemory.entries.length > 0 && (
+                          <div>
+                            <h4 className="text-sm font-medium text-ink mb-2">
+                              记忆条目 ({viewMemory.entries.length})
+                            </h4>
+                            <div className="space-y-2 max-h-48 overflow-auto">
+                              {viewMemory.entries.map((entry) => (
+                                <div
+                                  key={entry.id}
+                                  className="p-3 bg-slate-50 rounded-lg border border-hairline"
+                                >
+                                  <div className="flex items-start justify-between">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <Badge variant="soft" className="bg-blue-100 text-blue-700 text-xs">
+                                          {entry.type}
+                                        </Badge>
+                                        <span className="text-sm font-medium text-ink truncate">{entry.key}</span>
+                                      </div>
+                                      <p className="text-xs text-slate line-clamp-3">{entry.value}</p>
+                                      {entry.score !== undefined && (
+                                        <span className="text-xs text-slate mt-1 inline-block">
+                                          相关度: {Math.round(entry.score * 100)}%
+                                        </span>
+                                      )}
+                                    </div>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => deleteMemoryEntry(viewMemory.id, entry.id)}
+                                      disabled={pendingAction === `memory_entry:${selectedAgent}:${viewMemory.id}:${entry.id}`}
+                                    >
+                                      <Trash2 className="w-4 h-4 text-red-500" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                       <div className="mt-6 pt-4 border-t border-hairline flex justify-end">
                         <Button size="sm" onClick={() => setViewMemory(null)}>
@@ -1130,12 +1557,73 @@ export default function AgentsPage() {
                     </div>
                     <div className="col-span-2">
                       <label className="block text-sm font-medium text-ink mb-2">工作目录</label>
-                      <Input
-                        value={editingConfig ? editForm.working_directory : currentAgent.working_directory}
-                        onChange={(e) => setEditForm(prev => ({ ...prev, working_directory: e.target.value }))}
-                        disabled={!editingConfig}
-                        icon={<FolderOpen className="w-4 h-4" />}
-                      />
+                      <div className="flex gap-2">
+                        <div className="flex-1">
+                          <Input
+                            value={editingConfig ? editForm.working_directory : currentAgent.working_directory}
+                            onChange={(e) => setEditForm(prev => ({ ...prev, working_directory: e.target.value }))}
+                            disabled={!editingConfig}
+                            icon={<FolderOpen className="w-4 h-4" />}
+                          />
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={browseWorkingDir}
+                          disabled={isLoadingFiles}
+                        >
+                          <Search className="w-4 h-4 mr-1" />
+                          浏览
+                        </Button>
+                      </div>
+                      {browseEntries !== null && (
+                        <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-hairline max-h-60 overflow-auto">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-mono text-slate truncate">{browseCurrentPath || '/'}</span>
+                            <div className="flex gap-1">
+                              {browsePathStack.length > 0 && (
+                                <Button variant="ghost" size="sm" onClick={navigateUp} disabled={isLoadingFiles}>
+                                  ← 返回
+                                </Button>
+                              )}
+                              <Button variant="ghost" size="sm" onClick={browseWorkingDir} disabled={isLoadingFiles}>
+                                <RefreshCw className={`w-3 h-3 ${isLoadingFiles ? 'animate-spin' : ''}`} />
+                              </Button>
+                            </div>
+                          </div>
+                          {isLoadingFiles ? (
+                            <p className="text-sm text-slate text-center py-4">加载中...</p>
+                          ) : browseEntries.length === 0 ? (
+                            <p className="text-sm text-slate text-center py-4">空目录</p>
+                          ) : (
+                            <div className="space-y-1">
+                              {browseEntries.map((entry) => (
+                                <div
+                                  key={entry.path}
+                                  className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-100 cursor-pointer text-xs"
+                                  onClick={() => {
+                                    if (entry.type === 'directory') {
+                                      navigateToDir(entry.path);
+                                    } else {
+                                      openFileContent(entry.path);
+                                    }
+                                  }}
+                                >
+                                  {entry.type === 'directory' ? (
+                                    <FolderOpen className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                                  ) : (
+                                    <FileText className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                  )}
+                                  <span className="font-mono text-slate-700 truncate">{entry.name}</span>
+                                  {entry.type === 'file' && (
+                                    <span className="text-slate-400 flex-shrink-0 ml-auto">{formatBytes(entry.size)}</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="col-span-2">
                       <label className="block text-sm font-medium text-ink mb-2">描述</label>
@@ -1146,7 +1634,13 @@ export default function AgentsPage() {
                       />
                     </div>
                     <div className="col-span-2">
-                      <label className="block text-sm font-medium text-ink mb-2">System Prompt</label>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-sm font-medium text-ink">System Prompt</label>
+                        <Button variant="ghost" size="sm" onClick={() => setViewSystemPrompt(true)}>
+                          <Eye className="w-4 h-4 mr-1" />
+                          全屏查看
+                        </Button>
+                      </div>
                       <Textarea
                         value={editingConfig ? editForm.system_prompt : currentAgent.system_prompt}
                         onChange={(e) => setEditForm(prev => ({ ...prev, system_prompt: e.target.value }))}
@@ -1185,5 +1679,197 @@ export default function AgentsPage() {
         </div>
       </div>
     </div>
+
+      {/* Tool Source Code Modal */}
+      {viewToolSource && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-3xl p-6 relative animate-in fade-in zoom-in-95 max-h-[85vh] flex flex-col">
+            <button
+              onClick={() => setViewToolSource(null)}
+              className="absolute top-4 right-4 p-1 hover:bg-slate-100 rounded transition-colors"
+            >
+              <X className="w-5 h-5 text-slate" />
+            </button>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-xl bg-brand-green/10 flex items-center justify-center">
+                <Code className="w-5 h-5 text-brand-green" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-ink">{viewToolSource.name}</h3>
+                <p className="text-sm text-slate">工具源代码</p>
+              </div>
+            </div>
+            <div className="overflow-auto flex-1">
+              <CodeBlock language={viewToolSource.source_code?.startsWith('{') ? 'json' : 'typescript'}>
+                {viewToolSource.source_code}
+              </CodeBlock>
+            </div>
+            <div className="mt-6 pt-4 border-t border-hairline flex justify-end">
+              <Button size="sm" onClick={() => setViewToolSource(null)}>
+                关闭
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Skill Source Code Modal */}
+      {viewSkillSource && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-3xl p-6 relative animate-in fade-in zoom-in-95 max-h-[85vh] flex flex-col">
+            <button
+              onClick={() => setViewSkillSource(null)}
+              className="absolute top-4 right-4 p-1 hover:bg-slate-100 rounded transition-colors"
+            >
+              <X className="w-5 h-5 text-slate" />
+            </button>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-xl bg-brand-green/10 flex items-center justify-center">
+                <Code className="w-5 h-5 text-brand-green" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-ink">{viewSkillSource.name}</h3>
+                <p className="text-sm text-slate">技能源代码</p>
+              </div>
+            </div>
+            <div className="overflow-auto flex-1">
+              <CodeBlock language="typescript">
+                {viewSkillSource.source_markdown || viewSkillSource.source_code}
+              </CodeBlock>
+            </div>
+            <div className="mt-6 pt-4 border-t border-hairline flex justify-end">
+              <Button size="sm" onClick={() => setViewSkillSource(null)}>
+                关闭
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* System Prompt Fullscreen Modal */}
+      {viewSystemPrompt && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-4xl p-6 relative animate-in fade-in zoom-in-95 max-h-[85vh] flex flex-col">
+            <button
+              onClick={() => setViewSystemPrompt(false)}
+              className="absolute top-4 right-4 p-1 hover:bg-slate-100 rounded transition-colors"
+            >
+              <X className="w-5 h-5 text-slate" />
+            </button>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-xl bg-brand-green/10 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-brand-green" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-ink">System Prompt</h3>
+                <p className="text-sm text-slate">{currentAgent?.name || ''}</p>
+              </div>
+            </div>
+            <div className="overflow-auto flex-1">
+              <CodeBlock language="markdown">
+                {currentAgent?.system_prompt || ''}
+              </CodeBlock>
+            </div>
+            <div className="mt-6 pt-4 border-t border-hairline flex justify-end">
+              <Button size="sm" onClick={() => setViewSystemPrompt(false)}>
+                关闭
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+       {/* File Content Viewer Modal */}
+       {fileContent && (
+         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+           <Card className="w-full max-w-4xl p-6 relative animate-in fade-in zoom-in-95 max-h-[85vh] flex flex-col">
+             <button
+               onClick={() => setFileContent(null)}
+               className="absolute top-4 right-4 p-1 hover:bg-slate-100 rounded transition-colors"
+             >
+               <X className="w-5 h-5 text-slate" />
+             </button>
+             <div className="flex items-center gap-3 mb-6">
+               <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                 <FileText className="w-5 h-5 text-blue-500" />
+               </div>
+               <div>
+                 <h3 className="text-lg font-semibold text-ink truncate max-w-lg">{fileContent.path.split('/').pop()}</h3>
+                 <p className="text-sm text-slate truncate max-w-lg">{fileContent.path}</p>
+               </div>
+             </div>
+             <div className="overflow-auto flex-1">
+               {isLoadingFileContent ? (
+                 <p className="text-sm text-slate text-center py-8">加载中...</p>
+               ) : fileContent.content ? (
+                 <CodeBlock language={fileContent.path.endsWith('.json') ? 'json' : fileContent.path.endsWith('.py') ? 'python' : fileContent.path.endsWith('.ts') || fileContent.path.endsWith('.tsx') ? 'typescript' : fileContent.path.endsWith('.js') ? 'javascript' : fileContent.path.endsWith('.md') ? 'markdown' : fileContent.path.endsWith('.yaml') || fileContent.path.endsWith('.yml') ? 'yaml' : fileContent.path.endsWith('.html') ? 'html' : fileContent.path.endsWith('.css') ? 'css' : fileContent.path.endsWith('.sh') ? 'bash' : 'text'}>
+                   {fileContent.content.length > 50000
+                     ? fileContent.content.slice(0, 50000) + '\n\n... (文件过大，已截断)'
+                     : fileContent.content}
+                 </CodeBlock>
+               ) : (
+                 <p className="text-sm text-slate text-center py-8">无法读取文件内容 (二进制文件)</p>
+               )}
+             </div>
+             <div className="mt-6 pt-4 border-t border-hairline flex justify-end gap-2">
+               <Button size="sm" variant="ghost" onClick={() => setFileContent(null)}>
+                 关闭
+               </Button>
+               <Button size="sm" onClick={() => { navigator.clipboard?.writeText(fileContent.content); setFileContent(null); }}>
+                 复制内容
+               </Button>
+             </div>
+           </Card>
+         </div>
+       )}
+
+       {/* Hermes Tool Chat Modal */}
+       {showHermesChat && selectedAgent && (
+         <HermesToolChatModal
+           agentId={selectedAgent}
+           onClose={() => setShowHermesChat(false)}
+           onToolCreated={(_data) => { void loadAgentDetail(selectedAgent); }}
+         />
+       )}
+
+       {/* Hermes Skill Chat Modal */}
+       {showHermesSkillChat && selectedAgent && (
+         <HermesSkillChatModal
+           agentId={selectedAgent}
+           onClose={() => setShowHermesSkillChat(false)}
+           onSkillCreated={(_data) => { void loadAgentDetail(selectedAgent); }}
+         />
+       )}
+
+      {/* Related Detail Modal */}
+      {showRelatedDetail?.open && selectedAgent && (
+        <RelatedDetailModal
+          agentId={selectedAgent}
+          type={showRelatedDetail.type}
+          name={showRelatedDetail.name}
+          itemId={showRelatedDetail.itemId}
+          onClose={() => setShowRelatedDetail(null)}
+        />
+      )}
+
+      {/* Skill Upload Modal */}
+      {showSkillUpload && selectedAgent && (
+        <SkillUploadModal
+          agentId={selectedAgent}
+          onClose={() => setShowSkillUpload(false)}
+          onSkillCreated={(_data) => { void loadAgentDetail(selectedAgent); }}
+        />
+      )}
+
+      <ConfirmDialog
+        open={confirmDialog.open}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel="确认删除"
+        variant="danger"
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, open: false }))}
+      />
+    </>
   );
 }

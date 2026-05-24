@@ -9,15 +9,18 @@ import {
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { useToast } from '@/components/ui/Toast';
 import { clsx } from 'clsx';
 import { conversationApi, workflowApi } from '@/lib/api';
 import type { ConversationSummary } from '@/lib/api';
 import type { ChatMessage } from '@/types';
 
-const WELCOME_MESSAGE: ChatMessage = {
-  id: 'welcome',
-  role: 'assistant',
-  content: `您好！我是专利智脑的专利代理人助理。请描述您的发明创造，我们将一起完善技术方案。
+function createWelcomeMessage(): ChatMessage {
+  return {
+    id: 'welcome',
+    role: 'assistant',
+    content: `您好！我是专利智脑的专利代理人助理。请描述您的发明创造，我们将一起完善技术方案。
 
 例如：
 • 这是哪个技术领域的创新？
@@ -25,8 +28,9 @@ const WELCOME_MESSAGE: ChatMessage = {
 • 核心技术方案大概是什么？
 
 多轮对话后，我可以帮您启动正式的专利申请流程。`,
-  timestamp: new Date().toISOString(),
-};
+    timestamp: new Date().toISOString(),
+  };
+}
 
 function ChatPageContent() {
   const router = useRouter();
@@ -40,12 +44,13 @@ function ChatPageContent() {
 
   // Active conversation
   const [activeConvId, setActiveConvId] = useState<string | null>(convIdFromParam);
-  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MESSAGE]);
+  const [messages, setMessages] = useState<ChatMessage[]>([createWelcomeMessage()]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingConv, setIsLoadingConv] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Workflow state
   const [workflowTaskId, setWorkflowTaskId] = useState<string | null>(null);
@@ -55,6 +60,8 @@ function ChatPageContent() {
   // Recommendations from backend
   const [recommendStartWorkflow, setRecommendStartWorkflow] = useState(false);
   const [suggestedTitle, setSuggestedTitle] = useState<string | null>(null);
+
+  const { addToast } = useToast();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sendingRef = useRef(false);
@@ -74,7 +81,7 @@ function ChatPageContent() {
       const result = await conversationApi.list();
       setConversations(result.conversations);
     } catch {
-      // Silently fail — list is best-effort
+      addToast({ type: 'error', title: '加载对话列表失败', message: '无法获取对话列表，请检查网络连接' });
     } finally {
       setLoadingList(false);
     }
@@ -86,32 +93,36 @@ function ChatPageContent() {
     setError(null);
     try {
       const detail = await conversationApi.get(convId);
-      setMessages(detail.messages.length > 0 ? detail.messages : [WELCOME_MESSAGE]);
+      setMessages(detail.messages.length > 0 ? detail.messages : [createWelcomeMessage()]);
       setWorkflowTaskId(detail.workflow_task_id ?? null);
       setWorkflowState(detail.workflow_state ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载对话失败');
-      setMessages([WELCOME_MESSAGE]);
+      setMessages([createWelcomeMessage()]);
     } finally {
       setIsLoadingConv(false);
     }
   }, []);
 
-  // Initial load
+  const initialMountDone = useRef(false);
+
   useEffect(() => {
     void loadConversations();
   }, [loadConversations]);
 
-  // Handle conv_id from URL
   useEffect(() => {
-    if (convIdFromParam && convIdFromParam !== activeConvId) {
+    if (!initialMountDone.current) {
+      initialMountDone.current = true;
+      if (convIdFromParam) {
+        void loadConversation(convIdFromParam);
+      } else {
+        setMessages([createWelcomeMessage()]);
+        setWorkflowTaskId(null);
+        setWorkflowState(null);
+      }
+    } else if (convIdFromParam && convIdFromParam !== activeConvId) {
       setActiveConvId(convIdFromParam);
       void loadConversation(convIdFromParam);
-    } else if (!convIdFromParam && !activeConvId) {
-      // No conversation selected — start fresh
-      setMessages([WELCOME_MESSAGE]);
-      setWorkflowTaskId(null);
-      setWorkflowState(null);
     }
   }, [convIdFromParam, activeConvId, loadConversation]);
 
@@ -129,7 +140,7 @@ function ChatPageContent() {
   // Create new conversation
   const handleNewConversation = async () => {
     setActiveConvId(null);
-    setMessages([WELCOME_MESSAGE]);
+    setMessages([createWelcomeMessage()]);
     setWorkflowTaskId(null);
     setWorkflowState(null);
     setRecommendStartWorkflow(false);
@@ -147,12 +158,19 @@ function ChatPageContent() {
     setSuggestedTitle(null);
     router.replace(`/chat?conv_id=${encodeURIComponent(convId)}`);
     // Sidebar auto-hides on mobile
-    setShowSidebar(true);
+    setShowSidebar(false);
   };
 
   // Delete conversation
-  const handleDeleteConversation = async (e: React.MouseEvent, convId: string) => {
+  const handleDeleteConversation = (e: React.MouseEvent, convId: string) => {
     e.stopPropagation();
+    setDeleteConfirmId(convId);
+  };
+
+  const executeDeleteConversation = async () => {
+    const convId = deleteConfirmId;
+    if (!convId) return;
+    setDeleteConfirmId(null);
     try {
       await conversationApi.delete(convId);
       setConversations((prev) => prev.filter((c) => c.id !== convId));
@@ -274,6 +292,7 @@ function ChatPageContent() {
   };
 
   return (
+    <>
     <div className="flex h-[calc(100vh-4rem)]">
       {/* Sidebar Toggle (mobile) */}
       <button
@@ -589,6 +608,16 @@ function ChatPageContent() {
         </div>
       </div>
     </div>
+      <ConfirmDialog
+        open={deleteConfirmId !== null}
+        title="删除对话"
+        message="确定要删除此对话吗？删除后无法恢复。"
+        confirmLabel="确认删除"
+        variant="danger"
+        onConfirm={executeDeleteConversation}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
+    </>
   );
 }
 

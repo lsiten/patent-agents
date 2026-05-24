@@ -195,6 +195,9 @@ export interface AgentTool {
   enabled: boolean;
   category: 'search' | 'file' | 'analysis' | 'external';
   config?: Record<string, string>;
+  source_code?: string;       // Tool implementation source (Python/TypeScript)
+  is_hermes?: boolean;        // Whether created via Hermes framework
+  related_files?: string[];   // Related source file paths (project-relative)
 }
 
 export interface AgentSkill {
@@ -204,6 +207,9 @@ export interface AgentSkill {
   enabled: boolean;
   version: string;
   tags: string[];
+  source_code?: string;       // Skill implementation source
+  source_markdown?: string;   // Skill documented in Markdown
+  related_files?: string[];   // Related source file paths (project-relative)
 }
 
 export interface AgentTimer {
@@ -223,6 +229,19 @@ export interface AgentMemory {
   size: number;
   item_count: number;
   last_updated: string;
+  content?: string;           // Memory content preview (JSON/text)
+  entries?: MemoryEntry[];    // Individual memory entries
+}
+
+export interface MemoryEntry {
+  id: string;
+  type: 'fact' | 'context' | 'preference' | 'knowledge' | 'event';
+  key: string;
+  value: string;
+  score?: number;
+  created_at: string;
+  updated_at: string;
+  tags?: string[];
 }
 
 export interface AgentConfig {
@@ -310,4 +329,24 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   error?: string;
   message?: string;
+}
+
+// ============ Agent 文件浏览类型 ============
+export interface DirEntry {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  size: number;
+}
+
+export interface BrowseDirResponse {
+  path: string;
+  absolute_path: string;
+  entries: DirEntry[];
+}
+
+export interface FileContentResponse {
+  path: string;
+  content: string;
+  encoding?: 'utf-8' | 'base64';
 }

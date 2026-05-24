@@ -2,7 +2,7 @@
  * API Client for Patent Multi-Agent System
  */
 
-import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory, OrgNode } from '@/types';
+import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory, OrgNode, DirEntry, BrowseDirResponse, FileContentResponse } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
@@ -270,14 +270,18 @@ export interface ChatMessage {
 }
 
 export const chatApi = {
-  sendMessage: (content: string, task_id?: string) =>
+  sendMessage: (content: string, task_id?: string, user_id?: string) =>
     request<{ user_message: ChatMessage; assistant_message: ChatMessage }>('/chat/messages', {
       method: 'POST',
+      headers: user_id ? { 'X-User-ID': user_id } : undefined,
       body: JSON.stringify({ content, task_id }),
     }),
 
-  getMessages: (session_id = 'default') =>
-    request<{ messages: ChatMessage[]; count: number }>(`/chat/messages?session_id=${encodeURIComponent(session_id)}`),
+  getMessages: (session_id = 'default', user_id?: string) =>
+    request<{ messages: ChatMessage[]; count: number }>(
+      `/chat/messages?session_id=${encodeURIComponent(session_id)}`,
+      { headers: user_id ? { 'X-User-ID': user_id } : undefined },
+    ),
 };
 
 // ============ Agent Management API ============
@@ -289,9 +293,114 @@ export interface AgentDetailResponse {
   memories: AgentMemory[];
 }
 
+// ============ Hermes Hot-Plug API ============
+export interface ValidateToolResponse {
+  valid: boolean;
+  name: string | null;
+  error: string | null;
+}
+
+export interface HotPlugResponse {
+  success: boolean;
+  name: string;
+  message: string;
+}
+
+export interface ChatGenerateResponse {
+  success: boolean;
+  name: string;
+  code: string;
+  message: string;
+  skill_data?: { name: string; description: string; proficiency: number; keywords: string[] };
+  generated_content?: string;
+}
+
+export interface UploadSkillResponse {
+  success: boolean;
+  name: string;
+  files: { filename: string; content: string; size: number }[];
+  scripts: string[];
+  message: string;
+}
+
+export interface RelatedFileEntry {
+  path: string;
+  content: string | null;
+}
+
+export interface RelatedFilesResponse {
+  type: 'tool' | 'skill';
+  name: string;
+  source_code: string | null;
+  source_markdown?: string;
+  files: RelatedFileEntry[];
+}
+
+export const hermesApi = {
+  validateTool: (agentId: string, code: string) =>
+    request<ValidateToolResponse>(`/agents/${encodeURIComponent(agentId)}/tools/validate`, {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  hotPlugTool: (agentId: string, name: string, description: string, code: string) =>
+    request<HotPlugResponse>(`/agents/${encodeURIComponent(agentId)}/tools/hot-plug`, {
+      method: 'POST',
+      body: JSON.stringify({ name, description, code }),
+    }),
+
+  chatGenerateTool: (agentId: string, name: string, description: string, parameters?: Record<string, string>) =>
+    request<ChatGenerateResponse>(`/agents/${encodeURIComponent(agentId)}/tools/chat-generate`, {
+      method: 'POST',
+      body: JSON.stringify({ name, description, parameters }),
+    }),
+
+   uploadSkill: (agentId: string, name: string, description: string, options?: { markdown?: string; zipBase64?: string; tags?: string[] }) =>
+     request<UploadSkillResponse>(`/agents/${encodeURIComponent(agentId)}/skills/upload`, {
+       method: 'POST',
+       body: JSON.stringify({ name, description, ...options }),
+     }),
+
+   chatGenerateSkill: (agentId: string, name: string | undefined, description: string, parameters?: Record<string, string>) =>
+     request<ChatGenerateResponse>(`/agents/${encodeURIComponent(agentId)}/skills/chat-generate`, {
+       method: 'POST',
+       body: JSON.stringify({ name, description, parameters }),
+     }),
+
+   getRelatedFiles: (agentId: string, toolId?: string, skillId?: string) => {
+    const params = new URLSearchParams();
+    if (toolId) params.set('tool_id', toolId);
+    if (skillId) params.set('skill_id', skillId);
+    return request<RelatedFilesResponse>(`/agents/${encodeURIComponent(agentId)}/related-files?${params.toString()}`);
+  },
+
+  createTool: (agentId: string, toolData: Record<string, unknown>) =>
+    request<{ success: boolean; tool: Record<string, unknown> }>(`/agents/${encodeURIComponent(agentId)}/tools`, {
+      method: 'POST',
+      body: JSON.stringify(toolData),
+    }),
+
+  updateTool: (agentId: string, toolId: string, toolData: Record<string, unknown>) =>
+    request<{ success: boolean; tool: Record<string, unknown> }>(`/agents/${encodeURIComponent(agentId)}/tools/${encodeURIComponent(toolId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(toolData),
+    }),
+
+  deleteTool: (agentId: string, toolId: string) =>
+    request<{ success: boolean; tool_id: string }>(`/agents/${encodeURIComponent(agentId)}/tools/${encodeURIComponent(toolId)}`, {
+      method: 'DELETE',
+    }),
+};
+
 export const agentApi = {
   list: () =>
     request<{ agents: AgentConfig[]; total: number }>('/agents'),
+
+  browseDirectory: (agentId: string, path = '') =>
+    request<BrowseDirResponse>(`/agents/${encodeURIComponent(agentId)}/browse?path=${encodeURIComponent(path)}`),
+
+  getAgentFileContent: (agentId: string, path: string) =>
+    request<FileContentResponse>(`/agents/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(path)}`),
 
   get: (agent_id: string) =>
     request<AgentDetailResponse>(`/agents/${encodeURIComponent(agent_id)}`),
@@ -313,6 +422,11 @@ export const agentApi = {
 
   clearMemory: (agent_id: string, memory_id: string) =>
     request(`/agents/${encodeURIComponent(agent_id)}/memory/${encodeURIComponent(memory_id)}/clear`, { method: 'POST' }),
+
+  deleteMemoryEntry: (agent_id: string, memory_id: string, entry_id: string) =>
+    request(`/agents/${encodeURIComponent(agent_id)}/memory/${encodeURIComponent(memory_id)}/entries/${encodeURIComponent(entry_id)}`, {
+      method: 'DELETE',
+    }),
 
   // Helper: update full tools/skills/timers arrays via PUT agents/{id}
   updateTools: (agent_id: string, tools: AgentTool[]) =>
@@ -412,29 +526,75 @@ export const systemApi = {
 };
 
 // ============ SSE Event Stream ============
-export function createEventStream(task_id: string, onEvent: (event: any) => void, onDone: (state: string) => void) {
-  const eventSource = new EventSource(`${API_BASE_URL}/tasks/${task_id}/stream`);
+const SSE_MAX_RETRIES = 8;
+const SSE_INITIAL_DELAY = 1000;
+const SSE_MAX_DELAY = 30000;
 
-  eventSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      onEvent(data);
-    } catch (e) {
-      console.error('Failed to parse SSE event:', e);
+export function createEventStream(
+  task_id: string,
+  onEvent: (event: any) => void,
+  onDone: (state: string) => void,
+): () => void {
+  let retryCount = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let closed = false;
+  let currentEventSource: EventSource | null = null;
+
+  function cleanup() {
+    closed = true;
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
     }
-  };
+    if (currentEventSource) {
+      currentEventSource.close();
+      currentEventSource = null;
+    }
+  }
 
-  eventSource.addEventListener('done', (event: any) => {
-    onDone(event.data);
-    eventSource.close();
-  });
+  function connect() {
+    if (closed) return;
+    if (currentEventSource) {
+      currentEventSource.close();
+    }
 
-  eventSource.onerror = (error) => {
-    console.error('SSE Error:', error);
-    eventSource.close();
-  };
+    currentEventSource = new EventSource(`${API_BASE_URL}/tasks/${task_id}/stream`);
 
-  return () => eventSource.close();
+    currentEventSource.onmessage = (event) => {
+      if (closed) return;
+      try {
+        const data = JSON.parse(event.data);
+        onEvent(data);
+      } catch (e) {
+        console.error('Failed to parse SSE event:', e);
+      }
+    };
+
+    currentEventSource.addEventListener('done', (event: any) => {
+      if (closed) return;
+      onDone(event.data);
+      cleanup();
+    });
+
+    currentEventSource.onerror = () => {
+      if (closed) return;
+      retryCount++;
+      if (retryCount > SSE_MAX_RETRIES) {
+        console.error(`SSE: max retries (${SSE_MAX_RETRIES}) exceeded, giving up`);
+        cleanup();
+        return;
+      }
+      const delay = Math.min(SSE_INITIAL_DELAY * Math.pow(2, retryCount - 1), SSE_MAX_DELAY);
+      if (currentEventSource) {
+        currentEventSource.close();
+        currentEventSource = null;
+      }
+      retryTimer = setTimeout(connect, delay);
+    };
+  }
+
+  connect();
+  return cleanup;
 }
 
 // ============ React Query Hooks (Optional) ============

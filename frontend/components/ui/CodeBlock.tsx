@@ -47,7 +47,7 @@ export const CodeBlock = ({
       <pre
         className={twMerge(
           clsx(
-            'bg-canvas-dark text-on-dark rounded-md p-lg overflow-x-auto text-code-md font-source-code',
+            'bg-canvas-dark rounded-md p-lg overflow-x-auto text-code-md font-source-code text-white',
             className
           )
         )}

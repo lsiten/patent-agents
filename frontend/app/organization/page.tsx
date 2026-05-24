@@ -211,6 +211,8 @@ export default function OrganizationPage() {
   const [editForm, setEditForm] = useState<Partial<OrgNode>>({});
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [addForm, setAddForm] = useState({ name: '', description: '', type: 'group' as 'group' | 'agent' });
+  const [addNameError, setAddNameError] = useState<string | null>(null);
+  const [editNameError, setEditNameError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -345,6 +347,17 @@ export default function OrganizationPage() {
   };
 
   const saveEditNode = () => {
+    const name = (editForm.name || '').trim();
+    if (!name) {
+      setEditNameError('节点名称不能为空');
+      return;
+    }
+    if (name.length > MAX_NAME_LENGTH) {
+      setEditNameError(`节点名称不能超过 ${MAX_NAME_LENGTH} 个字符`);
+      return;
+    }
+    setEditNameError(null);
+
     const updateNode = (tree: OrgNode, id: string, updates: Partial<OrgNode>): OrgNode => {
       if (tree.id === id) {
         return { ...tree, ...updates };
@@ -355,8 +368,8 @@ export default function OrganizationPage() {
       };
     };
     if (!selectedNode) return;
-    const newTree = updateNode(orgTree, selectedNode.id, editForm);
-    const newSelectedNode = { ...selectedNode, ...editForm };
+    const newTree = updateNode(orgTree, selectedNode.id, { ...editForm, name });
+    const newSelectedNode = { ...selectedNode, name };
     setOrgTree(newTree);
     setSelectedNode(newSelectedNode);
     setEditingNode(false);
@@ -381,13 +394,26 @@ export default function OrganizationPage() {
     void persistTree(newTree);
   };
 
+  const MAX_NAME_LENGTH = 100;
+
   const handleAddNode = () => {
     if (!selectedNode || selectedNode.type === 'agent') return;
 
+    const name = addForm.name.trim();
+    if (!name) {
+      setAddNameError('节点名称不能为空');
+      return;
+    }
+    if (name.length > MAX_NAME_LENGTH) {
+      setAddNameError(`节点名称不能超过 ${MAX_NAME_LENGTH} 个字符`);
+      return;
+    }
+    setAddNameError(null);
+
     const newNode: OrgNode = {
       id: `node-${Date.now()}`,
-      name: addForm.name,
-      description: addForm.description,
+      name,
+      description: addForm.description.trim(),
       type: addForm.type,
       expanded: true,
       children: [],
@@ -539,8 +565,14 @@ export default function OrganizationPage() {
                       <label className="block text-sm font-medium text-ink mb-2">名称</label>
                       <Input
                         value={editForm.name || ''}
-                        onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                        onChange={(e) => {
+                          setEditForm(prev => ({ ...prev, name: e.target.value }));
+                          setEditNameError(null);
+                        }}
                       />
+                      {editNameError && (
+                        <p className="mt-1 text-xs text-red-500">{editNameError}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-ink mb-2">描述</label>
@@ -668,9 +700,15 @@ export default function OrganizationPage() {
                         <label className="block text-sm font-medium text-ink mb-2">名称</label>
                         <Input
                           value={addForm.name}
-                          onChange={(e) => setAddForm(prev => ({ ...prev, name: e.target.value }))}
+                          onChange={(e) => {
+                            setAddForm(prev => ({ ...prev, name: e.target.value }));
+                            setAddNameError(null);
+                          }}
                           placeholder="输入节点名称"
                         />
+                        {addNameError && (
+                          <p className="mt-1 text-xs text-red-500">{addNameError}</p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-ink mb-2">描述</label>
@@ -684,7 +722,7 @@ export default function OrganizationPage() {
                         <Button variant="ghost" size="sm" fullWidth onClick={() => setShowAddDialog(false)}>
                           取消
                         </Button>
-                        <Button size="sm" fullWidth onClick={handleAddNode} disabled={!addForm.name}>
+                        <Button size="sm" fullWidth onClick={handleAddNode} disabled={!addForm.name.trim()}>
                           <Plus className="w-4 h-4 mr-1" />
                           添加
                         </Button>
