@@ -28,6 +28,8 @@ from src.services import (
     ChatService,
 )
 from src.agents.profiles import ProfileRegistry, register_default_profiles
+from src.agents.hermes.tools import register_all_tools
+from src.agents import get_agent_factory
 from src.core.workflow_engine import PatentWorkflowEngine
 from src.core.events import get_event_bus
 from src.data_sources.base import get_data_source_manager
@@ -362,6 +364,10 @@ async def init_container() -> None:
     # 注册默认 Agent 配置
     registry = container.profile_registry()
     register_default_profiles(registry)
+
+    factory = get_agent_factory()
+    register_all_tools(factory)
+    logger.info("Hermes tools registered", count=4)
 
     logger.info("Application container initialized successfully")
 
