@@ -194,11 +194,11 @@ class QualityReviewerAgent(BaseHermesAgent):
                 ))
 
             score = float(data.get("score", 0.7))
-            return ReviewResult(passed=score >= 0.75, score=score, issues=issues)
+            return ReviewResult(passed=score >= 0.90, score=score, issues=issues)
 
         except Exception as e:
             logger.warning(f"解析权利要求审查结果失败: {e}")
-            return ReviewResult(passed=True, score=0.7, issues=[])
+            return ReviewResult(passed=True, score=0.90, issues=[])
 
     async def _review_description(self, task: PatentTask) -> ReviewResult:
         """审查说明书"""
@@ -230,11 +230,11 @@ class QualityReviewerAgent(BaseHermesAgent):
                 ))
 
             score = float(data.get("score", 0.7))
-            return ReviewResult(passed=score >= 0.75, score=score, issues=issues)
+            return ReviewResult(passed=score >= 0.90, score=score, issues=issues)
 
         except Exception as e:
             logger.warning(f"解析说明书审查结果失败: {e}")
-            return ReviewResult(passed=True, score=0.75, issues=[])
+            return ReviewResult(passed=True, score=0.90, issues=[])
 
     def _check_consistency(self, draft_doc) -> ReviewResult:
         """一致性检查 - 权利要求与说明书对应关系"""
@@ -257,7 +257,7 @@ class QualityReviewerAgent(BaseHermesAgent):
                 ))
                 score -= 0.1
 
-        return ReviewResult(passed=score >= 0.85, score=max(0, score), issues=issues)
+        return ReviewResult(passed=score >= 0.90, score=max(0, score), issues=issues)
 
     def _assess_prior_art_risk(self, task: PatentTask) -> ReviewResult:
         """评估现有技术风险"""
@@ -290,11 +290,11 @@ class QualityReviewerAgent(BaseHermesAgent):
             for r in results
         )
 
-        if critical_issues > 0 or overall_score < 0.6:
+        if critical_issues > 0 or overall_score < 0.75:
             return "reject", Severity.CRITICAL
-        elif high_issues > 0 or overall_score < 0.75:
+        elif high_issues > 0 or overall_score < 0.85:
             return "revise", Severity.HIGH
-        elif overall_score < 0.85:
+        elif overall_score < 0.90:
             return "revise", Severity.MEDIUM
         else:
             return "approve", Severity.LOW

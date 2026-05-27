@@ -60,6 +60,15 @@ async def startup_event():
         redis_client = container.redis_client()()
         await init_event_bus(redis_client)
 
+        # 初始化持久化存储（用于在 DB 中持久化内存 store）
+        from src.infrastructure.persistence import init_store
+        init_store(container.db_provider().async_session_factory)
+        logger.info("持久化存储初始化完成")
+
+        # 从数据库恢复内存存储（使已持久化的数据在重启后可用）
+        from src.api.routes import restore_stores_from_db
+        await restore_stores_from_db()
+
         logger.info("专利智脑服务启动成功!", port=settings.port)
 
     except Exception as e:

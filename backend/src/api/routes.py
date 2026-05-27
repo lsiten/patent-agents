@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 
 from .schemas import (
@@ -45,6 +45,8 @@ from ..agents.ceo import CEOAgent
 from ..core.workflow_engine import PatentWorkflowEngine, WorkflowContext
 from ..knowledge.base import get_knowledge_base
 from ..data_sources.base import get_data_source_manager
+from ..infrastructure.persistence import get_store
+from .schemas import WorkflowEventResponse, OrgNodeResponse
 
 
 router = APIRouter(tags=["patent-agents"])
@@ -63,6 +65,88 @@ profile_registry = get_profile_registry()
 register_default_profiles(profile_registry)
 workflow_engine = PatentWorkflowEngine()
 organization_tree_store: OrgNodeResponse | None = None
+
+# ── 持久化存储辅助 ──
+_store_instance = None
+
+
+def _get_persist_store():
+    global _store_instance
+    if _store_instance is None:
+        _store_instance = get_store()
+    return _store_instance
+
+
+async def _persist_task(task_id: str) -> None:
+    task = tasks_store.get(task_id)
+    if task is None:
+        return
+    try:
+        await _get_persist_store().save("tasks", task_id, task.model_dump(mode="json"))
+    except Exception as e:
+        logger.warning(f"保存任务 {task_id} 到数据库失败: {e}")
+
+
+async def _persist_events(task_id: str) -> None:
+    events = task_events.get(task_id)
+    if events is None:
+        return
+    try:
+        await _get_persist_store().save("task_events", task_id, [e.model_dump(mode="json") for e in events])
+    except Exception as e:
+        logger.warning(f"保存事件 {task_id} 到数据库失败: {e}")
+
+
+async def _persist_conversation(conv_id: str) -> None:
+    conv = conversations_store.get(conv_id)
+    if conv is None:
+        return
+    try:
+        await _get_persist_store().save("conversations", conv_id, conv)
+    except Exception as e:
+        logger.warning(f"保存对话 {conv_id} 到数据库失败: {e}")
+
+
+async def _persist_org_tree() -> None:
+    if organization_tree_store is None:
+        return
+    try:
+        await _get_persist_store().save("org_tree", "root", organization_tree_store.model_dump(mode="json"))
+    except Exception as e:
+        logger.warning(f"保存组织架构到数据库失败: {e}")
+
+
+async def restore_stores_from_db() -> None:
+    """启动时从数据库恢复内存存储"""
+    store = _get_persist_store()
+    try:
+        for key, value in await store.load_all("tasks"):
+            try:
+                tasks_store[key] = PatentTask.model_validate(value)
+            except Exception as e:
+                logger.warning(f"恢复任务 {key} 失败: {e}")
+
+        for key, value in await store.load_all("task_events"):
+            try:
+                task_events[key] = [WorkflowEventResponse.model_validate(e) for e in value]
+            except Exception as e:
+                logger.warning(f"恢复事件 {key} 失败: {e}")
+
+        for key, value in await store.load_all("conversations"):
+            conversations_store[key] = value
+
+        org_val = await store.load("org_tree", "root")
+        if org_val is not None:
+            global organization_tree_store
+            organization_tree_store = OrgNodeResponse.model_validate(org_val)
+
+        logger.info(
+            f"从数据库恢复: {len(tasks_store)} 个任务, "
+            f"{len(task_events)} 组事件, "
+            f"{len(conversations_store)} 个对话"
+        )
+    except Exception as e:
+        logger.warning(f"数据库恢复失败（首次启动?）: {e}")
 
 
 def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
@@ -345,6 +429,7 @@ async def create_workflow_session(request: WorkflowStartRequest):
             event_type="workflow.created",
             data={"state": context.current_phase.value},
         )
+    await _persist_events(task_id)
     return _workflow_context_to_response(context)
 
 
@@ -368,6 +453,7 @@ async def chat_with_brainstorm_agent(task_id: str, request: ChatMessageRequest):
             event_type="chat.message.created",
             data=response,
         )
+    await _persist_events(task_id)
     return response
 
 
@@ -405,6 +491,7 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
                     event_type="workflow.completed",
                     data={"state": context.current_phase.value},
                 )
+            await _persist_events(task_id)
         except Exception as e:
             async with workflow_lock:
                 _append_workflow_event(
@@ -413,6 +500,7 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
                     message=str(e),
                     event_type="workflow.failed",
                 )
+            await _persist_events(task_id)
             raise
 
     background_tasks.add_task(run_workflow)
@@ -423,7 +511,95 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
             message="专利申请流程已启动",
             event_type="workflow.started",
         )
+    await _persist_events(task_id)
     return {"task_id": task_id, "status": "started"}
+
+
+@router.post("/workflows/{task_id}/resume")
+async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
+    """恢复工作流执行
+    - 中断的流程从当前阶段继续执行
+    - 已完成的流程自动进入迭代修正（从撰写阶段重新开始）
+    """
+    async with workflow_lock:
+        context = workflow_engine.get_workflow(task_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+
+    force_start_from = None
+    if context.current_phase == WorkflowState.COMPLETED:
+        # 已完成的工作流 → 进入迭代修正模式
+        if context.iteration_count >= context.max_iterations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"已达到最大迭代次数（{context.max_iterations}），无法继续修正",
+            )
+        force_start_from = WorkflowState.PATENT_WRITING
+        context.iteration_count += 1
+
+    elif context.current_phase in [WorkflowState.FAILED, WorkflowState.CANCELLED]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"工作流已终止，无法恢复（状态: {context.current_phase.value}）",
+        )
+
+    async def phase_callback(phase, result):
+        async with workflow_lock:
+            _append_workflow_event(
+                task_id=task_id,
+                agent=phase.value,
+                message=f"阶段 {phase.value} 已完成",
+                event_type="workflow.phase.completed",
+                data={
+                    "phase": phase.value,
+                    "success": result.success,
+                    "duration_seconds": result.duration_seconds,
+                    "issues": result.issues,
+                },
+            )
+
+    async def run_resume():
+        try:
+            await workflow_engine.resume_workflow(
+                context,
+                phase_callback=phase_callback,
+                force_start_from=force_start_from,
+            )
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent="workflow_engine",
+                    message="专利工作流已恢复并完成",
+                    event_type="workflow.completed",
+                    data={"state": context.current_phase.value},
+                )
+            await _persist_events(task_id)
+        except Exception as e:
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent="workflow_engine",
+                    message=str(e),
+                    event_type="workflow.failed",
+                )
+            await _persist_events(task_id)
+            raise
+
+    background_tasks.add_task(run_resume)
+    async with workflow_lock:
+        _append_workflow_event(
+            task_id=task_id,
+            agent="workflow_engine",
+            message=f"工作流已从 {context.current_phase.value} 阶段恢复",
+            event_type="workflow.resumed",
+            data={"current_phase": context.current_phase.value},
+        )
+    await _persist_events(task_id)
+    return {
+        "task_id": task_id,
+        "status": "resumed",
+        "current_phase": context.current_phase.value,
+    }
 
 
 @router.get("/workflows", response_model=WorkflowListResponse)
@@ -479,6 +655,7 @@ async def cancel_workflow(task_id: str):
             message="工作流已取消",
             event_type="workflow.cancelled",
         )
+    await _persist_events(task_id)
     return {"task_id": task_id, "status": "cancelled"}
 
 
@@ -502,6 +679,10 @@ async def create_task(request: CreateTaskRequest, background_tasks: BackgroundTa
     async with workflow_lock:
         tasks_store[task_id] = task
         task_events[task_id] = []
+
+    # 持久化到数据库
+    await _persist_task(task_id)
+    await _persist_events(task_id)
 
     logger.info(f"创建新任务: {task_id}")
 
@@ -537,6 +718,8 @@ async def _execute_workflow(task_id: str):
         async with workflow_lock:
             task_events[task_id] = event_responses
             tasks_store[task_id] = result_task
+        await _persist_task(task_id)
+        await _persist_events(task_id)
         logger.info(f"任务 {task_id} 执行完成，状态: {result_task.current_state}")
 
     except Exception as e:
@@ -545,6 +728,7 @@ async def _execute_workflow(task_id: str):
             if task_id in tasks_store:
                 tasks_store[task_id].current_state = WorkflowState.FAILED
                 tasks_store[task_id].error_message = str(e)
+        await _persist_task(task_id)
 
 
 @router.get("/tasks", response_model=TaskListResponse)
@@ -665,6 +849,7 @@ async def cancel_task(task_id: str):
             task.error_message = "用户取消任务"
             logger.info(f"任务 {task_id} 已被用户取消")
 
+    await _persist_task(task_id)
     return {"status": "success", "message": "任务已取消"}
 
 
@@ -938,6 +1123,7 @@ async def update_organization_tree(tree: OrgNodeResponse) -> OrganizationUpdateR
     global organization_tree_store
     _validate_org_tree(tree)
     organization_tree_store = tree
+    await _persist_org_tree()
     return {"status": "success", "message": "组织架构已更新", "tree": tree}
 
 
@@ -974,6 +1160,7 @@ async def create_conversation(request: CreateConversationRequest):
     }
     async with conversations_lock:
         conversations_store[conv_id] = conversation
+    await _persist_conversation(conv_id)
     return conversation
 
 
@@ -1084,6 +1271,7 @@ USER: {content}
                 title = content[:50]
                 conv["title"] = title + ("..." if len(content) > 50 else "")
 
+    await _persist_conversation(conv_id)
     return ConversationChatResponse(
         message=assistant_msg,
         has_recommendation=has_recommendation,
@@ -1132,6 +1320,8 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             conv["status"] = "workflow_linked"
             conv["updated_at"] = datetime.now().isoformat()
 
+    await _persist_events(task_id)
+    await _persist_conversation(conv_id)
     return {"task_id": task_id, "status": "created", "conversation_id": conv_id}
 
 
@@ -1142,6 +1332,8 @@ async def delete_conversation(conv_id: str):
         if conv_id not in conversations_store:
             raise HTTPException(status_code=404, detail="对话不存在")
         del conversations_store[conv_id]
+    store = _get_persist_store()
+    await store.delete("conversation", conv_id)
 
 
 @router.get("/conversations/{conv_id}/workflow-status", response_model=dict)
@@ -1560,3 +1752,34 @@ async def read_agent_file(agent_id: str, path: str = Query(...)):
         raise HTTPException(status_code=403, detail=f"无权限读取文件: {e}")
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"读取文件失败: {e}")
+
+
+@router.get("/export/{task_id}")
+async def export_patent_docx(task_id: str):
+    """导出专利文档为DOCX格式并下载"""
+    async with workflow_lock:
+        task = tasks_store.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    patent_data: dict | None = None
+    if task.final_patent:
+        fp = task.final_patent
+        if isinstance(fp, dict):
+            patent_data = fp.get("patent_draft") or fp
+        elif fp.patent_draft:
+            patent_data = fp.patent_draft.model_dump()
+    elif task.draft_doc:
+        patent_data = task.draft_doc.model_dump()
+
+    if not patent_data:
+        raise HTTPException(status_code=400, detail="该任务尚无专利文档可导出")
+
+    from src.document_gen.generator import generate_patent_docx
+    filepath = await asyncio.to_thread(generate_patent_docx, patent_data, task_id)
+
+    return FileResponse(
+        path=filepath,
+        filename=f"patent_{task_id}.docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )

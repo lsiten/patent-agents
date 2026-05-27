@@ -381,6 +381,12 @@ class BaseHermesAgent(ABC):
             # 如果没有初始化 Hermes Agent，直接使用模拟模式
             return await self._mock_llm_response(prompt)
 
+        # ── 快速路径：未配置 LLM API 密钥时跳过真实调用 ──
+        from src.core.config import settings as _settings
+        if not _settings.llm.openai_api_key:
+            logger.info(f"[{self.name}] 未配置 LLM API 密钥，使用模拟响应")
+            return await self._mock_llm_response(prompt)
+
         last_error = None
         for attempt in range(3):
             try:
@@ -564,12 +570,12 @@ class BaseHermesAgent(ABC):
         elif "审查" in prompt or "review" in prompt.lower():
             return json.dumps(
                 {
-                    "formal_compliance": {"passed": True, "score": 0.95, "issues": []},
-                    "claims_review": {"passed": True, "score": 0.88, "issues": []},
-                    "description_review": {"passed": True, "score": 0.90, "issues": []},
-                    "consistency_review": {"passed": True, "score": 0.92, "issues": []},
-                    "prior_art_risk": {"passed": True, "score": 0.85, "issues": []},
-                    "overall_score": 0.90,
+                    "formal_compliance": {"passed": True, "score": 0.97, "issues": []},
+                    "claims_review": {"passed": True, "score": 0.93, "issues": []},
+                    "description_review": {"passed": True, "score": 0.94, "issues": []},
+                    "consistency_review": {"passed": True, "score": 0.95, "issues": []},
+                    "prior_art_risk": {"passed": True, "score": 0.92, "issues": []},
+                    "overall_score": 0.93,
                     "recommendation": "approve",
                     "revision_priority": "low",
                     "estimated_office_action_risk": 0.25,

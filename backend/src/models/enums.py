@@ -4,13 +4,17 @@ from enum import Enum
 class WorkflowState(str, Enum):
     """工作流状态枚举"""
     INITIAL = "initial"
+    BRAINSTORMING = "brainstorming"
     REQUIREMENT_ANALYSIS = "requirement"
     RETRIEVAL_ANALYSIS = "retrieval"
     WRITING = "writing"
+    PATENT_WRITING = "patent_writing"
     REVIEWING = "reviewing"
+    QUALITY_REVIEW = "quality_review"
     ITERATION = "iteration"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class PatentType(str, Enum):

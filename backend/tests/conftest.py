@@ -39,6 +39,16 @@ async def _test_health():
 # ── Pytest Fixtures ──────────────────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _mock_llm_api_key(monkeypatch: pytest.MonkeyPatch):
+    """Clear the LLM API key during tests so _call_hermes uses mock responses.
+
+    Without this the background agent tasks (CEOAgent → HermesCore.execute)
+    make real LLM API calls that hang or time out in TestClient context.
+    """
+    monkeypatch.setattr(settings.llm, "openai_api_key", "")
+
+
 @pytest.fixture
 def client() -> TestClient:
     """FastAPI TestClient bound to the test app (no startup/shutdown events)."""

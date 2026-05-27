@@ -100,10 +100,14 @@ class WorkflowContext:
 
         # 元数据
         self.iteration_count: int = 0
-        self.max_iterations: int = 3
+        self.max_iterations: int = 5  # 增加迭代上限以支持质量分数达标的迭代
         self.current_phase: WorkflowState = WorkflowState.INITIALIZED
         self.phase_history: List[PhaseResult] = []
         self.metadata: Dict[str, Any] = {}
+
+        # 迭代修正反馈
+        self.latest_revision_suggestions: List[str] = []
+        self.latest_review_score: float = 0.0
 
         # 消息历史
         self.message_history: List[Dict[str, Any]] = []
@@ -487,8 +491,22 @@ class PatentWritingPhaseExecutor(WorkflowPhaseExecutor):
             req = self.context.requirement_analysis
             retrieval = self.context.retrieval_report
 
+            # 构建迭代修正反馈部分（如果有的话）
+            revision_feedback = ""
+            if self.context.latest_revision_suggestions:
+                revision_feedback = f"""
+【之前审查的修正建议】
+请根据以下质量审查建议对专利文件进行针对性修正（这是第 {self.context.iteration_count} 轮迭代修正）：
+
+{json.dumps(self.context.latest_revision_suggestions, ensure_ascii=False, indent=2)}
+
+请逐条回应上述修正建议：
+- 针对每条建议说明如何修改
+- 确保所有建议都被妥善处理
+"""
+
             input_text = f"""
-基于以下信息撰写专利申请文件：
+基于以下信息撰写高质量的专利申请文件：
 
 【技术需求分析】
 技术领域：{req.get('tech_field', 'N/A')}
@@ -504,6 +522,27 @@ class PatentWritingPhaseExecutor(WorkflowPhaseExecutor):
 【检索分析建议】
 撰写建议：
 {json.dumps(retrieval.get('writing_recommendations', []), ensure_ascii=False, indent=2)}
+{revision_feedback}
+【质量要求】
+请严格遵循以下质量标准撰写专利申请文件，确保文件能通过最高质量审查（得分90分以上）：
+
+1. 【权利要求书质量】
+   - 独立权利要求必须包含"其特征在于"等前序-特征划分语句
+   - 禁止使用"最好"、"最佳"、"必须"、"绝对"、"可以"、"可选"等主观/不确定术语
+   - 权利要求中的技术术语在说明书中必须有明确定义
+   - 权利要求需要层次清晰，从属权利要求对独立权利要求进行合理限定
+   - 独立权利要求应当涵盖核心发明点，保护范围适当且具有新颖性
+
+2. 【说明书质量】
+   - 技术领域描述准确、简洁，与IPC分类对应
+   - 背景技术客观描述现有技术不足
+   - 发明内容与权利要求一致，清楚说明技术方案
+   - 具体实施方式充分、详细，包含至少一个完整实施例
+   - 说明书中所有关键技术术语均在具体实施方式中有详细说明
+
+3. 【摘要质量】
+   - 摘要150-300字，完整概括技术方案
+   - 包含主要技术特征和有益效果
 
 请按照标准专利格式撰写权利要求书和说明书。
 """
@@ -528,6 +567,7 @@ class PatentWritingPhaseExecutor(WorkflowPhaseExecutor):
                                 "items": {"type": "string"},
                             },
                         },
+                        "required": ["independent_claim", "dependent_claims"],
                     },
                     "description": {
                         "type": "object",
@@ -537,9 +577,11 @@ class PatentWritingPhaseExecutor(WorkflowPhaseExecutor):
                             "summary_of_invention": {"type": "string"},
                             "detailed_description": {"type": "string"},
                         },
+                        "required": ["technical_field", "background_art", "summary_of_invention", "detailed_description"],
                     },
                     "abstract": {"type": "string"},
                 },
+                "required": ["claims", "description", "abstract"],
             }
 
             result = await llm_service.structured_output(messages, output_schema)
@@ -592,20 +634,91 @@ class QualityReviewPhaseExecutor(WorkflowPhaseExecutor):
             agent = factory.create_agent(self.get_agent_profile_id())
 
             draft = self.context.patent_draft
+            req = self.context.requirement_analysis
+
+            claims_section = draft.get('claims', {})
+            desc_section = draft.get('description', {})
+            dependent_claims = claims_section.get('dependent_claims', [])
+            dependent_text = "\n".join(
+                [f"  从属权利要求{i+1}: {c}" for i, c in enumerate(dependent_claims)]
+            ) if dependent_claims else "  无"
+
+            # 构建需求分析上下文（用于评估一致性）
+            key_features_text = ""
+            if req.get('key_innovative_features'):
+                features = []
+                for f in req.get('key_innovative_features', []):
+                    if isinstance(f, dict):
+                        features.append(f"- {f.get('name', 'N/A')}: {f.get('description', 'N/A')}")
+                key_features_text = "\n".join(features)
 
             input_text = f"""
-请对以下专利申请文件进行质量审查：
+请对以下专利申请文件进行严格的质量审查。
+
+【核心技术需求】
+技术领域：{req.get('tech_field', 'N/A')}
+核心技术问题：{req.get('technical_problem', 'N/A')}
+关键创新特征：
+{key_features_text}
 
 【权利要求书】
 独立权利要求：
-{draft.get('claims', {}).get('independent_claim', 'N/A')}
+{claims_section.get('independent_claim', 'N/A')}
 
-从属权利要求数量：{len(draft.get('claims', {}).get('dependent_claims', []))}
+从属权利要求：
+{dependent_text}
+
+【说明书】
+技术领域：{desc_section.get('technical_field', 'N/A')}
+背景技术：{desc_section.get('background_art', 'N/A')[:300]}
+发明内容：{desc_section.get('summary_of_invention', 'N/A')[:300]}
+具体实施方式：{desc_section.get('detailed_description', 'N/A')[:500]}
 
 【说明书摘要】
 {draft.get('abstract', 'N/A')}
 
-请进行全面的质量审查，包括形式合规性、权利要求质量、说明书充分性等。
+【审查评分标准（请严格执行）】
+请按照以下详细标准对每项进行评分(0-100分)，并给出总体评分：
+
+1. 形式合规性 (权重20%)
+   - 权利要求编号连续：5分
+   - 独立权利要求包含"其特征在于"划分语句：5分
+   - 摘要长度150-300字：5分
+   - 无禁止使用的主观/不确定术语（最好、最佳、必须、绝对等）：5分
+   → 90分以上=以上4项全部满足
+
+2. 权利要求质量 (权重35%)
+   - 独立权利要求保护范围适当，涵盖核心发明点：15分
+   - 从属权利要求层次清晰，合理限定：10分
+   - 权利要求清楚、简要，得到说明书支持：10分
+   → 90分以上=权利要求清晰界定保护范围，从属关系合理，无术语模糊
+
+3. 说明书充分性 (权重25%)
+   - 技术领域准确描述：5分
+   - 背景技术客观分析现有技术不足：5分
+   - 发明内容清楚说明技术方案：5分
+   - 具体实施方式充分详细，实施例完整：10分
+   → 90分以上=各节内容完整，实施例充分支持权利要求范围
+
+4. 权利要求-说明书一致性 (权重10%)
+   - 权利要求中的技术术语在说明书中有明确定义：5分
+   - 权利要求的技术方案在实施例中有对应实现：5分
+   → 90分以上=所有权利要求术语在说明书中均有定义
+
+5. 现有技术风险 (权重10%)
+   - 独立权利要求与现有技术的区别特征清晰：5分
+   - 技术方案整体具备非显而易见性：5分
+   → 90分以上=独立权利要求具备明显新颖性/创造性
+
+总分 = 形式合规性*20% + 权利要求*35% + 说明书*25% + 一致性*10% + 现有技术风险*10%
+
+【评分准则】
+- 95-100分：优秀，各方面均完美无缺
+- 90-94分：良好，仅个别微小可改进之处
+- 80-89分：合格，有明显可改进之处
+- 70分以下：需要大幅修改
+
+请给出各维度详细评分、总评分和具体的修改建议。
 """
 
             from src.core.llm_client import get_llm_service, LLMMessage
@@ -647,15 +760,24 @@ class QualityReviewPhaseExecutor(WorkflowPhaseExecutor):
                     },
                     "review_summary": {"type": "string"},
                 },
+                "required": ["overall_score", "recommendation", "revision_suggestions", "review_summary"],
             }
 
             result = await llm_service.structured_output(messages, output_schema)
 
             self.context.review_report = result
 
+            # 存储修正建议和分数到上下文用于迭代反馈
+            score = result.get("overall_score", 0)
+            self.context.latest_review_score = score
+            if result.get("revision_suggestions"):
+                self.context.latest_revision_suggestions = result["revision_suggestions"]
+
             issues = []
             if result.get("recommendation") in ["revise", "reject"]:
                 issues.append(f"审查结果为 {result['recommendation']}，需要进行修正")
+            if score < 90:
+                issues.append(f"审查得分 {score} 低于 90 分目标，需要继续迭代改进")
 
             duration = (datetime.now() - start_time).total_seconds()
 
@@ -771,8 +893,12 @@ class PatentWorkflowEngine:
         )
 
         try:
-            for phase in self._default_workflow_sequence:
+            phase_sequence = list(self._default_workflow_sequence)
+            phase_index = 0
+            while phase_index < len(phase_sequence):
+                phase = phase_sequence[phase_index]
                 if not phase.value:
+                    phase_index += 1
                     continue
 
                 context.current_phase = phase
@@ -806,20 +932,31 @@ class PatentWorkflowEngine:
                     context.current_phase = WorkflowState.FAILED
                     return context
 
-                # 如果审查阶段建议修改，启动迭代
+                # 如果审查阶段得分低于90或建议修改，启动迭代
                 if phase == WorkflowState.QUALITY_REVIEW:
                     review_result = result.output
-                    if review_result.get("recommendation") == "revise" and context.iteration_count < context.max_iterations:
+                    overall_score = review_result.get("overall_score", 0)
+                    needs_iteration = (
+                        overall_score < 90
+                        or review_result.get("recommendation") in ["revise", "reject"]
+                    )
+                    if needs_iteration and context.iteration_count < context.max_iterations:
                         self._logger.info(
                             "Starting iteration phase",
                             task_id=context.task_id,
                             iteration=context.iteration_count + 1,
+                            score=overall_score,
+                            reason="score<90" if overall_score < 90 else review_result.get("recommendation"),
                         )
                         context.current_phase = WorkflowState.ITERATION
                         context.iteration_count += 1
 
-                        # TODO: 执行迭代修正逻辑
-                        # 这里简化处理，直接继续
+                        phase_sequence.insert(phase_index + 1, WorkflowState.PATENT_WRITING)
+                        phase_sequence.insert(phase_index + 2, WorkflowState.QUALITY_REVIEW)
+                        phase_index += 1
+                        continue
+
+                phase_index += 1
 
             # 工作流完成
             context.current_phase = WorkflowState.COMPLETED
@@ -841,6 +978,145 @@ class PatentWorkflowEngine:
             context.current_phase = WorkflowState.FAILED
             self._logger.error(
                 "Workflow failed with error",
+                task_id=context.task_id,
+                error=str(e),
+                exc_info=True,
+            )
+            raise
+
+    async def resume_workflow(
+        self,
+        context: WorkflowContext,
+        phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None]] = None,
+        force_start_from: Optional[WorkflowState] = None,
+    ) -> WorkflowContext:
+        """
+        从当前阶段恢复工作流执行
+        用于工作流因服务器重启或异常中断后的恢复
+
+        Args:
+            context: 工作流上下文
+            phase_callback: 每个阶段完成后的回调
+            force_start_from: 强制从指定阶段开始（用于已完成工作流的迭代修正）
+        """
+        if force_start_from:
+            # 强制从指定阶段开始（用于迭代修正）
+            current = force_start_from
+            context.current_phase = WorkflowState.ITERATION
+            self._logger.info(
+                "Forcing resume from phase for iteration",
+                task_id=context.task_id,
+                phase=current.value,
+                iteration=context.iteration_count + 1,
+            )
+        else:
+            current = context.current_phase
+
+        # 查找当前阶段在工作流序列中的位置
+        try:
+            start_index = self._default_workflow_sequence.index(current)
+        except ValueError:
+            self._logger.error(
+                "Current phase not in workflow sequence",
+                task_id=context.task_id,
+                phase=current.value,
+            )
+            context.current_phase = WorkflowState.FAILED
+            return context
+
+        remaining = self._default_workflow_sequence[start_index:]
+
+        self._logger.info(
+            "Resuming workflow from phase",
+            task_id=context.task_id,
+            current_phase=current.value,
+            remaining_phases=[p.value for p in remaining],
+        )
+
+        try:
+            phase_index = 0
+            while phase_index < len(remaining):
+                phase = remaining[phase_index]
+                if not phase.value:
+                    phase_index += 1
+                    continue
+
+                context.current_phase = phase
+
+                # 发布进度事件
+                await self._publish_progress_event(context, phase, "running")
+
+                # 执行阶段
+                result = await self.execute_phase(context, phase)
+
+                context.add_phase_result(result)
+
+                # 发布阶段完成事件
+                await self._publish_progress_event(context, phase, "completed", result)
+
+                # 调用回调
+                if phase_callback:
+                    if asyncio.iscoroutinefunction(phase_callback):
+                        await phase_callback(phase, result)
+                    else:
+                        phase_callback(phase, result)
+
+                # 检查是否失败
+                if not result.success:
+                    self._logger.error(
+                        "Phase failed during resume, stopping workflow",
+                        task_id=context.task_id,
+                        phase=phase.value,
+                        issues=result.issues,
+                    )
+                    context.current_phase = WorkflowState.FAILED
+                    return context
+
+                # 如果审查阶段得分低于90或建议修改，启动迭代
+                if phase == WorkflowState.QUALITY_REVIEW:
+                    review_result = result.output
+                    overall_score = review_result.get("overall_score", 0)
+                    needs_iteration = (
+                        overall_score < 90
+                        or review_result.get("recommendation") in ["revise", "reject"]
+                    )
+                    if needs_iteration and context.iteration_count < context.max_iterations:
+                        self._logger.info(
+                            "Starting iteration phase during resume",
+                            task_id=context.task_id,
+                            iteration=context.iteration_count + 1,
+                            score=overall_score,
+                            reason="score<90" if overall_score < 90 else review_result.get("recommendation"),
+                        )
+                        context.current_phase = WorkflowState.ITERATION
+                        context.iteration_count += 1
+                        remaining.insert(phase_index + 1, WorkflowState.PATENT_WRITING)
+                        remaining.insert(phase_index + 2, WorkflowState.QUALITY_REVIEW)
+                        phase_index += 1
+                        continue
+
+                phase_index += 1
+
+            # 工作流完成
+            context.current_phase = WorkflowState.COMPLETED
+
+            self._logger.info(
+                "Workflow resumed and completed successfully",
+                task_id=context.task_id,
+                total_phases=len(context.phase_history),
+            )
+
+            return context
+
+        except asyncio.CancelledError:
+            context.current_phase = WorkflowState.CANCELLED
+            self._logger.info("Workflow cancelled during resume", task_id=context.task_id)
+            raise
+
+        except Exception as e:
+            context.current_phase = WorkflowState.FAILED
+            self._logger.error(
+                "Workflow resume failed with error",
                 task_id=context.task_id,
                 error=str(e),
                 exc_info=True,

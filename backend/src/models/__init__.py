@@ -5,6 +5,7 @@ from .chat import ChatSession, ChatMessage
 from .agent import Agent, AgentTool, AgentSkill, AgentMemory
 from .knowledge import KnowledgePatent
 from .audit import AuditLog, ApiUsage
+from .store import StoredValue
 
 __all__ = [
     "Base",
@@ -14,4 +15,5 @@ __all__ = [
     "Agent", "AgentTool", "AgentSkill", "AgentMemory",
     "KnowledgePatent",
     "AuditLog", "ApiUsage",
+    "StoredValue",
 ]

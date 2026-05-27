@@ -27,9 +27,7 @@ from src.services import (
     WorkflowService,
     ChatService,
 )
-from src.agents.profiles import ProfileRegistry, register_default_profiles
-from src.agents.hermes.tools import register_all_tools
-from src.agents import get_agent_factory
+from src.agents.profiles import ProfileRegistry
 from src.core.workflow_engine import PatentWorkflowEngine
 from src.core.events import get_event_bus
 from src.data_sources.base import get_data_source_manager
@@ -357,13 +355,23 @@ async def init_container() -> None:
     db = container.db_provider()
     await db.init()
 
+    from src.models.base import Base as ModelBase
+    async with db.engine.begin() as conn:
+        await conn.run_sync(ModelBase.metadata.create_all)
+    logger.info("Database tables created / verified")
+
     # 初始化 Redis
     redis = container.redis_provider()
     await redis.init()
 
-    # 注册默认 Agent 配置
+    # lazy import to break circular dependency
+    from src.agents.profiles import register_default_profiles
+
     registry = container.profile_registry()
     register_default_profiles(registry)
+
+    from src.agents import get_agent_factory
+    from src.agents.hermes.tools import register_all_tools
 
     factory = get_agent_factory()
     register_all_tools(factory)

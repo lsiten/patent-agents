@@ -666,7 +666,10 @@ export const conversationApi = {
   createWorkflow: (conv_id: string) =>
     request<{ task_id: string; status: string; redirect_url: string }>(
       `/conversations/${encodeURIComponent(conv_id)}/create-workflow`,
-      { method: 'POST' }
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }
     ),
 };
 

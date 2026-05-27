@@ -43,6 +43,7 @@ pgvector = "^0.2.5"
 pytest = "^7.4.4"
 pytest-asyncio = "^0.23.3"
 pytest-cov = "^4.1.0"
+pytest-timeout = "^2.3.1"
 black = "^23.12.1"
 isort = "^5.13.2"
 flake8 = "^7.0.0"
@@ -102,7 +103,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-addopts = "-v --cov=src --cov-report=term-missing"
+addopts = "-v --cov=src --cov-report=term-missing --timeout=60"
 filterwarnings = [
     # httpx/pydantic unclosed sockets during GC teardown (third-party lib internals)
     "ignore:Exception ignored in.*socket.socket.*:pytest.PytestUnraisableExceptionWarning",
