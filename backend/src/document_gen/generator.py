@@ -1,17 +1,30 @@
 """
 Patent document generator — produces professionally formatted .docx files
-from FinalPatent data using python-docx.
+based on an extracted PatentFeatureProfile (not direct file access).
+
+The generator reads a persisted feature profile (JSON) that describes the exact
+formatting characteristics of finalized patents. It never reads the original
+docx reference files at generation time.
+
+Flow:
+  1. Feature profile extracted once from 定稿文件/ → saved as JSON
+  2. Generator loads the JSON profile at startup
+  3. All formatting decisions are driven by the profile
 """
-import os
-from datetime import datetime
+
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Pt, RGBColor
+from docx.shared import Cm, Pt
 
+from src.document_gen.feature_profile import (
+    PatentFeatureProfile,
+    load_profile,
+)
 from src.models.domain import (
     Claim,
     FinalPatent,
@@ -21,158 +34,277 @@ from src.models.domain import (
 
 EXPORT_DIR = Path(__file__).resolve().parent.parent.parent / "exports"
 
+# Cached profile (loaded once from persisted JSON or defaults)
+_cached_profile: Optional[PatentFeatureProfile] = None
 
-def make_paragraph(doc: Document, text: str, bold: bool = False,
-                   size: int = 12, alignment: Optional[int] = None,
-                   font_name: str = "宋体", space_after: Optional[Cm] = None,
-                   space_before: Optional[Cm] = None,
-                   first_line_indent: Optional[Cm] = None) -> None:
-    """Add a paragraph with proper CJK font handling."""
-    p = doc.add_paragraph()
-    run = p.add_run(text)
-    run.font.size = Pt(size)
+
+def _get_profile() -> PatentFeatureProfile:
+    """Load the feature profile (cached after first call)."""
+    global _cached_profile
+    if _cached_profile is None:
+        _cached_profile = load_profile()
+    return _cached_profile
+
+
+def set_profile(profile: PatentFeatureProfile) -> None:
+    """Override the cached profile (for testing or custom profiles)."""
+    global _cached_profile
+    _cached_profile = profile
+
+
+def reset_profile() -> None:
+    """Reset cached profile (forces reload on next use)."""
+    global _cached_profile
+    _cached_profile = None
+
+
+# ─── Low-level paragraph helpers ─────────────────────────────────────────────
+
+
+def _set_line_spacing_exact(para, emu: int) -> None:
+    """Set exact line spacing via XML. EMU → twips for w:line attribute."""
+    # w:line uses twips (1/20 of a point). EMU / 635 = twips
+    twips = round(emu / 635)
+    pPr = para._element.get_or_add_pPr()
+    spacing = pPr.find(qn("w:spacing"))
+    if spacing is None:
+        spacing = OxmlElement("w:spacing")
+        pPr.append(spacing)
+    spacing.set(qn("w:line"), str(twips))
+    spacing.set(qn("w:lineRule"), "exact")
+
+
+def _set_run_font(run, font_name: str, size_pt: float, bold: bool = False):
+    """Set font properties on a run with proper CJK handling."""
     run.font.name = font_name
+    run.font.size = Pt(size_pt)
     run.bold = bold
-    # Set East-Asian font for CJK characters
-    run.element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
-    if alignment is not None:
-        p.alignment = alignment
-    if space_after is not None:
-        p.paragraph_format.space_after = space_after
-    if space_before is not None:
-        p.paragraph_format.space_before = space_before
-    if first_line_indent is not None:
-        p.paragraph_format.first_line_indent = first_line_indent
+    # Set East-Asian, ASCII, and HAnsi fonts for CJK
+    rPr = run._element.get_or_add_rPr()
+    rFonts = rPr.find(qn("w:rFonts"))
+    if rFonts is None:
+        rFonts = OxmlElement("w:rFonts")
+        rPr.insert(0, rFonts)
+    rFonts.set(qn("w:eastAsia"), font_name)
+    rFonts.set(qn("w:ascii"), font_name)
+    rFonts.set(qn("w:hAnsi"), font_name)
 
 
-def add_heading_cjk(doc: Document, text: str, level: int = 1) -> None:
-    """Add a heading with proper CJK font."""
-    h = doc.add_heading(text, level=level)
+def _get_alignment(align_str: str):
+    """Convert alignment string to python-docx constant."""
+    mapping = {
+        "JUSTIFY": WD_ALIGN_PARAGRAPH.JUSTIFY,
+        "CENTER": WD_ALIGN_PARAGRAPH.CENTER,
+        "LEFT": WD_ALIGN_PARAGRAPH.LEFT,
+        "RIGHT": WD_ALIGN_PARAGRAPH.RIGHT,
+    }
+    return mapping.get(align_str.upper(), WD_ALIGN_PARAGRAPH.JUSTIFY)
+
+
+def add_body_paragraph(
+    doc: Document,
+    text: str,
+    profile: PatentFeatureProfile,
+    first_line_indent: bool = True,
+    bold: bool = False,
+) -> None:
+    """Add a body text paragraph formatted according to the feature profile."""
+    para = doc.add_paragraph()
+    run = para.add_run(text)
+
+    typo = profile.typography
+    pfmt = profile.paragraph_format
+
+    _set_run_font(run, typo.body_font_name, typo.body_font_size_pt, bold)
+
+    # Alignment
+    para.paragraph_format.alignment = _get_alignment(pfmt.body_alignment)
+
+    # First line indent
+    if first_line_indent:
+        para.paragraph_format.first_line_indent = Cm(pfmt.body_first_line_indent_cm)
+
+    # Line spacing
+    _set_line_spacing_exact(para, pfmt.body_line_spacing_emu)
+
+
+def add_section_heading(
+    doc: Document,
+    text: str,
+    profile: PatentFeatureProfile,
+) -> None:
+    """Add a description sub-section heading (e.g. 技术领域, 背景技术)."""
+    para = doc.add_paragraph()
+    run = para.add_run(text)
+
+    typo = profile.typography
+    pfmt = profile.paragraph_format
+
+    _set_run_font(
+        run,
+        typo.section_heading_font_name,
+        typo.section_heading_font_size_pt,
+        bold=typo.section_heading_bold,
+    )
+
+    para.paragraph_format.alignment = _get_alignment(pfmt.section_heading_alignment)
+    _set_line_spacing_exact(para, pfmt.body_line_spacing_emu)
+
+
+def add_document_heading(
+    doc: Document,
+    text: str,
+    profile: PatentFeatureProfile,
+) -> None:
+    """Add a document-level heading (e.g. 权利要求书, 说明书)."""
+    struct = profile.document_structure
+    pfmt = profile.paragraph_format
+    typo = profile.typography
+
+    # Space characters apart using separator from profile
+    spaced_text = struct.heading_char_separator.join(list(text))
+
+    h = doc.add_heading(spaced_text, level=1)
+
+    # Apply font to all runs
     for run in h.runs:
-        run.font.name = "黑体"
-        run.element.rPr.rFonts.set(qn("w:eastAsia"), "黑体")
-        if level == 1:
-            run.font.size = Pt(16)
-        elif level == 2:
-            run.font.size = Pt(14)
-        else:
-            run.font.size = Pt(12)
+        _set_run_font(
+            run, typo.doc_heading_font_name, typo.section_heading_font_size_pt,
+            bold=typo.doc_heading_bold,
+        )
+
+    h.alignment = _get_alignment(pfmt.doc_heading_alignment)
 
 
-def add_section_heading(doc: Document, text: str) -> None:
-    """Add a section heading (centered, bold) like 权利要求书, 说明书."""
-    make_paragraph(
-        doc, text, bold=True, size=18,
-        alignment=WD_ALIGN_PARAGRAPH.CENTER,
-        font_name="黑体", space_before=Cm(2.0), space_after=Cm(1.0),
-    )
+# ─── Section/Page Management ────────────────────────────────────────────────
 
 
-def add_subsection_heading(doc: Document, text: str) -> None:
-    """Add a subsection heading like 技术领域, 背景技术."""
-    make_paragraph(
-        doc, text, bold=True, size=14,
-        font_name="黑体", space_before=Cm(0.8), space_after=Cm(0.4),
-    )
+def _set_section_margins(section, margins: tuple) -> None:
+    """Set section margins from (top, bottom, left, right) in cm."""
+    top, bottom, left, right = margins
+    section.top_margin = Cm(top)
+    section.bottom_margin = Cm(bottom)
+    section.left_margin = Cm(left)
+    section.right_margin = Cm(right)
 
 
-def add_body_text(doc: Document, text: str, first_line_indent: Cm = Cm(0.74)) -> None:
-    """Add body text with first-line indent (2 Chinese characters at 12pt)."""
-    make_paragraph(
-        doc, text, size=12, font_name="宋体",
-        first_line_indent=first_line_indent,
-        space_after=Cm(0.2),
-    )
+def _set_page_size(section, profile: PatentFeatureProfile) -> None:
+    """Set page size from profile."""
+    section.page_width = Cm(profile.page_layout.page_width_cm)
+    section.page_height = Cm(profile.page_layout.page_height_cm)
 
 
-def build_claims_section(doc: Document, draft: PatentDraft) -> None:
+def _get_margins_for_section(section_name: str, profile: PatentFeatureProfile) -> tuple:
+    """Get margins tuple for a named section from profile."""
+    layout = profile.page_layout
+    mapping = {
+        "摘要": layout.margins_abstract,
+        "摘要附图": layout.margins_abstract_drawings,
+        "权利要求书": layout.margins_claims,
+        "说明书": layout.margins_description,
+        "说明书附图": layout.margins_description_drawings,
+    }
+    return mapping.get(section_name, layout.margins_abstract)
+
+
+def add_new_section(
+    doc: Document,
+    section_name: str,
+    profile: PatentFeatureProfile,
+) -> None:
+    """Add a new section with page break and margins from profile."""
+    doc.add_section()
+    new_section = doc.sections[-1]
+    _set_page_size(new_section, profile)
+    margins = _get_margins_for_section(section_name, profile)
+    _set_section_margins(new_section, margins)
+
+
+# ─── Document Building ───────────────────────────────────────────────────────
+
+
+def build_abstract_section(doc: Document, draft: PatentDraft, profile: PatentFeatureProfile) -> None:
+    """Generate 说明书摘要 section."""
+    add_document_heading(doc, "说明书摘要", profile)
+    add_body_paragraph(doc, draft.abstract, profile)
+
+
+def build_abstract_drawings_section(doc: Document, draft: PatentDraft, profile: PatentFeatureProfile) -> None:
+    """Generate 摘要附图 section."""
+    add_new_section(doc, "摘要附图", profile)
+    add_document_heading(doc, "摘要附图", profile)
+    add_body_paragraph(doc, "（无附图）", profile, first_line_indent=False)
+
+
+def build_claims_section(doc: Document, draft: PatentDraft, profile: PatentFeatureProfile) -> None:
     """Generate 权利要求书 section."""
-    add_section_heading(doc, "权利要求书")
-
-    # Add title line
-    add_body_text(doc, f"1、{draft.title}")
+    add_new_section(doc, "权利要求书", profile)
+    add_document_heading(doc, "权利要求书", profile)
 
     if not draft.claims:
-        add_body_text(doc, "（无权利要求内容）")
+        add_body_paragraph(doc, "（无权利要求内容）", profile)
         return
 
     for claim in draft.claims:
-        text = _format_claim(claim)
-        add_body_text(doc, text)
+        text = _format_claim(claim, profile)
+        add_body_paragraph(doc, text, profile)
 
 
-def _format_claim(claim: Claim) -> str:
-    """Format a claim number + content with dependency reference."""
-    prefix = f"{claim.claim_number}、"
+def _format_claim(claim: Claim, profile: PatentFeatureProfile) -> str:
+    """Format a claim using content patterns from profile."""
+    sep = profile.content_patterns.claim_numbering_separator
+    prefix = f"{claim.claim_number}{sep}"
     if claim.dependencies:
         dep_ref = "、".join(str(d) for d in claim.dependencies)
-        prefix = f"{claim.claim_number}、根据权利要求{dep_ref}所述的"
+        dep_fmt = profile.content_patterns.claim_dependent_format.replace("{n}", dep_ref)
+        prefix = f"{claim.claim_number}{sep}{dep_fmt}"
     return f"{prefix}{claim.content}"
 
 
-def build_description_section(doc: Document, draft: PatentDraft) -> None:
-    """Generate 说明书 section."""
-    add_section_heading(doc, "说  明  书")
-
-    # 发明名称
-    add_subsection_heading(doc, "发明名称")
-    add_body_text(doc, draft.title)
+def build_description_section(doc: Document, draft: PatentDraft, profile: PatentFeatureProfile) -> None:
+    """Generate 说明书 section with all sub-sections."""
+    add_new_section(doc, "说明书", profile)
+    add_document_heading(doc, "说明书", profile)
 
     # 技术领域
-    add_subsection_heading(doc, "技术领域")
-    add_body_text(doc, draft.technical_field)
+    add_section_heading(doc, "技术领域", profile)
+    add_body_paragraph(doc, draft.technical_field, profile)
 
     # 背景技术
-    add_subsection_heading(doc, "背景技术")
-    add_body_text(doc, draft.background_art.content)
+    add_section_heading(doc, "背景技术", profile)
+    _add_multiline_content(doc, draft.background_art.content, profile)
 
     # 发明内容
-    add_subsection_heading(doc, "发明内容")
-    add_body_text(doc, draft.summary_of_invention.content)
+    add_section_heading(doc, "发明内容", profile)
+    _add_multiline_content(doc, draft.summary_of_invention.content, profile)
 
     # 附图说明 (optional)
     if draft.description_of_drawings:
-        add_subsection_heading(doc, "附图说明")
-        add_body_text(doc, draft.description_of_drawings.content)
+        add_section_heading(doc, "附图说明", profile)
+        _add_multiline_content(doc, draft.description_of_drawings.content, profile)
 
     # 具体实施方式
-    add_subsection_heading(doc, "具体实施方式")
-    add_body_text(doc, draft.detailed_description.content)
-
-    # 权利要求支持 (引用 claims 列表)
-    if draft.claims:
-        add_subsection_heading(doc, "权利要求书支持")
-        add_body_text(doc, f"本说明书支持权利要求{len(draft.claims)}项所述的{len([c for c in draft.claims if c.claim_type == 'independent'])}个独立权利要求的技术方案。")
+    add_section_heading(doc, "具体实施方式", profile)
+    _add_multiline_content(doc, draft.detailed_description.content, profile)
 
 
-def build_abstract_section(doc: Document, draft: PatentDraft) -> None:
-    """Generate 说明书摘要 section."""
-    add_section_heading(doc, "说明书摘要")
-    add_body_text(doc, draft.abstract)
+def build_description_drawings_section(
+    doc: Document, draft: PatentDraft, profile: PatentFeatureProfile
+) -> None:
+    """Generate 说明书附图 section."""
+    add_new_section(doc, "说明书附图", profile)
+    add_document_heading(doc, "说明书附图", profile)
+    add_body_paragraph(doc, "（无附图）", profile, first_line_indent=False)
 
 
-def add_footer(doc: Document, task_id: str) -> None:
-    """Add document metadata footer."""
-    for section in doc.sections:
-        footer = section.footer
-        footer.is_linked_to_previous = False
-        p = footer.paragraphs[0]
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        run = p.add_run(f"专利智脑 · 任务 {task_id} · 生成时间 {now}")
-        run.font.size = Pt(8)
-        run.font.color.rgb = RGBColor(128, 128, 128)
-        run.font.name = "宋体"
-        run.element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+def _add_multiline_content(doc: Document, content: str, profile: PatentFeatureProfile) -> None:
+    """Add content that may contain multiple paragraphs."""
+    paragraphs = [p.strip() for p in content.split("\n") if p.strip()]
+    for para_text in paragraphs:
+        add_body_paragraph(doc, para_text, profile)
 
 
-def page_margin_default(doc: Document) -> None:
-    """Set standard page margins for patent documents."""
-    for section in doc.sections:
-        section.top_margin = Cm(2.54)
-        section.bottom_margin = Cm(2.54)
-        section.left_margin = Cm(3.17)
-        section.right_margin = Cm(3.17)
+# ─── Main Entry Point ────────────────────────────────────────────────────────
 
 
 def generate_patent_docx(
@@ -181,17 +313,23 @@ def generate_patent_docx(
     output_dir: Optional[Path] = None,
 ) -> str:
     """
-    Generate a professional Chinese patent application .docx file.
+    Generate a professional Chinese patent application .docx file
+    based on the extracted feature profile.
 
-    Accepts data in multiple compressed forms:
-    - (dict, task_id)         — raw dict from API store + task ID string
+    The feature profile (PatentFeatureProfile) describes all formatting:
+    - Page layout, margins per section
+    - Typography (font, size, bold)
+    - Paragraph format (indent, line spacing, alignment)
+    - Document structure (sections, headings)
+    - Content patterns (claim format, numbering)
+
+    The generator never reads the original reference docx files directly.
+
+    Accepts data in multiple forms:
+    - (dict, task_id)           — raw dict + task ID string
     - (PatentTask, FinalPatent) — model objects from workflow engine
-    - (PatentDraft, task_id)   — draft model + task ID string
-
-    Args:
-        patent_data: Dict or model containing patent draft data.
-        task_id_or_patent: Task ID string or FinalPatent (for model path).
-        output_dir: Directory to save the file (defaults to EXPORT_DIR/task_id/).
+    - (PatentDraft, task_id)    — draft model + task ID string
+    - (FinalPatent,)            — FinalPatent model object
 
     Returns:
         Absolute path to the generated .docx file.
@@ -214,7 +352,7 @@ def generate_patent_docx(
     else:
         raise TypeError(f"Unsupported patent_data type: {type(patent_data)}")
 
-    # Parse draft dict through Pydantic for validation + nested model coercion
+    # Parse draft dict through Pydantic for validation
     draft = PatentDraft(**draft_dict)
 
     if output_dir is None:
@@ -223,45 +361,24 @@ def generate_patent_docx(
 
     file_path = output_dir / f"{task_id}_专利申请书.docx"
 
+    # Load feature profile (from persisted JSON or defaults)
+    profile = _get_profile()
+
+    # Create document
     doc = Document()
-    page_margin_default(doc)
 
-    # ── Title page ──
-    make_paragraph(
-        doc, "专利申请文件", bold=True, size=22,
-        alignment=WD_ALIGN_PARAGRAPH.CENTER,
-        font_name="黑体", space_after=Cm(3.0),
-    )
-    make_paragraph(
-        doc, draft.title, bold=True, size=16,
-        alignment=WD_ALIGN_PARAGRAPH.CENTER,
-        font_name="黑体", space_after=Cm(1.0),
-    )
-    make_paragraph(
-        doc, f"任务编号：{task_id}", size=10,
-        alignment=WD_ALIGN_PARAGRAPH.CENTER,
-        font_name="宋体", space_after=Cm(0.3),
-    )
-    make_paragraph(
-        doc, f"专利类型：{draft.claims[0].category if draft.claims else '发明专利'}",
-        size=10, alignment=WD_ALIGN_PARAGRAPH.CENTER,
-        font_name="宋体", space_after=Cm(2.0),
-    )
+    # Configure first section (摘要)
+    first_section = doc.sections[0]
+    _set_page_size(first_section, profile)
+    margins = _get_margins_for_section("摘要", profile)
+    _set_section_margins(first_section, margins)
 
-    # ── 权利要求书 (page break) ──
-    doc.add_page_break()
-    build_claims_section(doc, draft)
-
-    # ── 说明书 (page break) ──
-    doc.add_page_break()
-    build_description_section(doc, draft)
-
-    # ── 说明书摘要 (page break) ──
-    doc.add_page_break()
-    build_abstract_section(doc, draft)
-
-    # ── Footer ──
-    add_footer(doc, task_id)
+    # Build all 5 sections per document structure
+    build_abstract_section(doc, draft, profile)
+    build_abstract_drawings_section(doc, draft, profile)
+    build_claims_section(doc, draft, profile)
+    build_description_section(doc, draft, profile)
+    build_description_drawings_section(doc, draft, profile)
 
     doc.save(str(file_path))
     return str(file_path)

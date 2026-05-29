@@ -326,6 +326,16 @@ class ConversationSummary(BaseModel):
     linked_workflow_id: Optional[str] = None
 
 
+class ToolCallInfo(BaseModel):
+    """工具/技能调用信息"""
+    name: str
+    parameters: Dict[str, Any] = {}
+    result: Optional[Any] = None
+    success: bool = True
+    error: Optional[str] = None
+    duration_ms: Optional[float] = None
+
+
 class ConversationMessage(BaseModel):
     """对话消息"""
     id: str
@@ -334,6 +344,7 @@ class ConversationMessage(BaseModel):
     timestamp: str
     type: str = "text"
     metadata: Optional[Dict[str, Any]] = None
+    tool_calls: Optional[List[ToolCallInfo]] = None
 
 
 class ConversationDetail(BaseModel):

@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
+import { ToolCallCard } from '@/components/chat/ToolCallCard';
 import { clsx } from 'clsx';
 import { conversationApi, workflowApi } from '@/lib/api';
 import type { ConversationSummary } from '@/lib/api';
@@ -212,32 +213,87 @@ function ChatPageContent() {
         convId = created.id;
         setActiveConvId(convId);
         router.replace(`/chat?conv_id=${encodeURIComponent(convId)}`);
-        // Refresh list
         void loadConversations();
       }
 
-      // Send chat message
-      const response = await conversationApi.chat(convId, { content });
-      const assistantMsg: ChatMessage = {
-        id: `assistant-${Date.now()}`,
+      // Create a streaming assistant message placeholder
+      const streamMsgId = `assistant-stream-${Date.now()}`;
+      const streamMsg: ChatMessage = {
+        id: streamMsgId,
         role: 'assistant',
-        content: response.message.content,
-        timestamp: response.message.timestamp || new Date().toISOString(),
+        content: '',
+        timestamp: new Date().toISOString(),
+        isStreaming: true,
+        tool_calls: [],
+        skill_uses: [],
       };
+      setMessages((prev) => [...prev, streamMsg]);
 
-      setMessages((prev) =>
-        prev.map((m) => (m.id === userMsg.id ? { ...m, task_id: convId! } : m)).concat(assistantMsg)
-      );
-
-      // Check recommendations
-      if (response.has_recommendation) {
-        setRecommendStartWorkflow(true);
-        // Refresh list to get updated title
-        void loadConversations();
-      }
+      // Use streaming API
+      conversationApi.chatStream(convId, { content }, {
+        onThinking: () => {
+          setMessages((prev) => prev.map((m) =>
+            m.id === streamMsgId ? { ...m, content: m.content || '正在思考...' } : m
+          ));
+        },
+        onSkillUse: (data) => {
+          setMessages((prev) => prev.map((m) =>
+            m.id === streamMsgId
+              ? { ...m, skill_uses: [...(m.skill_uses || []), data] }
+              : m
+          ));
+        },
+        onToolCallStart: (data) => {
+          setMessages((prev) => prev.map((m) =>
+            m.id === streamMsgId
+              ? { ...m, tool_calls: [...(m.tool_calls || []), { ...data, result: null, success: true }] }
+              : m
+          ));
+        },
+        onToolCallEnd: (data) => {
+          setMessages((prev) => prev.map((m) => {
+            if (m.id !== streamMsgId) return m;
+            const updatedCalls = (m.tool_calls || []).map((tc) =>
+              tc.name === data.name && tc.result === null
+                ? { ...tc, result: data.result, success: data.success, error: data.error }
+                : tc
+            );
+            return { ...m, tool_calls: updatedCalls };
+          }));
+        },
+        onContent: (data) => {
+          setMessages((prev) => prev.map((m) =>
+            m.id === streamMsgId
+              ? { ...m, content: data.content, isStreaming: false }
+              : m
+          ));
+          if (data.has_recommendation) {
+            setRecommendStartWorkflow(true);
+          }
+        },
+        onDone: (data) => {
+          // Replace streaming message with final persisted message
+          setMessages((prev) => prev.map((m) =>
+            m.id === streamMsgId
+              ? { ...data.message, isStreaming: false }
+              : m
+          ));
+          setIsLoading(false);
+          sendingRef.current = false;
+          if (data.has_recommendation) {
+            setRecommendStartWorkflow(true);
+          }
+          void loadConversations();
+        },
+        onError: (errorMsg) => {
+          setError(errorMsg);
+          setMessages((prev) => prev.filter((m) => m.id !== streamMsgId));
+          setIsLoading(false);
+          sendingRef.current = false;
+        },
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : '发送消息失败');
-    } finally {
       sendingRef.current = false;
       setIsLoading(false);
     }
@@ -496,6 +552,13 @@ function ChatPageContent() {
                       )}
                     >
                       {msg.content}
+                      {msg.role === 'assistant' && (msg.tool_calls?.length || msg.skill_uses?.length) ? (
+                        <ToolCallCard
+                          toolCalls={msg.tool_calls}
+                          skillUses={msg.skill_uses}
+                          isStreaming={msg.isStreaming}
+                        />
+                      ) : null}
                     </div>
                     <p className="text-[11px] text-slate/60 mt-1 px-1">
                       {new Date(msg.timestamp).toLocaleTimeString('zh-CN', {

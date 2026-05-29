@@ -37,6 +37,7 @@ class HermesFunctionResult(BaseModel):
     """Hermes 函数执行结果"""
     name: str
     call_id: str
+    parameters: Dict[str, Any] = Field(default_factory=dict)
     result: Any
     success: bool = True
     error: Optional[str] = None
@@ -291,7 +292,7 @@ class HermesAgent(ABC):
 
             # 3. 如果没有函数调用，直接返回结果
             if not function_calls:
-                result = response.content
+                result = self._clean_tool_call_tags(response.content or "")
                 if output_schema:
                     return self._parse_structured_output(result, output_schema)
                 return result
@@ -299,6 +300,9 @@ class HermesAgent(ABC):
             # 4. 执行函数调用
             for func_call in function_calls:
                 result = await self._execute_tool_call(func_call)
+
+                # 记录工具调用结果到上下文
+                self.context.add_tool_result(result)
 
                 # 将函数调用和结果添加到对话历史
                 self.context.add_message(HermesMessage(
@@ -319,24 +323,179 @@ class HermesAgent(ABC):
 
         # 最终响应
         final_response = await self._call_llm()
-        final_content = final_response.content or ""
+        final_content = self._clean_tool_call_tags(final_response.content or "")
 
         if output_schema:
             return self._parse_structured_output(final_content, output_schema)
 
         return final_content
 
+    async def run_stream(
+        self,
+        user_input: str,
+        context: Optional[Dict[str, Any]] = None,
+    ):
+        """
+        流式运行 Agent — async generator，逐步 yield 事件
+
+        事件格式: {"type": str, "data": dict}
+        事件类型:
+          - thinking: Agent 开始思考
+          - skill_use: Agent 使用技能
+          - tool_call_start: 开始调用工具
+          - tool_call_end: 工具调用完成
+          - content: 最终回复内容
+          - done: 执行完成
+        """
+        logger.info("Agent stream starting", agent=self.name, input_length=len(user_input))
+
+        # 初始化上下文
+        self._context = HermesAgentContext(
+            metadata=context or {},
+            max_function_calls=self.max_iterations,
+        )
+
+        # 添加系统提示词
+        self.context.add_message(HermesMessage(
+            role=HermesMessageRole.SYSTEM,
+            content=self._build_system_prompt(None),
+        ))
+
+        # 添加用户输入
+        self.context.add_message(HermesMessage(
+            role=HermesMessageRole.USER,
+            content=user_input,
+        ))
+
+        # 主循环
+        iteration = 0
+        while iteration < self.max_iterations:
+            iteration += 1
+
+            # 1. 思考阶段
+            yield {"type": "thinking", "data": {"iteration": iteration, "agent": self.name}}
+
+            response = await self._call_llm()
+
+            # 2. 解析技能使用
+            skill_uses = self._parse_skill_uses(response.content or "")
+            for skill in skill_uses:
+                yield {"type": "skill_use", "data": skill}
+
+            # 3. 解析工具调用
+            function_calls = self._parse_function_calls(response)
+
+            # 4. 如果没有函数调用，返回最终结果
+            if not function_calls:
+                final_content = self._clean_tool_call_tags(response.content or "")
+                final_content = self._clean_skill_use_tags(final_content)
+                yield {"type": "content", "data": {"content": final_content}}
+                yield {"type": "done", "data": {"iterations": iteration, "tool_calls_count": len(self.context.tool_results)}}
+                return
+
+            # 5. 执行工具调用
+            for func_call in function_calls:
+                yield {"type": "tool_call_start", "data": {"name": func_call.name, "parameters": func_call.parameters}}
+
+                result = await self._execute_tool_call(func_call)
+                self.context.add_tool_result(result)
+
+                yield {"type": "tool_call_end", "data": {
+                    "name": result.name,
+                    "parameters": result.parameters,
+                    "result": result.result if result.success else None,
+                    "success": result.success,
+                    "error": result.error,
+                }}
+
+                # 添加到对话历史
+                self.context.add_message(HermesMessage(
+                    role=HermesMessageRole.ASSISTANT,
+                    function_call=func_call,
+                ))
+                self.context.add_message(HermesMessage(
+                    role=HermesMessageRole.FUNCTION_RESULT,
+                    name=func_call.name,
+                    content=json.dumps(result.result, ensure_ascii=False) if result.success else result.error,
+                ))
+
+            if self.context.should_stop():
+                logger.warning("Agent reached max function calls", agent=self.name)
+                break
+
+        # 最终响应
+        yield {"type": "thinking", "data": {"iteration": iteration + 1, "agent": self.name, "phase": "final"}}
+        final_response = await self._call_llm()
+        final_content = self._clean_tool_call_tags(final_response.content or "")
+        final_content = self._clean_skill_use_tags(final_content)
+
+        # 解析最终回复中的技能使用
+        skill_uses = self._parse_skill_uses(final_response.content or "")
+        for skill in skill_uses:
+            yield {"type": "skill_use", "data": skill}
+
+        yield {"type": "content", "data": {"content": final_content}}
+        yield {"type": "done", "data": {"iterations": iteration, "tool_calls_count": len(self.context.tool_results)}}
+
     def _build_system_prompt(self, output_schema: Optional[Type[T]] = None) -> str:
-        """构建系统提示词"""
+        """构建系统提示词 — 包含 Hermes 风格的工具调用指令"""
         prompt = self.system_prompt
 
-        # 添加工具说明
+        # 添加工具/技能调用说明（Hermes prompt-based function calling）
         if self._tools:
-            tool_descriptions = "\n".join([
-                f"- {name}: {tool.description}"
-                for name, tool in self._tools.items()
-            ])
-            prompt += f"\n\n可用工具:\n{tool_descriptions}"
+            tool_schemas = []
+            for name, tool in self._tools.items():
+                tool_def = tool.definition
+                params_schema = {}
+                for p_name, p_def in tool_def.parameters.items():
+                    params_schema[p_name] = {
+                        "type": p_def.type,
+                        "description": p_def.description,
+                    }
+                    if p_def.enum:
+                        params_schema[p_name]["enum"] = p_def.enum
+
+                tool_schemas.append({
+                    "name": name,
+                    "description": tool.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": params_schema,
+                        "required": [p for p, d in tool_def.parameters.items() if d.required],
+                    },
+                })
+
+            tools_json = json.dumps(tool_schemas, indent=2, ensure_ascii=False)
+            prompt += f"""
+
+## 可用工具/技能
+
+你可以调用以下工具来辅助分析。当你需要使用工具时，请在回复中使用以下格式：
+
+<tool_call>
+{{"name": "工具名称", "arguments": {{"参数名": "参数值"}}}}
+</tool_call>
+
+你可以在一次回复中调用多个工具。工具调用后系统会返回结果，你再基于结果继续回答。
+
+可用工具列表：
+{tools_json}
+
+重要：只在确实需要时才调用工具。如果你能直接回答用户问题，就直接回答。"""
+
+        # 添加技能使用标记说明
+        prompt += """
+
+## 技能使用声明
+
+当你在回复中运用了某项专业技能时，请用以下标记声明：
+
+<skill_use>
+{"name": "技能名称", "description": "技能说明", "reasoning": "为什么使用该技能"}
+</skill_use>
+
+可声明的技能包括：创意激发、技术分析、风险评估、保护方向探索、IPC分类、专利性判断、现有技术对比、商业价值分析、权利要求设计、Agent调度。
+你可以在回复中声明多个技能的使用。"""
 
         # 添加结构化输出要求
         if output_schema:
@@ -346,7 +505,7 @@ class HermesAgent(ABC):
         return prompt
 
     async def _call_llm(self) -> LLMResponse:
-        """调用 LLM API - 使用新的统一客户端"""
+        """调用 LLM API - 不传 tools 参数，使用 prompt-based tool calling"""
         try:
             llm_service = get_llm_service()
 
@@ -360,33 +519,87 @@ class HermesAgent(ABC):
                 elif msg.role == HermesMessageRole.ASSISTANT:
                     messages.append(CoreLLMMessage(role="assistant", content=msg.content or ""))
                 elif msg.role == HermesMessageRole.FUNCTION_RESULT or msg.role == HermesMessageRole.TOOL:
-                    messages.append(CoreLLMMessage(role="function", name=msg.name or "", content=msg.content or ""))
+                    messages.append(CoreLLMMessage(role="user", content=f"[工具 {msg.name} 的执行结果]:\n{msg.content or ''}"))
 
-            tools = self.get_tool_definitions() if self._tools else None
-
+            # 不传 tools 参数 — 工具调用通过 prompt 文本解析
             return await llm_service.chat_completion(
                 messages=messages,
                 model=self.model,
                 temperature=self.temperature,
-                tools=tools,
             )
         except Exception as e:
             logger.error(f"[HermesAgent._call_llm] LLM调用失败: {e}")
             raise
 
     def _parse_function_calls(self, response: LLMResponse) -> List[HermesFunctionCall]:
-        """解析 LLM 响应中的函数调用"""
-        if not response.has_function_call:
-            return []
-
+        """解析 LLM 响应中的函数调用 — 支持 API tool_calls 和 prompt-based <tool_call> 标记"""
         calls = []
-        for func_call in response.function_calls:
-            calls.append(HermesFunctionCall(
-                name=func_call.name,
-                parameters=func_call.arguments,
-                id=str(uuid4()),
-            ))
+
+        # 方式1：API 原生 tool_calls（proxy 支持时）
+        if response.has_function_call:
+            for func_call in response.function_calls:
+                calls.append(HermesFunctionCall(
+                    name=func_call.name,
+                    parameters=func_call.arguments,
+                    id=str(uuid4()),
+                ))
+            return calls
+
+        # 方式2：从文本中解析 <tool_call> 标记（Hermes prompt-based）
+        content = response.content or ""
+        tool_call_pattern = re.compile(
+            r'<tool_call>\s*(\{.*?\})\s*</tool_call>',
+            re.DOTALL,
+        )
+
+        for match in tool_call_pattern.finditer(content):
+            try:
+                call_data = json.loads(match.group(1))
+                name = call_data.get("name", "")
+                arguments = call_data.get("arguments", {})
+                if name and name in self._tools:
+                    calls.append(HermesFunctionCall(
+                        name=name,
+                        parameters=arguments if isinstance(arguments, dict) else {},
+                        id=str(uuid4()),
+                    ))
+                    logger.info(f"Parsed prompt-based tool call: {name}")
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Failed to parse tool_call: {e}, raw: {match.group(1)[:100]}")
+
         return calls
+
+    @staticmethod
+    def _clean_tool_call_tags(content: str) -> str:
+        """清理响应文本中的 <tool_call> 标记"""
+        cleaned = re.sub(r'<tool_call>\s*\{.*?\}\s*</tool_call>', '', content, flags=re.DOTALL)
+        # 清理多余空行
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+        return cleaned.strip()
+
+    @staticmethod
+    def _parse_skill_uses(content: str) -> List[Dict[str, Any]]:
+        """解析响应文本中的 <skill_use> 标记"""
+        skill_uses = []
+        pattern = re.compile(r'<skill_use>\s*(\{.*?\})\s*</skill_use>', re.DOTALL)
+        for match in pattern.finditer(content):
+            try:
+                data = json.loads(match.group(1))
+                skill_uses.append({
+                    "name": data.get("name", ""),
+                    "description": data.get("description", ""),
+                    "reasoning": data.get("reasoning", ""),
+                })
+            except (json.JSONDecodeError, KeyError):
+                pass
+        return skill_uses
+
+    @staticmethod
+    def _clean_skill_use_tags(content: str) -> str:
+        """清理响应文本中的 <skill_use> 标记"""
+        cleaned = re.sub(r'<skill_use>\s*\{.*?\}\s*</skill_use>', '', content, flags=re.DOTALL)
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+        return cleaned.strip()
 
     async def _execute_tool_call(self, func_call: HermesFunctionCall) -> HermesFunctionResult:
         """执行工具调用"""
@@ -404,6 +617,7 @@ class HermesAgent(ABC):
             return HermesFunctionResult(
                 name=func_call.name,
                 call_id=func_call.id,
+                parameters=func_call.parameters,
                 result=None,
                 success=False,
                 error=error_msg,
@@ -419,6 +633,7 @@ class HermesAgent(ABC):
             return HermesFunctionResult(
                 name=func_call.name,
                 call_id=func_call.id,
+                parameters=func_call.parameters,
                 result=result,
                 success=True,
             )
@@ -433,6 +648,7 @@ class HermesAgent(ABC):
             return HermesFunctionResult(
                 name=func_call.name,
                 call_id=func_call.id,
+                parameters=func_call.parameters,
                 result=None,
                 success=False,
                 error=str(e),

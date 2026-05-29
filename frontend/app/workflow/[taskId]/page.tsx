@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import {
   Brain,
   Search,
@@ -12,6 +12,10 @@ import {
   Clock,
   AlertCircle,
   RefreshCw,
+  Pause,
+  Play,
+  MessageSquare,
+  Download,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -20,6 +24,13 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { CodeBlock } from '@/components/ui/CodeBlock';
 import { workflowApi, type WorkflowResponse } from '@/lib/api';
 import type { WorkflowState, WorkflowEvent, AgentInfo } from '@/types';
+import {
+  RequirementAnalysisView,
+  RetrievalReportView,
+  PatentDraftView,
+  QualityReviewView,
+  MultiRoundView,
+} from '@/components/workflow/AgentOutputRenderers';
 
 const workflowSteps: { state: WorkflowState; label: string; icon: typeof Brain }[] = [
   { state: 'initial', label: '已提交', icon: User },
@@ -191,12 +202,14 @@ function EmptyOutput({ icon: Icon, message }: { icon: typeof Brain; message: str
 
 export default function WorkflowPage() {
   const params = useParams();
+  const router = useRouter();
   const taskId = params.taskId as string;
   const [workflow, setWorkflow] = useState<WorkflowResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pollIntervalMs, setPollIntervalMs] = useState(3000);
+  const [isPaused, setIsPaused] = useState(false);
 
   const currentState = getWorkflowState(workflow);
   const currentStepIndex = useMemo(() => {
@@ -273,16 +286,65 @@ export default function WorkflowPage() {
     }
   };
 
-  const renderJsonOutput = (output: Record<string, unknown> | undefined, icon: typeof Brain, emptyMessage: string) => {
+  const renderAgentOutput = (
+    type: 'requirement' | 'retrieval' | 'draft' | 'review',
+    output: Record<string, unknown> | undefined,
+    icon: typeof Brain,
+    emptyMessage: string
+  ) => {
     if (!hasOutput(output)) {
       return <EmptyOutput icon={icon} message={emptyMessage} />;
     }
 
-    return (
-      <CodeBlock language="json">
-        {JSON.stringify(output, null, 2)}
-      </CodeBlock>
-    );
+    // Check for multi-round outputs in phase_history
+    const getPhaseOutputs = (phaseName: string): Record<string, unknown>[] => {
+      if (!workflow) return [];
+      const outputs = workflow.phase_history
+        .filter((p) => p.phase === phaseName && p.success)
+        .map((p) => p.output as Record<string, unknown>)
+        .filter((o) => o && Object.keys(o).length > 0);
+      // If no outputs from history, use the current output
+      return outputs.length > 0 ? outputs : (output ? [output] : []);
+    };
+
+    switch (type) {
+      case 'requirement':
+        return <RequirementAnalysisView data={output!} />;
+      case 'retrieval':
+        return <RetrievalReportView data={output!} />;
+      case 'draft': {
+        const draftRounds = getPhaseOutputs('writing');
+        if (draftRounds.length > 1) {
+          return (
+            <MultiRoundView
+              rounds={draftRounds}
+              label="撰写"
+              renderRound={(data) => <PatentDraftView data={data} taskId={taskId} />}
+            />
+          );
+        }
+        return <PatentDraftView data={output!} taskId={taskId} />;
+      }
+      case 'review': {
+        const reviewRounds = getPhaseOutputs('review');
+        if (reviewRounds.length > 1) {
+          return (
+            <MultiRoundView
+              rounds={reviewRounds}
+              label="审查"
+              renderRound={(data, idx) => <QualityReviewView data={data} roundIndex={idx} />}
+            />
+          );
+        }
+        return <QualityReviewView data={output!} />;
+      }
+      default:
+        return (
+          <CodeBlock language="json">
+            {JSON.stringify(output, null, 2)}
+          </CodeBlock>
+        );
+    }
   };
 
   return (
@@ -315,6 +377,54 @@ export default function WorkflowPage() {
               <RefreshCw className={`w-4 h-4 mr-1 ${isRefreshing ? 'animate-spin' : ''}`} />
               刷新
             </Button>
+            {!isTerminal && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    if (isPaused) {
+                      await workflowApi.resume(taskId);
+                      setIsPaused(false);
+                    } else {
+                      await workflowApi.pause(taskId);
+                      setIsPaused(true);
+                    }
+                  } catch {}
+                }}
+              >
+                {isPaused ? <Play className="w-4 h-4 mr-1" /> : <Pause className="w-4 h-4 mr-1" />}
+                {isPaused ? '恢复' : '暂停'}
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                // 跳转到关联的对话页面（通过 workflow 的 conversation_id）
+                const convId = workflow?.conversation_id;
+                if (convId) {
+                  router.push(`/chat?conv_id=${encodeURIComponent(convId)}`);
+                } else {
+                  router.push('/chat');
+                }
+              }}
+            >
+              <MessageSquare className="w-4 h-4 mr-1" />
+              前往对话补充
+            </Button>
+            {isTerminal && workflow?.current_state === 'completed' && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => {
+                  window.open(workflowApi.exportDocx(taskId), '_blank');
+                }}
+              >
+                <Download className="w-4 h-4 mr-1" />
+                下载专利文件
+              </Button>
+            )}
           </div>
         </div>
 
@@ -476,7 +586,8 @@ export default function WorkflowPage() {
                     </TabsList>
 
                     <TabsContent value="requirement">
-                      {renderJsonOutput(
+                      {renderAgentOutput(
+                        'requirement',
                         workflow?.outputs.requirement_analysis,
                         Brain,
                         '需求分析尚未完成，请稍候...'
@@ -484,7 +595,8 @@ export default function WorkflowPage() {
                     </TabsContent>
 
                     <TabsContent value="retrieval">
-                      {renderJsonOutput(
+                      {renderAgentOutput(
+                        'retrieval',
                         workflow?.outputs.retrieval_report,
                         Search,
                         '检索分析进行中，请稍候...'
@@ -492,7 +604,8 @@ export default function WorkflowPage() {
                     </TabsContent>
 
                     <TabsContent value="draft">
-                      {renderJsonOutput(
+                      {renderAgentOutput(
+                        'draft',
                         workflow?.outputs.patent_draft,
                         FileEdit,
                         '等待检索完成后开始撰写...'
@@ -500,7 +613,8 @@ export default function WorkflowPage() {
                     </TabsContent>
 
                     <TabsContent value="review">
-                      {renderJsonOutput(
+                      {renderAgentOutput(
+                        'review',
                         workflow?.outputs.review_report,
                         CheckSquare,
                         '等待文件撰写完成后开始审查...'

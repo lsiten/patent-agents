@@ -165,6 +165,21 @@ export interface AgentInfo {
 // ============ 对话相关类型 ============
 export type MessageRole = 'user' | 'assistant' | 'system' | 'agent';
 
+export interface ToolCallInfo {
+  name: string;
+  parameters: Record<string, unknown>;
+  result: unknown;
+  success: boolean;
+  error?: string;
+  duration_ms?: number;
+}
+
+export interface SkillUseInfo {
+  name: string;
+  description: string;
+  reasoning: string;
+}
+
 export interface ChatMessage {
   id: string;
   task_id?: string;
@@ -174,6 +189,9 @@ export interface ChatMessage {
   timestamp: string;
   type?: 'text' | 'json' | 'file' | 'progress';
   metadata?: Record<string, unknown>;
+  tool_calls?: ToolCallInfo[];
+  skill_uses?: SkillUseInfo[];
+  isStreaming?: boolean;
 }
 
 export interface ChatSession {

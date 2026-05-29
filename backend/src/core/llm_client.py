@@ -41,6 +41,11 @@ class LLMMessage:
             msg["function_call"] = self.function_call
         return msg
 
+    def to_anthropic_format(self) -> Dict[str, Any]:
+        """转换为 Anthropic 格式（注意：system 消息需要单独处理，不放入 messages 数组）"""
+        msg = {"role": self.role, "content": self.content}
+        return msg
+
 
 @dataclass
 class LLMFunctionCall:
@@ -295,6 +300,284 @@ class OpenAIClient(BaseLLMClient):
         return self._token_usage
 
 
+class AnthropicClient(BaseLLMClient):
+    """Anthropic Claude 客户端 — 原生 Messages API"""
+
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+        self.api_key = api_key or settings.llm.anthropic_api_key
+        self.base_url = base_url or settings.llm.anthropic_base_url
+        self.default_model = settings.llm.claude_model
+        self.default_temperature = settings.llm.llm_temperature
+        self.default_max_tokens = settings.llm.llm_max_tokens
+        self.timeout = settings.llm.llm_timeout
+        self.max_retries = settings.llm.max_retries
+        self.retry_delay = settings.llm.retry_delay
+
+        self._client = None
+        self._client_init_lock = asyncio.Lock()
+        self._token_usage = LLMTokenUsage()
+
+        if not self.api_key:
+            logger.warning("Anthropic API key not configured")
+
+    async def _init_client(self):
+        """初始化客户端（延迟初始化）"""
+        if self._client is not None or not self.api_key:
+            return
+
+        async with self._client_init_lock:
+            if self._client is not None:
+                return
+            try:
+                from anthropic import AsyncAnthropic
+                kwargs = {
+                    "api_key": self.api_key,
+                    "timeout": float(self.timeout),
+                    "max_retries": 0,  # 我们自己处理重试
+                }
+                if self.base_url and self.base_url != "https://api.anthropic.com/v1":
+                    kwargs["base_url"] = self.base_url
+                self._client = AsyncAnthropic(**kwargs)
+                logger.info("Anthropic client initialized")
+            except ImportError:
+                logger.warning("Anthropic package not installed")
+
+    def count_tokens(self, text: str) -> int:
+        """估算 Token 数量（简化版）"""
+        import re
+        chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
+        other_chars = len(text) - chinese_chars
+        return int(chinese_chars * 1.3 + other_chars * 0.25)
+
+    @staticmethod
+    def _convert_tools_to_anthropic(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        将 OpenAI 格式的 tools 转换为 Anthropic 格式
+        OpenAI:  {"type": "function", "function": {"name": ..., "description": ..., "parameters": ...}}
+        Anthropic: {"name": ..., "description": ..., "input_schema": ...}
+        """
+        anthropic_tools = []
+        for tool in tools:
+            if tool.get("type") == "function":
+                func = tool["function"]
+                anthropic_tools.append({
+                    "name": func["name"],
+                    "description": func.get("description", ""),
+                    "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
+                })
+            else:
+                # 如果已经是 Anthropic 格式或其他格式，直接传递
+                anthropic_tools.append(tool)
+        return anthropic_tools
+
+    @staticmethod
+    def _extract_system_and_messages(
+        messages: List[LLMMessage],
+    ) -> Tuple[Optional[str], List[Dict[str, Any]]]:
+        """
+        从消息列表中提取 system 消息和用户/助手消息
+        Claude API 要求 system 作为单独参数，messages 中只能有 user/assistant
+        """
+        system_parts = []
+        api_messages = []
+
+        for msg in messages:
+            if msg.role == "system":
+                system_parts.append(msg.content)
+            elif msg.role in ("user", "assistant"):
+                api_messages.append({"role": msg.role, "content": msg.content})
+            elif msg.role == "function":
+                # function/tool result → 转换为 user 消息中的 tool_result block
+                api_messages.append({
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": msg.name or "unknown",
+                            "content": msg.content,
+                        }
+                    ],
+                })
+
+        # 合并所有 system 消息
+        system_text = "\n\n".join(system_parts) if system_parts else None
+
+        # Claude 要求 messages 不能为空且必须以 user 开头
+        if api_messages and api_messages[0]["role"] == "assistant":
+            # 如果第一条是 assistant，在前面加一个空 user 消息
+            api_messages.insert(0, {"role": "user", "content": "请继续。"})
+
+        # Claude 不允许连续相同角色的消息，需要合并
+        merged = []
+        for msg in api_messages:
+            if merged and merged[-1]["role"] == msg["role"]:
+                # 合并连续同角色消息
+                prev_content = merged[-1]["content"]
+                curr_content = msg["content"]
+                if isinstance(prev_content, str) and isinstance(curr_content, str):
+                    merged[-1]["content"] = prev_content + "\n\n" + curr_content
+                elif isinstance(prev_content, list) and isinstance(curr_content, list):
+                    merged[-1]["content"] = prev_content + curr_content
+                elif isinstance(prev_content, str) and isinstance(curr_content, list):
+                    merged[-1]["content"] = [{"type": "text", "text": prev_content}] + curr_content
+                elif isinstance(prev_content, list) and isinstance(curr_content, str):
+                    merged[-1]["content"] = prev_content + [{"type": "text", "text": curr_content}]
+            else:
+                merged.append(msg)
+
+        return system_text, merged
+
+    async def chat_completion(
+        self,
+        messages: List[LLMMessage],
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        **kwargs,
+    ) -> LLMResponse:
+        """执行聊天补全（Anthropic Messages API），带自动重试"""
+        start_time = time.perf_counter()
+
+        await self._init_client()
+
+        if self._client is None:
+            raise LLMAuthError("Anthropic API key or package is not configured")
+
+        model = model or self.default_model
+        temperature = temperature if temperature is not None else self.default_temperature
+        max_tokens = max_tokens or self.default_max_tokens
+
+        # 提取 system 消息和格式化 messages
+        system_text, api_messages = self._extract_system_and_messages(messages)
+
+        if not api_messages:
+            api_messages = [{"role": "user", "content": "你好"}]
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                request_kwargs: Dict[str, Any] = {
+                    "model": model,
+                    "messages": api_messages,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                }
+
+                if system_text:
+                    request_kwargs["system"] = system_text
+
+                if tools:
+                    request_kwargs["tools"] = self._convert_tools_to_anthropic(tools)
+                    if tool_choice:
+                        # 转换 tool_choice 格式
+                        if isinstance(tool_choice, str):
+                            if tool_choice == "auto":
+                                request_kwargs["tool_choice"] = {"type": "auto"}
+                            elif tool_choice == "none":
+                                # Anthropic 没有 none，不传 tool_choice
+                                pass
+                            elif tool_choice == "required":
+                                request_kwargs["tool_choice"] = {"type": "any"}
+                            else:
+                                request_kwargs["tool_choice"] = {"type": "tool", "name": tool_choice}
+                        elif isinstance(tool_choice, dict):
+                            # 尝试直接传递
+                            if "function" in tool_choice:
+                                request_kwargs["tool_choice"] = {
+                                    "type": "tool",
+                                    "name": tool_choice["function"]["name"],
+                                }
+                            else:
+                                request_kwargs["tool_choice"] = tool_choice
+
+                response = await self._client.messages.create(**request_kwargs)
+
+                latency = (time.perf_counter() - start_time) * 1000
+
+                # 解析响应内容
+                content_text = ""
+                function_calls = []
+
+                for block in response.content:
+                    if block.type == "text":
+                        content_text += block.text
+                    elif block.type == "tool_use":
+                        function_calls.append(LLMFunctionCall(
+                            name=block.name,
+                            arguments=block.input if isinstance(block.input, dict) else {},
+                            raw_arguments=json.dumps(block.input, ensure_ascii=False) if block.input else "{}",
+                        ))
+
+                result = LLMResponse(
+                    content=content_text if content_text else None,
+                    function_calls=function_calls,
+                    model=response.model,
+                    provider=LLMProvider.ANTHROPIC,
+                    latency_ms=latency,
+                    raw_response=response,
+                )
+
+                # Token 使用
+                if hasattr(response, "usage") and response.usage:
+                    result.prompt_tokens = response.usage.input_tokens
+                    result.completion_tokens = response.usage.output_tokens
+                    result.total_tokens = response.usage.input_tokens + response.usage.output_tokens
+                    self._token_usage.add(LLMTokenUsage(
+                        prompt_tokens=response.usage.input_tokens,
+                        completion_tokens=response.usage.output_tokens,
+                        total_tokens=response.usage.input_tokens + response.usage.output_tokens,
+                    ))
+
+                logger.debug(
+                    "Anthropic chat completion",
+                    model=model,
+                    latency_ms=round(latency),
+                    tokens=result.total_tokens,
+                    has_function_call=result.has_function_call,
+                )
+
+                return result
+
+            except Exception as e:
+                error_str = str(e).lower()
+
+                if "rate limit" in error_str or "429" in str(e):
+                    if attempt < self.max_retries:
+                        delay = self.retry_delay * (2 ** attempt)
+                        logger.warning(
+                            "Anthropic rate limit hit, retrying",
+                            attempt=attempt + 1,
+                            delay_seconds=delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    raise LLMRateLimitError(f"Anthropic rate limit exceeded after {self.max_retries} retries: {e}")
+
+                if "authentication" in error_str or "401" in str(e) or "api_key" in error_str:
+                    raise LLMAuthError(f"Anthropic authentication failed: {e}")
+
+                if attempt < self.max_retries:
+                    delay = self.retry_delay * (2 ** attempt)
+                    logger.warning(
+                        "Anthropic API error, retrying",
+                        attempt=attempt + 1,
+                        error=str(e),
+                        delay_seconds=delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+                raise LLMError(f"Anthropic API error: {e}")
+
+        raise LLMError("Max retries exceeded")
+
+    @property
+    def total_token_usage(self) -> LLMTokenUsage:
+        """获取累计 Token 使用量"""
+        return self._token_usage
+
+
 class LLMClientFactory:
     """LLM 客户端工厂"""
 
@@ -308,8 +591,7 @@ class LLMClientFactory:
             if provider == LLMProvider.OPENAI:
                 cls._instances[provider] = OpenAIClient()
             elif provider == LLMProvider.ANTHROPIC:
-                # TODO: 实现 Anthropic 客户端
-                cls._instances[provider] = OpenAIClient()  # 临时使用 OpenAI 替代
+                cls._instances[provider] = AnthropicClient()
             else:
                 raise ValueError(f"Unsupported LLM provider: {provider}")
 
@@ -416,19 +698,18 @@ class LLMService:
         output_schema: Dict[str, Any],
         temperature: float = 0.2,
         max_retries: int = 3,
+        max_tokens: int = 8192,
     ) -> Dict[str, Any]:
         """
         结构化输出，确保返回符合 JSON Schema
         """
         # 添加 Schema 要求到系统消息
         schema_prompt = f"""
-请严格按照以下 JSON Schema 格式输出结果，不要添加任何其他解释：
+请严格按照以下 JSON Schema 格式输出结果，不要添加任何其他解释文字，直接输出 JSON：
 
-```json
 {json.dumps(output_schema, indent=2, ensure_ascii=False)}
-```
 
-输出必须是一个有效的 JSON 对象。
+重要：输出必须是一个有效的 JSON 对象，不要用 markdown 代码块包裹，直接输出 JSON。
 """
 
         # 查找或创建系统消息
@@ -451,6 +732,7 @@ class LLMService:
                 response = await self.chat_completion(
                     messages=request_messages,
                     temperature=temperature,
+                    max_tokens=max_tokens,
                 )
 
                 if not response.content:
@@ -459,16 +741,35 @@ class LLMService:
                 # 尝试解析 JSON
                 content = response.content.strip()
 
-                # 从 Markdown 代码块中提取
+                # 尝试多种提取方式
                 import re
+
+                # 方式1：从 Markdown 代码块中提取
                 json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', content)
                 if json_match:
-                    content = json_match.group(1)
+                    try:
+                        return json.loads(json_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
 
-                result = json.loads(content)
-                return result
+                # 方式2：直接尝试解析整个内容
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    pass
 
-            except json.JSONDecodeError as e:
+                # 方式3：查找第一个 { 和最后一个 } 之间的内容
+                brace_start = content.find('{')
+                brace_end = content.rfind('}')
+                if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
+                    try:
+                        return json.loads(content[brace_start:brace_end + 1])
+                    except json.JSONDecodeError:
+                        pass
+
+                raise json.JSONDecodeError("No valid JSON found in response", content, 0)
+
+            except (json.JSONDecodeError, ValueError) as e:
                 if attempt < max_retries - 1:
                     self._logger.warning(
                         "Failed to parse JSON, retrying",
@@ -480,7 +781,7 @@ class LLMService:
                         *request_messages,
                         LLMMessage(
                             role="user",
-                            content=f"之前的输出不是有效的 JSON，错误: {e}。请重新输出纯 JSON 格式。",
+                            content=f"之前的输出不是有效的 JSON。错误: {e}。请直接输出 JSON 对象，不要有任何其他文字、代码块标记或解释。",
                         ),
                     ]
                     await asyncio.sleep(0.5)

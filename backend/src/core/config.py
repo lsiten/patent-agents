@@ -210,9 +210,14 @@ class StorageSettings(BaseSettings):
         default="./finalized_patents",
         alias="KNOWLEDGE_BASE_PATH"
     )
+    finalized_patents_docx_path: str = Field(
+        default="./定稿文件",
+        alias="FINALIZED_PATENTS_DOCX_PATH",
+        description="定稿专利 docx 文件目录，每个子目录为一个专利（含 A/B 文件）"
+    )
     export_path: str = Field(default="./exports", alias="EXPORT_PATH")
     export_formats: List[str] = Field(
-        default_factory=lambda: ["json", "md"],
+        default_factory=lambda: ["json", "md", "docx"],
         alias="EXPORT_FORMATS"
     )
 

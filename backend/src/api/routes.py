@@ -119,34 +119,54 @@ async def _persist_org_tree() -> None:
 async def restore_stores_from_db() -> None:
     """启动时从数据库恢复内存存储"""
     store = _get_persist_store()
+    restored_tasks = 0
+    restored_events = 0
+    restored_conversations = 0
+
+    # 恢复任务
     try:
         for key, value in await store.load_all("tasks"):
             try:
                 tasks_store[key] = PatentTask.model_validate(value)
+                restored_tasks += 1
             except Exception as e:
                 logger.warning(f"恢复任务 {key} 失败: {e}")
+    except Exception as e:
+        logger.warning(f"恢复任务列表失败: {e}")
 
+    # 恢复事件
+    try:
         for key, value in await store.load_all("task_events"):
             try:
                 task_events[key] = [WorkflowEventResponse.model_validate(e) for e in value]
+                restored_events += 1
             except Exception as e:
                 logger.warning(f"恢复事件 {key} 失败: {e}")
+    except Exception as e:
+        logger.warning(f"恢复事件列表失败: {e}")
 
+    # 恢复对话
+    try:
         for key, value in await store.load_all("conversations"):
             conversations_store[key] = value
+            restored_conversations += 1
+    except Exception as e:
+        logger.warning(f"恢复对话列表失败: {e}")
 
+    # 恢复组织架构
+    try:
         org_val = await store.load("org_tree", "root")
         if org_val is not None:
             global organization_tree_store
             organization_tree_store = OrgNodeResponse.model_validate(org_val)
-
-        logger.info(
-            f"从数据库恢复: {len(tasks_store)} 个任务, "
-            f"{len(task_events)} 组事件, "
-            f"{len(conversations_store)} 个对话"
-        )
     except Exception as e:
-        logger.warning(f"数据库恢复失败（首次启动?）: {e}")
+        logger.warning(f"恢复组织架构失败: {e}")
+
+    logger.info(
+        f"从数据库恢复: {restored_tasks} 个任务, "
+        f"{restored_events} 组事件, "
+        f"{restored_conversations} 个对话"
+    )
 
 
 def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
@@ -1131,7 +1151,7 @@ async def update_organization_tree(tree: OrgNodeResponse) -> OrganizationUpdateR
 
 def _get_brainstorm_agent():
     from src.agents import get_agent_factory as _f
-    return _f().create_agent("patent.brainstorm_partner.v1")
+    return _f().create_agent("patent.ceo.v1")
 
 
 @router.post("/conversations", response_model=ConversationDetail, status_code=status.HTTP_201_CREATED)
@@ -1229,20 +1249,55 @@ async def chat_in_conversation(conv_id: str, request: ConversationChatRequest):
             f"{m['role'].upper()}: {m['content']}"
             for m in conv["messages"][-10:]
         ])
-        prompt = f"""
-你是一个专利头脑风暴助手。你的目标是帮助用户探索和阐述技术构思。
 
-当前对话历史：
+        prompt = f"""你是一位融合了创意探讨与专业调度能力的专利智能助手。你的角色是"专利创意总监"。
+
+## 你的核心能力
+1. **头脑风暴伙伴**：友好、开放地与用户探讨技术构思，通过提问引导用户思考更多细节
+2. **专利专业知识**：精通专利法、专利申请流程、权利要求书撰写规范、IPC 分类等
+3. **搜索与检索**：能够搜索现有技术、专利数据库、学术论文，评估专利性
+4. **总结与归纳**：对用户描述的技术方案进行结构化总结，提炼创新点
+5. **风险评估**：评估专利申请的新颖性、创造性、实用性风险
+6. **Agent 调度**：必要时调度需求分析、检索分析、撰写、审查等专业 Agent 协助工作
+
+## 你的行为准则
+- 沟通风格：友好、专业但不晦涩，像一位经验丰富的专利顾问同事
+- 主动性：主动使用工具进行风险分析和任务规划，给用户提供有依据的专业建议
+- 深度：对用户的技术方案要追问关键细节（技术原理、创新点、应用场景、与现有技术的区别）
+- 全面性：从新颖性、创造性、实用性三个维度评估专利价值
+- 工具使用：当用户描述了技术方案时，**主动调用 risk_analyzer 进行风险评估**；当对话进行到一定深度时，**调用 task_planner 制定工作计划**
+- 多提问、引导，避免在信息不充分时急于下结论
+- 当收集到足够信息时，可以建议创建正式专利申请
+
+## 当前对话历史
 {history_text}
 
+## 用户最新消息
 USER: {content}
 
-请友好回应用户，提供专业建议。必要时提问以获取更多信息。当你通过对话收集到足够的信息（技术问题、解决方案、关键特征、应用场景），可以在回复末尾添加标记 [CREATE_PATENT_RECOMMENDATION] 来建议创建专利申请。
+## 回复要求
+1. 先使用相关工具进行分析（如用户描述了技术方案，请调用 risk_analyzer）
+2. 基于工具分析结果，以自然对话形式回复用户
+3. 包含对用户想法的理解和专业评价
+4. 包含建设性的提问或建议（1-3个）
+5. 当你通过对话收集到足够的信息，可以在回复末尾添加标记 [CREATE_PATENT_RECOMMENDATION] 来建议创建专利申请
 
-注意：不要在一开始就建议申请专利，要先充分理解用户的技术构思。
+使用友好的 Markdown 格式回复。
 """
         response = await agent.run(prompt)
         response_text = str(response)
+
+        # 收集 Hermes agent 的工具调用历史
+        tool_calls_data = []
+        if hasattr(agent, '_context') and agent._context and agent._context.tool_results:
+            for tr in agent._context.tool_results:
+                tool_calls_data.append({
+                    "name": tr.name,
+                    "parameters": tr.parameters,
+                    "result": tr.result if tr.success else None,
+                    "success": tr.success,
+                    "error": tr.error,
+                })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 响应失败: {str(e)}")
 
@@ -1257,6 +1312,7 @@ USER: {content}
         "timestamp": datetime.now().isoformat(),
         "type": "text",
         "metadata": {"recommend_create_patent": has_recommendation} if has_recommendation else None,
+        "tool_calls": tool_calls_data if tool_calls_data else None,
     }
 
     async with conversations_lock:
@@ -1279,9 +1335,153 @@ USER: {content}
     )
 
 
+@router.post("/conversations/{conv_id}/chat/stream")
+async def chat_in_conversation_stream(conv_id: str, request: ConversationChatRequest):
+    """在对话中发送消息 — SSE 流式输出（展示工具调用和技能使用过程）"""
+    content = request.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="消息内容不能为空")
+
+    async with conversations_lock:
+        conv = conversations_store.get(conv_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    if conv.get("linked_workflow_id"):
+        raise HTTPException(status_code=400, detail="该对话已关联工作流，请使用工作流聊天接口")
+
+    # 添加用户消息
+    now = datetime.now().isoformat()
+    user_msg = {
+        "id": str(uuid.uuid4()),
+        "role": "user",
+        "content": content,
+        "timestamp": now,
+        "type": "text",
+        "metadata": None,
+    }
+
+    async with conversations_lock:
+        conv = conversations_store.get(conv_id)
+        if conv:
+            conv["messages"].append(user_msg)
+            conv["updated_at"] = now
+
+    async def event_generator():
+        import json as _json
+
+        agent = _get_brainstorm_agent()
+        history_text = "\n".join([
+            f"{m['role'].upper()}: {m['content']}"
+            for m in conv["messages"][-10:]
+        ])
+
+        prompt = f"""你是一位融合了创意探讨与专业调度能力的专利智能助手。你的角色是"专利创意总监"。
+
+## 你的核心能力
+1. **头脑风暴伙伴**：友好、开放地与用户探讨技术构思，通过提问引导用户思考更多细节
+2. **专利专业知识**：精通专利法、专利申请流程、权利要求书撰写规范、IPC 分类等
+3. **搜索与检索**：能够搜索现有技术、专利数据库、学术论文，评估专利性
+4. **总结与归纳**：对用户描述的技术方案进行结构化总结，提炼创新点
+5. **风险评估**：评估专利申请的新颖性、创造性、实用性风险
+6. **Agent 调度**：必要时调度需求分析、检索分析、撰写、审查等专业 Agent 协助工作
+
+## 你的行为准则
+- 沟通风格：友好、专业但不晦涩，像一位经验丰富的专利顾问同事
+- 主动性：主动使用工具进行风险分析和任务规划，给用户提供有依据的专业建议
+- 深度：对用户的技术方案要追问关键细节（技术原理、创新点、应用场景、与现有技术的区别）
+- 全面性：从新颖性、创造性、实用性三个维度评估专利价值
+- 工具使用：当用户描述了技术方案时，**主动调用 risk_analyzer 进行风险评估**；当对话进行到一定深度时，**调用 task_planner 制定工作计划**
+- 多提问、引导，避免在信息不充分时急于下结论
+- 当收集到足够信息时，可以建议创建正式专利申请
+
+## 当前对话历史
+{history_text}
+
+## 用户最新消息
+USER: {content}
+
+## 回复要求
+1. 先声明你正在使用的技能，再使用相关工具进行分析
+2. 基于工具分析结果，以自然对话形式回复用户
+3. 包含对用户想法的理解和专业评价
+4. 包含建设性的提问或建议（1-3个）
+5. 当你通过对话收集到足够的信息，可以在回复末尾添加标记 [CREATE_PATENT_RECOMMENDATION] 来建议创建专利申请
+
+使用友好的 Markdown 格式回复。
+"""
+        tool_calls_data = []
+        skill_uses_data = []
+        final_content = ""
+
+        try:
+            async for event in agent.run_stream(prompt):
+                event_type = event["type"]
+                event_data = event["data"]
+
+                if event_type == "thinking":
+                    yield f"event: thinking\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+                elif event_type == "skill_use":
+                    skill_uses_data.append(event_data)
+                    yield f"event: skill_use\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+                elif event_type == "tool_call_start":
+                    yield f"event: tool_call_start\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+                elif event_type == "tool_call_end":
+                    tool_calls_data.append(event_data)
+                    yield f"event: tool_call_end\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+                elif event_type == "content":
+                    final_content = event_data.get("content", "")
+                    # 检查推荐标记
+                    has_recommendation = "[CREATE_PATENT_RECOMMENDATION]" in final_content
+                    clean_content = final_content.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
+                    yield f"event: content\ndata: {_json.dumps({'content': clean_content, 'has_recommendation': has_recommendation}, ensure_ascii=False)}\n\n"
+
+                elif event_type == "done":
+                    # 构建 assistant 消息并持久化
+                    clean_content = final_content.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
+                    has_recommendation = "[CREATE_PATENT_RECOMMENDATION]" in final_content
+
+                    assistant_msg = {
+                        "id": str(uuid.uuid4()),
+                        "role": "assistant",
+                        "content": clean_content,
+                        "timestamp": datetime.now().isoformat(),
+                        "type": "text",
+                        "metadata": {"recommend_create_patent": has_recommendation} if has_recommendation else None,
+                        "tool_calls": tool_calls_data if tool_calls_data else None,
+                        "skill_uses": skill_uses_data if skill_uses_data else None,
+                    }
+
+                    async with conversations_lock:
+                        c = conversations_store.get(conv_id)
+                        if c:
+                            c["messages"].append(assistant_msg)
+                            c["updated_at"] = datetime.now().isoformat()
+                            user_msgs = [m for m in c["messages"] if m["role"] == "user"]
+                            if c["title"] == "新的对话" and len(user_msgs) == 1:
+                                title = content[:50]
+                                c["title"] = title + ("..." if len(content) > 50 else "")
+
+                    await _persist_conversation(conv_id)
+
+                    yield f"event: done\ndata: {_json.dumps({'message': assistant_msg, 'has_recommendation': has_recommendation, 'conversation_id': conv_id}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            yield f"event: error\ndata: {_json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/conversations/{conv_id}/create-workflow", response_model=dict)
-async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflowFromConversationRequest):
-    """从对话内容创建专利申请工作流"""
+async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflowFromConversationRequest, background_tasks: BackgroundTasks):
+    """从对话内容创建专利申请工作流（自动启动）"""
     async with conversations_lock:
         conv = conversations_store.get(conv_id)
     if not conv:
@@ -1322,7 +1522,64 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
 
     await _persist_events(task_id)
     await _persist_conversation(conv_id)
-    return {"task_id": task_id, "status": "created", "conversation_id": conv_id}
+
+    # 自动启动工作流（后台执行）
+    async def auto_start_workflow():
+        """自动启动工作流的后台任务"""
+        async def phase_callback(phase, result):
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent=phase.value,
+                    message=f"阶段 {phase.value} 已完成",
+                    event_type="workflow.phase.completed",
+                    data={
+                        "phase": phase.value,
+                        "success": result.success,
+                        "duration_seconds": result.duration_seconds,
+                        "issues": result.issues,
+                    },
+                )
+            await _persist_events(task_id)
+
+        try:
+            await workflow_engine.execute_full_workflow(context, phase_callback=phase_callback)
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent="workflow_engine",
+                    message="专利申请流程已完成",
+                    event_type="workflow.completed",
+                    data={"state": context.current_phase.value},
+                )
+            await _persist_events(task_id)
+        except Exception as e:
+            logger.error(f"工作流自动执行失败: {e}")
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent="workflow_engine",
+                    message=str(e),
+                    event_type="workflow.failed",
+                )
+            await _persist_events(task_id)
+            # 将失败信息写入对话，让 CEO 与用户沟通
+            async with conversations_lock:
+                c = conversations_store.get(conv_id)
+                if c:
+                    c["messages"].append({
+                        "id": str(uuid.uuid4()),
+                        "role": "assistant",
+                        "content": f"⚠️ 专利申请流程遇到问题：{str(e)}\n\n请补充更多技术细节后重试，或联系我协助解决。",
+                        "timestamp": datetime.now().isoformat(),
+                        "type": "text",
+                        "metadata": {"type": "workflow_error", "error": str(e)},
+                    })
+            await _persist_conversation(conv_id)
+
+    background_tasks.add_task(auto_start_workflow)
+
+    return {"task_id": task_id, "status": "started", "conversation_id": conv_id}
 
 
 @router.delete("/conversations/{conv_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1783,3 +2040,143 @@ async def export_patent_docx(task_id: str):
         filename=f"patent_{task_id}.docx",
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+
+
+@router.get("/workflows/{task_id}/export/docx")
+async def export_workflow_patent_docx(task_id: str):
+    """从工作流导出专利文档为DOCX格式"""
+    async with workflow_lock:
+        context = workflow_engine.get_workflow(task_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+
+    patent_draft = context.patent_draft
+    if not patent_draft:
+        raise HTTPException(status_code=400, detail="工作流尚未生成专利文档，请等待撰写阶段完成")
+
+    # 将工作流输出格式转换为 generate_patent_docx 需要的格式
+    draft_data = patent_draft if isinstance(patent_draft, dict) else patent_draft
+
+    # 工作流输出格式: {claims: {independent_claim, dependent_claims}, description: {...}, abstract}
+    # generate_patent_docx 需要的格式: PatentDraft model 或兼容 dict
+    # 做适配转换
+    claims_raw = draft_data.get("claims", {})
+    desc_raw = draft_data.get("description", {})
+
+    adapted_data = {
+        "title": context.requirement_analysis.get("patent_title", "专利申请文件"),
+        "technical_field": desc_raw.get("technical_field", ""),
+        "background_art": {"section_name": "背景技术", "content": desc_raw.get("background_art", ""), "word_count": len(desc_raw.get("background_art", ""))},
+        "summary_of_invention": {"section_name": "发明内容", "content": desc_raw.get("summary_of_invention", ""), "word_count": len(desc_raw.get("summary_of_invention", ""))},
+        "detailed_description": {"section_name": "具体实施方式", "content": desc_raw.get("detailed_description", ""), "word_count": len(desc_raw.get("detailed_description", ""))},
+        "claims": [],
+        "abstract": draft_data.get("abstract", ""),
+    }
+
+    # 转换权利要求
+    import re
+    def _strip_claim_prefix(text: str) -> str:
+        """去除LLM生成的权利要求编号前缀，如 '1. ', '2. 根据权利要求1所述的方法，'"""
+        # 去掉开头的数字编号 (如 "1. ", "2. ", "10. ")
+        text = re.sub(r'^\d+\.\s*', '', text.strip())
+        return text
+
+    if isinstance(claims_raw, dict):
+        ind_claim = claims_raw.get("independent_claim", "")
+        if ind_claim:
+            adapted_data["claims"].append({"claim_number": 1, "claim_type": "independent", "content": _strip_claim_prefix(ind_claim), "dependencies": []})
+        for i, dep in enumerate(claims_raw.get("dependent_claims", []), 2):
+            # 从属权利要求：提取实际依赖的权利要求号
+            dep_text = _strip_claim_prefix(dep)
+            dep_nums = re.findall(r'根据权利要求(\d+)', dep_text)
+            dependencies = [int(n) for n in dep_nums] if dep_nums else [1]
+            adapted_data["claims"].append({"claim_number": i, "claim_type": "dependent", "content": dep_text, "dependencies": dependencies})
+
+    from src.document_gen.generator import generate_patent_docx
+    # 清除旧的导出文件以确保重新生成
+    from pathlib import Path as _Path
+    _export_dir = _Path("./exports") / task_id
+    if _export_dir.exists():
+        import shutil
+        shutil.rmtree(_export_dir)
+    try:
+        filepath = await asyncio.to_thread(generate_patent_docx, adapted_data, task_id)
+    except Exception as e:
+        # 如果 PatentDraft 验证失败，直接用简单 docx 生成
+        import traceback
+        with open("/tmp/docx_export_error.log", "w") as f:
+            f.write(f"{type(e).__name__}: {e}\n")
+            traceback.print_exc(file=f)
+        from pathlib import Path
+        from docx import Document
+
+        doc = Document()
+        doc.add_heading(adapted_data["title"], level=0)
+
+        doc.add_heading("权利要求书", level=1)
+        if isinstance(claims_raw, dict):
+            doc.add_paragraph(claims_raw.get("independent_claim", ""))
+            for dep in claims_raw.get("dependent_claims", []):
+                doc.add_paragraph(dep)
+
+        doc.add_heading("说明书", level=1)
+        doc.add_heading("【技术领域】", level=2)
+        doc.add_paragraph(desc_raw.get("technical_field", ""))
+        doc.add_heading("【背景技术】", level=2)
+        doc.add_paragraph(desc_raw.get("background_art", ""))
+        doc.add_heading("【发明内容】", level=2)
+        doc.add_paragraph(desc_raw.get("summary_of_invention", ""))
+        doc.add_heading("【具体实施方式】", level=2)
+        doc.add_paragraph(desc_raw.get("detailed_description", ""))
+
+        doc.add_heading("说明书摘要", level=1)
+        doc.add_paragraph(draft_data.get("abstract", ""))
+
+        export_dir = Path("./exports") / task_id
+        export_dir.mkdir(parents=True, exist_ok=True)
+        filepath = str(export_dir / f"{task_id}_专利申请书.docx")
+        doc.save(filepath)
+
+    return FileResponse(
+        path=filepath,
+        filename=f"patent_{task_id}.docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@router.post("/workflows/{task_id}/pause")
+async def pause_workflow(task_id: str):
+    """暂停工作流执行"""
+    async with workflow_lock:
+        context = workflow_engine.get_workflow(task_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+
+    context.is_paused = True
+    _append_workflow_event(
+        task_id=task_id,
+        agent="workflow_engine",
+        message="工作流已暂停",
+        event_type="workflow.paused",
+    )
+    await _persist_events(task_id)
+    return {"task_id": task_id, "status": "paused"}
+
+
+@router.post("/workflows/{task_id}/resume")
+async def resume_workflow(task_id: str):
+    """恢复暂停的工作流"""
+    async with workflow_lock:
+        context = workflow_engine.get_workflow(task_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+
+    context.is_paused = False
+    _append_workflow_event(
+        task_id=task_id,
+        agent="workflow_engine",
+        message="工作流已恢复",
+        event_type="workflow.resumed",
+    )
+    await _persist_events(task_id)
+    return {"task_id": task_id, "status": "resumed"}

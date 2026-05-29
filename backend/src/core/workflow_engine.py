@@ -104,6 +104,7 @@ class WorkflowContext:
         self.current_phase: WorkflowState = WorkflowState.INITIALIZED
         self.phase_history: List[PhaseResult] = []
         self.metadata: Dict[str, Any] = {}
+        self.is_paused: bool = False
 
         # 迭代修正反馈
         self.latest_revision_suggestions: List[str] = []
@@ -385,6 +386,32 @@ class RetrievalAnalysisPhaseExecutor(WorkflowPhaseExecutor):
             output_schema = {
                 "type": "object",
                 "properties": {
+                    "retrieval_keywords": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "检索使用的关键词列表",
+                    },
+                    "retrieval_databases": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "检索的数据源列表，如USPTO、EPO、CNIPA、Google Patents、arXiv等",
+                    },
+                    "prior_art_references": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "reference_id": {"type": "string", "description": "专利号或文献ID"},
+                                "source": {"type": "string", "description": "来源数据库"},
+                                "url": {"type": "string", "description": "源文献链接URL，如专利局查询页面或论文DOI链接"},
+                                "relevance": {"type": "string", "enum": ["high", "medium", "low"]},
+                                "abstract": {"type": "string", "description": "摘要或相关内容概述"},
+                                "differences": {"type": "string", "description": "与本发明的主要区别"},
+                            },
+                        },
+                        "description": "检索到的相关对比文献",
+                    },
                     "novelty_assessment": {
                         "type": "object",
                         "properties": {
@@ -550,41 +577,125 @@ class PatentWritingPhaseExecutor(WorkflowPhaseExecutor):
             from src.core.llm_client import get_llm_service, LLMMessage
 
             llm_service = get_llm_service()
-            messages = [
-                LLMMessage(role="system", content=agent._build_system_prompt()),
-                LLMMessage(role="user", content=input_text),
-            ]
+            system_prompt = agent._build_system_prompt()
 
-            output_schema = {
+            # ── 分步生成专利文件，避免单次请求超时 ──
+
+            # Step 1: 生成权利要求书
+            self._logger.info("正在生成权利要求书...", task_id=self.context.task_id)
+            claims_messages = [
+                LLMMessage(role="system", content=system_prompt),
+                LLMMessage(role="user", content=input_text + "\n\n请先生成【权利要求书】部分，包含独立权利要求和从属权利要求。"),
+            ]
+            claims_schema = {
                 "type": "object",
                 "properties": {
-                    "claims": {
-                        "type": "object",
-                        "properties": {
-                            "independent_claim": {"type": "string"},
-                            "dependent_claims": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                        },
-                        "required": ["independent_claim", "dependent_claims"],
+                    "independent_claim": {"type": "string"},
+                    "dependent_claims": {
+                        "type": "array",
+                        "items": {"type": "string"},
                     },
-                    "description": {
-                        "type": "object",
-                        "properties": {
-                            "technical_field": {"type": "string"},
-                            "background_art": {"type": "string"},
-                            "summary_of_invention": {"type": "string"},
-                            "detailed_description": {"type": "string"},
-                        },
-                        "required": ["technical_field", "background_art", "summary_of_invention", "detailed_description"],
-                    },
+                },
+                "required": ["independent_claim", "dependent_claims"],
+            }
+            claims_result = await llm_service.structured_output(claims_messages, claims_schema, max_tokens=8192)
+
+            # Step 2: 生成技术领域 + 背景技术
+            self._logger.info("正在生成技术领域和背景技术...", task_id=self.context.task_id)
+            bg_messages = [
+                LLMMessage(role="system", content=system_prompt),
+                LLMMessage(role="user", content=input_text + f"""
+
+已生成的权利要求书：
+独立权利要求：{claims_result.get('independent_claim', '')}
+
+请基于以上权利要求书，生成说明书的【技术领域】和【背景技术】两个部分。"""),
+            ]
+            bg_schema = {
+                "type": "object",
+                "properties": {
+                    "technical_field": {"type": "string"},
+                    "background_art": {"type": "string"},
+                },
+                "required": ["technical_field", "background_art"],
+            }
+            bg_result = await llm_service.structured_output(bg_messages, bg_schema, max_tokens=4096)
+
+            # Step 3: 生成发明内容
+            self._logger.info("正在生成发明内容...", task_id=self.context.task_id)
+            summary_messages = [
+                LLMMessage(role="system", content=system_prompt),
+                LLMMessage(role="user", content=input_text + f"""
+
+已生成的权利要求书：
+独立权利要求：{claims_result.get('independent_claim', '')}
+
+请基于以上权利要求书，生成说明书的【发明内容】部分，包含要解决的技术问题、技术方案和有益效果。"""),
+            ]
+            summary_schema = {
+                "type": "object",
+                "properties": {
+                    "summary_of_invention": {"type": "string"},
+                },
+                "required": ["summary_of_invention"],
+            }
+            summary_result = await llm_service.structured_output(summary_messages, summary_schema, max_tokens=8192)
+
+            # Step 4: 生成具体实施方式
+            self._logger.info("正在生成具体实施方式...", task_id=self.context.task_id)
+            detailed_messages = [
+                LLMMessage(role="system", content=system_prompt),
+                LLMMessage(role="user", content=input_text + f"""
+
+已生成的权利要求书：
+独立权利要求：{claims_result.get('independent_claim', '')}
+
+请基于以上权利要求书，生成说明书的【具体实施方式】部分。要求：
+- 包含一个完整的核心实施例，详细描述技术方案的实现过程
+- 控制篇幅在2000-4000字
+- 重点描述核心创新点的实现细节"""),
+            ]
+            detailed_schema = {
+                "type": "object",
+                "properties": {
+                    "detailed_description": {"type": "string"},
+                },
+                "required": ["detailed_description"],
+            }
+            detailed_result = await llm_service.structured_output(detailed_messages, detailed_schema, max_tokens=6144)
+
+            # Step 5: 生成摘要
+            self._logger.info("正在生成说明书摘要...", task_id=self.context.task_id)
+            abstract_messages = [
+                LLMMessage(role="system", content=system_prompt),
+                LLMMessage(role="user", content=f"""
+已生成的权利要求书：
+独立权利要求：{claims_result.get('independent_claim', '')}
+
+技术领域：{bg_result.get('technical_field', '')}
+
+请生成150-300字的说明书摘要，完整概括技术方案和有益效果。"""),
+            ]
+            abstract_schema = {
+                "type": "object",
+                "properties": {
                     "abstract": {"type": "string"},
                 },
-                "required": ["claims", "description", "abstract"],
+                "required": ["abstract"],
             }
+            abstract_result = await llm_service.structured_output(abstract_messages, abstract_schema, max_tokens=2048)
 
-            result = await llm_service.structured_output(messages, output_schema)
+            # 合并结果
+            result = {
+                "claims": claims_result,
+                "description": {
+                    "technical_field": bg_result.get("technical_field", ""),
+                    "background_art": bg_result.get("background_art", ""),
+                    "summary_of_invention": summary_result.get("summary_of_invention", ""),
+                    "detailed_description": detailed_result.get("detailed_description", ""),
+                },
+                "abstract": abstract_result.get("abstract", ""),
+            }
 
             self.context.patent_draft = result
 
@@ -763,7 +874,7 @@ class QualityReviewPhaseExecutor(WorkflowPhaseExecutor):
                 "required": ["overall_score", "recommendation", "revision_suggestions", "review_summary"],
             }
 
-            result = await llm_service.structured_output(messages, output_schema)
+            result = await llm_service.structured_output(messages, output_schema, max_tokens=8192)
 
             self.context.review_report = result
 

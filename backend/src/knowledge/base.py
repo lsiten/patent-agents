@@ -6,7 +6,12 @@ import hashlib
 
 from loguru import logger
 
-from ..models.domain import FinalizedPatent, KeyFeature
+from ..models.domain import FinalizedPatent, KeyFeature, Claim, DescriptionSection
+from ..document_gen.docx_parser import (
+    FinalizedPatentEntry,
+    ParsedPatentDocx,
+    scan_finalized_patents_dir,
+)
 
 
 class KnowledgeBase(ABC):
@@ -186,6 +191,155 @@ class LocalFileKnowledgeBase(KnowledgeBase):
     def list_all_patents(self) -> List[Dict]:
         """列出所有专利元数据"""
         return list(self.index.values())
+
+    def import_from_docx_dir(self, docx_dir: Path) -> int:
+        """
+        从定稿文件目录导入专利到知识库。
+
+        解析每个子目录中的 B-*.docx（定稿专利）为 FinalizedPatent，
+        同时将 A-*.docx（交底书/对话记录）的文本作为 writing_patterns 补充。
+
+        Args:
+            docx_dir: 定稿文件根目录路径
+
+        Returns:
+            成功导入的专利数量
+        """
+        entries = scan_finalized_patents_dir(docx_dir)
+        imported = 0
+
+        for entry in entries:
+            if not entry.patent_doc:
+                logger.warning(f"跳过无 B 文件的专利: {entry.directory_name}")
+                continue
+
+            try:
+                patent = self._convert_to_finalized_patent(entry)
+                self.add_patent(patent)
+                imported += 1
+            except Exception as e:
+                logger.error(f"导入专利失败 {entry.directory_name}: {e}")
+
+        logger.info(f"从 docx 目录导入 {imported}/{len(entries)} 篇定稿专利")
+        return imported
+
+    def _convert_to_finalized_patent(self, entry: FinalizedPatentEntry) -> FinalizedPatent:
+        """将解析后的 docx 数据转换为 FinalizedPatent 模型。"""
+        parsed = entry.patent_doc
+        assert parsed is not None
+
+        # Convert claims
+        claims = []
+        for i, claim_text in enumerate(parsed.claims, 1):
+            # Detect if it's independent or dependent
+            is_dependent = "根据权利要求" in claim_text
+            claims.append(Claim(
+                claim_number=i,
+                claim_type="dependent" if is_dependent else "independent",
+                content=claim_text,
+                dependencies=[],
+                category="method" if "方法" in parsed.title else "system",
+            ))
+
+        # Convert description sections
+        desc_sections = []
+        for name, section in parsed.description_sections.items():
+            desc_sections.append(DescriptionSection(
+                section_name=name,
+                content=section.content,
+                word_count=len(section.content),
+            ))
+
+        # Extract writing patterns from A-file (disclosure)
+        writing_patterns = []
+        if entry.disclosure_doc and entry.disclosure_doc.full_text:
+            # Store a summary of the disclosure style
+            writing_patterns.append(f"交底书内容摘要（前2000字）: {entry.disclosure_doc.full_text[:2000]}")
+
+        # Build standard terms from the patent text
+        standard_terms = self._extract_standard_terms(parsed)
+
+        patent = FinalizedPatent(
+            patent_id=self._generate_id(parsed.title, parsed.ipc_code or "unknown"),
+            title=parsed.title,
+            patent_number=None,
+            tech_field=self._infer_tech_field(parsed),
+            ipc_classification=[parsed.ipc_code] if parsed.ipc_code else [],
+            claims=claims,
+            description_sections=desc_sections,
+            abstract=parsed.abstract,
+            style_features={},
+            writing_patterns=writing_patterns,
+            standard_terms=standard_terms,
+            quality_score=0.9,  # 定稿专利默认高质量
+            is_exemplar=True,  # 定稿专利作为范例
+            source="docx_import",
+            tags=[parsed.ipc_code] if parsed.ipc_code else [],
+        )
+
+        return patent
+
+    def _infer_tech_field(self, parsed: ParsedPatentDocx) -> str:
+        """从说明书技术领域部分推断技术领域。"""
+        tech_section = parsed.description_sections.get("技术领域")
+        if tech_section and tech_section.content:
+            return tech_section.content[:100]
+        return parsed.title
+
+    def _extract_standard_terms(self, parsed: ParsedPatentDocx) -> List[str]:
+        """从定稿专利中提取标准术语。"""
+        terms = set()
+        # Extract key terms from claims (quoted terms, defined terms)
+        for claim in parsed.claims:
+            # Find terms in 「」 or "" or specific patterns
+            import re
+            # Match "所述XXX" patterns
+            matches = re.findall(r"所述([\u4e00-\u9fff]+)", claim)
+            for m in matches:
+                if 2 <= len(m) <= 8:
+                    terms.add(m)
+        return list(terms)[:30]  # Limit to 30 terms
+
+    def get_docx_content_for_llm(
+        self, tech_field: Optional[str] = None, max_patents: int = 2
+    ) -> str:
+        """
+        获取定稿专利的文本内容，用于注入 LLM prompt 作为写作风格参考。
+
+        返回格式化的参考文本，包含权利要求书和说明书片段。
+        """
+        exemplars = self.get_exemplars(tech_field)
+        if not exemplars:
+            exemplars = list(self.get_patent_by_id(pid) for pid in list(self.index.keys())[:max_patents])
+            exemplars = [p for p in exemplars if p is not None]
+
+        if not exemplars:
+            return ""
+
+        reference_parts = []
+        for patent in exemplars[:max_patents]:
+            parts = [f"【参考专利：{patent.title}】"]
+
+            # Add claims excerpt
+            if patent.claims:
+                claims_text = "\n".join(c.content for c in patent.claims[:3])
+                parts.append(f"[权利要求书片段]\n{claims_text[:1500]}")
+
+            # Add description excerpt
+            for section in patent.description_sections:
+                if section.section_name in ("技术领域", "背景技术", "发明内容"):
+                    parts.append(f"[{section.section_name}]\n{section.content[:800]}")
+
+            # Add disclosure content if available
+            if patent.writing_patterns:
+                for pattern in patent.writing_patterns:
+                    if pattern.startswith("交底书内容摘要"):
+                        parts.append(f"[交底书参考]\n{pattern[10:800]}")
+                        break
+
+            reference_parts.append("\n".join(parts))
+
+        return "\n\n---\n\n".join(reference_parts)
 
 
 # 全局知识库实例

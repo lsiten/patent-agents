@@ -12,6 +12,7 @@ from ..models.domain import (
     FinalizedPatent,
 )
 from ..prompts.templates import PROMPTS
+from ..knowledge.base import get_knowledge_base
 
 
 class PatentWriterAgent(BaseHermesAgent):
@@ -51,20 +52,27 @@ class PatentWriterAgent(BaseHermesAgent):
         # 2. 提取写作风格指南
         style_guide = self._extract_style_guide(style_references)
 
-        # 3. 分步撰写各个部分
-        # 3.1 撰写权利要求书
+        # 3. 获取定稿专利内容作为 LLM 参考
+        reference_content = self._get_reference_patents_content(
+            task.requirement_doc.tech_field
+        )
+
+        # 4. 分步撰写各个部分
+        # 4.1 撰写权利要求书
         self.context.add_event("正在撰写权利要求书", "progress")
-        claims = await self._write_claims(task, style_guide)
+        claims = await self._write_claims(task, style_guide, reference_content)
 
-        # 3.2 撰写说明书
+        # 4.2 撰写说明书
         self.context.add_event("正在撰写说明书", "progress")
-        description_sections = await self._write_description(task, style_guide)
+        description_sections = await self._write_description(
+            task, style_guide, reference_content
+        )
 
-        # 3.3 撰写摘要
+        # 4.3 撰写摘要
         self.context.add_event("正在撰写摘要", "progress")
-        abstract = await self._write_abstract(task)
+        abstract = await self._write_abstract(task, reference_content)
 
-        # 4. 组装完整文档
+        # 5. 组装完整文档
         patent_draft = PatentDraft(
             title=self._generate_title(task),
             technical_field=task.requirement_doc.tech_field,
@@ -77,7 +85,7 @@ class PatentWriterAgent(BaseHermesAgent):
             reference_patent_style_ids=[p.patent_id for p in style_references],
         )
 
-        # 5. 更新任务
+        # 6. 更新任务
         task.draft_doc = patent_draft
         self.context.add_event(
             f"专利文件撰写完成，共 {len(claims)} 项权利要求，总字数: {patent_draft.word_count}",
@@ -85,6 +93,27 @@ class PatentWriterAgent(BaseHermesAgent):
         )
 
         return task
+
+    def _get_reference_patents_content(self, tech_field: str) -> str:
+        """从知识库获取定稿专利内容，用于注入 LLM prompt。"""
+        try:
+            kb = get_knowledge_base()
+            content = kb.get_docx_content_for_llm(tech_field=tech_field, max_patents=2)
+            if content:
+                logger.info(f"已加载定稿专利参考内容 ({len(content)} 字)")
+            return content
+        except Exception as e:
+            logger.warning(f"加载定稿专利参考内容失败: {e}")
+            return ""
+
+    def _format_reference_section(self, reference_content: str) -> str:
+        """格式化参考专利内容为 prompt section。"""
+        if not reference_content:
+            return ""
+        return f"""
+【定稿专利参考（请严格参考以下专利的写作风格、术语使用和段落结构）】
+{reference_content}
+"""
 
     def _extract_style_guide(self, reference_patents: List[FinalizedPatent]) -> str:
         """从参考专利中提取写作风格指南"""
@@ -99,14 +128,18 @@ class PatentWriterAgent(BaseHermesAgent):
 
         if not features:
             features = [
-                "使用'本发明涉及...'开头",
-                "独立权利要求采用前序+特征的结构",
+                "使用'本发明提供一种...'开头",
+                "独立权利要求采用'其特征在于'引出技术特征",
+                "从属权利要求使用'根据权利要求X所述的...'格式",
+                "具体实施方式中使用'需要说明的是'引出解释段落",
                 "技术术语保持一致定义",
             ]
 
         return "\n".join([f"- {f}" for f in features])
 
-    async def _write_claims(self, task: PatentTask, style_guide: str) -> List[Claim]:
+    async def _write_claims(
+        self, task: PatentTask, style_guide: str, reference_content: str
+    ) -> List[Claim]:
         """撰写权利要求书"""
         prompt = PROMPTS["patent_writer"]["claims"].format(
             key_features="\n".join([
@@ -119,6 +152,7 @@ class PatentWriterAgent(BaseHermesAgent):
                 task.retrieval_report.writing_recommendations
                 if task.retrieval_report else []
             ),
+            reference_patents_section=self._format_reference_section(reference_content),
         )
 
         response = await self._call_hermes(
@@ -158,7 +192,9 @@ class PatentWriterAgent(BaseHermesAgent):
                 )
             ]
 
-    async def _write_description(self, task: PatentTask, style_guide: str) -> dict:
+    async def _write_description(
+        self, task: PatentTask, style_guide: str, reference_content: str
+    ) -> dict:
         """撰写说明书各部分"""
         prompt = PROMPTS["patent_writer"]["description"].format(
             tech_field=task.requirement_doc.tech_field,
@@ -170,6 +206,7 @@ class PatentWriterAgent(BaseHermesAgent):
             ]),
             beneficial_effects="\n".join(task.requirement_doc.beneficial_effects),
             writing_tips=style_guide,
+            reference_patents_section=self._format_reference_section(reference_content),
         )
 
         response = await self._call_hermes(
@@ -219,8 +256,13 @@ class PatentWriterAgent(BaseHermesAgent):
                 ),
             }
 
-    async def _write_abstract(self, task: PatentTask) -> str:
+    async def _write_abstract(self, task: PatentTask, reference_content: str) -> str:
         """撰写摘要"""
+        ref_section = ""
+        if reference_content:
+            # Extract just the abstract portion from reference for brevity
+            ref_section = f"\n\n请参考以下定稿专利的摘要写作风格：\n{reference_content[:500]}"
+
         prompt = f"""
         请为以下技术发明撰写150-300字的专利摘要：
 
@@ -229,6 +271,8 @@ class PatentWriterAgent(BaseHermesAgent):
         有益效果：{', '.join(task.requirement_doc.beneficial_effects)}
 
         摘要应包括：技术领域、要解决的技术问题、技术方案要点、有益效果。
+        格式要求：使用"本发明提供一种..."开头。
+        {ref_section}
         """
 
         response = await self._call_hermes(prompt=prompt, system_prompt="你是专业的专利代理人")

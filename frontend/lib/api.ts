@@ -106,6 +106,7 @@ export interface WorkflowPhaseResult {
   phase: string;
   success: boolean;
   duration_seconds: number;
+  output: Record<string, unknown>;
   issues: string[];
   warnings: string[];
 }
@@ -118,6 +119,7 @@ export interface WorkflowResponse {
   updated_at?: string;
   iteration_count: number;
   message_count: number;
+  conversation_id?: string;
   phase_history: WorkflowPhaseResult[];
   outputs: {
     brainstorming: Record<string, unknown>;
@@ -177,6 +179,7 @@ function parseWorkflowPhaseResult(value: unknown): WorkflowPhaseResult {
     phase: requireString(value.phase, 'phase_history.phase'),
     success: requireBoolean(value.success, 'phase_history.success'),
     duration_seconds: requireNumber(value.duration_seconds, 'phase_history.duration_seconds'),
+    output: safeRecord(value.output),
     issues: stringArray(value.issues),
     warnings: stringArray(value.warnings),
   };
@@ -256,6 +259,15 @@ export const workflowApi = {
 
   getMessages: (taskId: string) =>
     request<{ messages: ChatMessage[]; count: number }>(`/workflows/${encodeURIComponent(taskId)}/messages`),
+
+  pause: (taskId: string) =>
+    request<{ task_id: string; status: string }>(`/workflows/${encodeURIComponent(taskId)}/pause`, { method: 'POST' }),
+
+  resume: (taskId: string) =>
+    request<{ task_id: string; status: string }>(`/workflows/${encodeURIComponent(taskId)}/resume`, { method: 'POST' }),
+
+  exportDocx: (taskId: string) =>
+    `${API_BASE_URL}/workflows/${encodeURIComponent(taskId)}/export/docx`,
 };
 
 // ============ Chat API ============
@@ -267,6 +279,14 @@ export interface ChatMessage {
   timestamp: string;
   type?: 'text' | 'json' | 'file' | 'progress';
   metadata?: Record<string, unknown>;
+  tool_calls?: Array<{
+    name: string;
+    parameters: Record<string, unknown>;
+    result: unknown;
+    success: boolean;
+    error?: string;
+    duration_ms?: number;
+  }>;
 }
 
 export const chatApi = {
@@ -671,6 +691,111 @@ export const conversationApi = {
         body: JSON.stringify({}),
       }
     ),
+
+  /**
+   * 流式聊天 — SSE 接收 agent 的工具调用、技能使用、内容输出
+   */
+  chatStream: (
+    conv_id: string,
+    data: ConversationChatRequest,
+    callbacks: {
+      onThinking?: (data: { iteration: number; agent: string; phase?: string }) => void;
+      onSkillUse?: (data: { name: string; description: string; reasoning: string }) => void;
+      onToolCallStart?: (data: { name: string; parameters: Record<string, unknown> }) => void;
+      onToolCallEnd?: (data: { name: string; parameters: Record<string, unknown>; result: unknown; success: boolean; error?: string }) => void;
+      onContent?: (data: { content: string; has_recommendation: boolean }) => void;
+      onDone?: (data: { message: ChatMessage; has_recommendation: boolean; conversation_id: string }) => void;
+      onError?: (error: string) => void;
+    },
+  ): { abort: () => void } => {
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/conversations/${encodeURIComponent(conv_id)}/chat/stream`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          const errBody = await response.text();
+          callbacks.onError?.(errBody || `HTTP ${response.status}`);
+          return;
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          callbacks.onError?.('No response body');
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          let eventType = '';
+          let eventData = '';
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.slice(7).trim();
+            } else if (line.startsWith('data: ')) {
+              eventData = line.slice(6);
+            } else if (line === '' && eventType && eventData) {
+              try {
+                const parsed = JSON.parse(eventData);
+                switch (eventType) {
+                  case 'thinking':
+                    callbacks.onThinking?.(parsed);
+                    break;
+                  case 'skill_use':
+                    callbacks.onSkillUse?.(parsed);
+                    break;
+                  case 'tool_call_start':
+                    callbacks.onToolCallStart?.(parsed);
+                    break;
+                  case 'tool_call_end':
+                    callbacks.onToolCallEnd?.(parsed);
+                    break;
+                  case 'content':
+                    callbacks.onContent?.(parsed);
+                    break;
+                  case 'done':
+                    callbacks.onDone?.(parsed);
+                    break;
+                  case 'error':
+                    callbacks.onError?.(parsed.error || 'Unknown error');
+                    break;
+                }
+              } catch {
+                // ignore parse errors
+              }
+              eventType = '';
+              eventData = '';
+            }
+          }
+        }
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          callbacks.onError?.(err instanceof Error ? err.message : 'Stream failed');
+        }
+      }
+    })();
+
+    return { abort: () => controller.abort() };
+  },
 };
 
 // ============ React Query Hooks (Optional) ============
