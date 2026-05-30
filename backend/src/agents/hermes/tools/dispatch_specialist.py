@@ -16,7 +16,7 @@ Dispatch Specialist Tool — CEO Agent 动态调度专业 Agent
 import asyncio
 import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
 
@@ -29,32 +29,61 @@ SPECIALIST_AGENTS = {
         "name": "头脑风暴伙伴",
         "description": "帮助梳理发明思路、拓展保护方向、探讨技术细节",
         "use_when": "需要与用户讨论技术方案、澄清细节、发散思维时",
+        "phase": "brainstorming",
     },
     "requirement_analyst": {
         "profile_id": "patent.requirement_analyst.v1",
         "name": "需求分析师",
         "description": "将技术描述转化为结构化专利需求（技术领域、创新点、IPC分类）",
         "use_when": "需要结构化分析技术方案、提取创新点、确定专利类型时",
+        "phase": "requirement_analysis",
     },
     "retrieval_analyst": {
         "profile_id": "patent.retrieval_analyst.v1",
         "name": "检索分析师",
         "description": "检索先有技术、评估专利性（新颖性/创造性/实用性）、识别风险",
         "use_when": "需要检索现有技术、评估专利性、对比分析差异时",
+        "phase": "retrieval_report",
     },
     "patent_writer": {
         "profile_id": "patent.writer.v1",
         "name": "专利撰写师",
         "description": "撰写权利要求书、说明书、摘要等完整专利申请文件",
         "use_when": "需要撰写或修改专利申请文件时",
+        "phase": "patent_draft",
     },
     "quality_reviewer": {
         "profile_id": "patent.quality_reviewer.v1",
         "name": "质量审查师",
         "description": "审查专利文件质量（形式合规、权利要求、说明书、一致性、审查风险）",
         "use_when": "需要对已撰写的专利文件进行质量审查时",
+        "phase": "review_report",
     },
 }
+
+
+# ============ 全局结果缓存 ============
+# 存储各 Agent 的实际输出，供 workflow_engine 读取
+
+_dispatch_results: List[Dict[str, Any]] = []
+
+
+def get_dispatch_results() -> List[Dict[str, Any]]:
+    """获取所有 dispatch 结果"""
+    return list(_dispatch_results)
+
+
+def clear_dispatch_results() -> None:
+    """清空结果缓存（workflow 开始时调用）"""
+    _dispatch_results.clear()
+
+
+def get_latest_result_by_phase(phase: str) -> Optional[Dict[str, Any]]:
+    """获取某阶段的最新结果"""
+    for r in reversed(_dispatch_results):
+        if r.get("phase") == phase:
+            return r
+    return None
 
 
 class DispatchSpecialistTool(HermesTool):
@@ -111,6 +140,7 @@ class DispatchSpecialistTool(HermesTool):
 
         specialist = SPECIALIST_AGENTS[agent_id]
         profile_id = specialist["profile_id"]
+        phase = specialist["phase"]
 
         # 构建完整 prompt
         full_prompt = task
@@ -130,21 +160,50 @@ class DispatchSpecialistTool(HermesTool):
                 user_input=full_prompt,
             )
 
+            # 归一化结果为字符串
+            if isinstance(result, dict):
+                result_text = result.get("final_response", "") or result.get("content", "") or json.dumps(result, ensure_ascii=False)
+            else:
+                result_text = str(result) if result else ""
+
             logger.info(
-                f"[dispatch_specialist] {specialist['name']} 完成，结果长度: {len(result)} chars"
+                f"[dispatch_specialist] {specialist['name']} 完成，结果长度: {len(result_text)} chars"
             )
+
+            # 存储到全局缓存（供 workflow_engine 读取）
+            dispatch_record = {
+                "agent": specialist["name"],
+                "agent_id": agent_id,
+                "profile_id": profile_id,
+                "phase": phase,
+                "task": task[:500],
+                "result": result_text,
+                "status": "completed",
+            }
+            _dispatch_results.append(dispatch_record)
 
             return {
                 "agent": specialist["name"],
                 "agent_id": agent_id,
                 "profile_id": profile_id,
                 "task": task[:200],
-                "result": result,
+                "result": result_text,
                 "status": "completed",
             }
 
         except Exception as e:
             logger.error(f"[dispatch_specialist] {specialist['name']} 执行失败: {e}")
+            error_record = {
+                "agent": specialist["name"],
+                "agent_id": agent_id,
+                "profile_id": profile_id,
+                "phase": phase,
+                "task": task[:500],
+                "error": str(e),
+                "status": "failed",
+            }
+            _dispatch_results.append(error_record)
+
             return {
                 "agent": specialist["name"],
                 "agent_id": agent_id,

@@ -258,6 +258,10 @@ class PatentWorkflowEngine:
         try:
             service = _get_agent_factory()
 
+            # 清空 dispatch 结果缓存（确保拿到的是本次 workflow 的结果）
+            from src.agents.hermes.tools.dispatch_specialist import clear_dispatch_results
+            clear_dispatch_results()
+
             # 标记进入第一阶段
             context.current_phase = WorkflowState.BRAINSTORMING
             await self._publish_progress_event(context, WorkflowState.BRAINSTORMING, "running")
@@ -567,13 +571,58 @@ class PatentWorkflowEngine:
         return base
 
     def _parse_ceo_output(self, context: WorkflowContext, result_text: str) -> None:
-        """尝试从 CEO 输出中解析结构化数据并填充 context"""
-        # CEO 的输出是自然语言摘要，各阶段真正的结构化数据
-        # 已通过 dispatch_specialist → 各专业 Agent 的 session 中产出
-        # 这里仅保存 CEO 的总结
-        context.brainstorming_output = context.brainstorming_output or {
-            "summary": result_text[:500],
+        """从 dispatch_specialist 缓存中读取各专业 Agent 的实际输出填入 context
+
+        每个阶段的输出来自对应的专业 Agent（而非 CEO 的总结），
+        确保数据的专业性和可追溯性。
+        """
+        from src.agents.hermes.tools.dispatch_specialist import (
+            get_dispatch_results,
+            get_latest_result_by_phase,
+        )
+
+        # 保存 CEO 的总结性回复
+        context.brainstorming_output = {
+            "summary": result_text[:500] if result_text else "",
+            "ceo_response": result_text,
         }
+
+        # 从各专业 Agent 的实际输出填充 context
+        req_result = get_latest_result_by_phase("requirement_analysis")
+        if req_result and req_result.get("status") == "completed":
+            context.requirement_analysis = {
+                "agent": req_result.get("agent", ""),
+                "output": req_result.get("result", ""),
+                "summary": req_result.get("result", "")[:500],
+                "task": req_result.get("task", ""),
+            }
+
+        ret_result = get_latest_result_by_phase("retrieval_report")
+        if ret_result and ret_result.get("status") == "completed":
+            context.retrieval_report = {
+                "agent": ret_result.get("agent", ""),
+                "output": ret_result.get("result", ""),
+                "summary": ret_result.get("result", "")[:500],
+                "task": ret_result.get("task", ""),
+            }
+
+        draft_result = get_latest_result_by_phase("patent_draft")
+        if draft_result and draft_result.get("status") == "completed":
+            context.patent_draft = {
+                "agent": draft_result.get("agent", ""),
+                "output": draft_result.get("result", ""),
+                "summary": draft_result.get("result", "")[:500],
+                "task": draft_result.get("task", ""),
+            }
+
+        review_result = get_latest_result_by_phase("review_report")
+        if review_result and review_result.get("status") == "completed":
+            context.review_report = {
+                "agent": review_result.get("agent", ""),
+                "output": review_result.get("result", ""),
+                "summary": review_result.get("result", "")[:500],
+                "task": review_result.get("task", ""),
+            }
 
     def _try_parse_json(self, text: str) -> Dict[str, Any]:
         """尝试从文本中解析 JSON"""
