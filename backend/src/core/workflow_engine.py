@@ -311,12 +311,23 @@ class PatentWorkflowEngine:
                     else:
                         agent_text = str(agent_raw) if agent_raw else ""
 
+                    # 尝试解析 Agent 输出中的 JSON 结构化数据
+                    parsed_output = self._try_parse_json(agent_text)
+                    
+                    # 如果解析出结构化数据（非 raw_output 包装），直接用作 context 字段
+                    # 这样前端能直接访问 outputs.patent_draft.claims 等嵌套字段
+                    if "raw_output" not in parsed_output:
+                        context_data = parsed_output
+                    else:
+                        # 降级为文本存储
+                        context_data = {
+                            "agent": agent_id,
+                            "output": agent_text,
+                            "summary": agent_text[:500],
+                        }
+
                     # 存储到 context
-                    setattr(context, context_field, {
-                        "agent": agent_id,
-                        "output": agent_text,
-                        "summary": agent_text[:500],
-                    })
+                    setattr(context, context_field, context_data)
 
                     context.add_phase_result(PhaseResult(
                         phase=phase_enum,
