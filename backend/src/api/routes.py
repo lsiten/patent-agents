@@ -2119,13 +2119,10 @@ async def get_agent_related_files(
 
         source_markdown = "\n".join(markdown_lines)
 
-        profile_file_rel = "backend/src/agents/profiles/default_profiles.py"
-        source_code = _read_file(profile_file_rel)
-
         return {
             "type": "skill",
             "name": skill_meta["name"],
-            "source_code": source_code,
+            "source_code": None,
             "source_markdown": source_markdown,
             "structure": structure_info,
             "files": [
@@ -2133,7 +2130,6 @@ async def get_agent_related_files(
                     "path": f"skills/{skill_meta['name']}.md",
                     "content": source_markdown,
                 },
-                {"path": profile_file_rel, "content": source_code},
             ],
         }
 
