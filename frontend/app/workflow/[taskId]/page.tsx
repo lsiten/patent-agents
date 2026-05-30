@@ -483,7 +483,7 @@ export default function WorkflowPage() {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-md mb-xl">
           <div>
             <h1 className="text-heading-3 font-euclid font-medium text-ink mb-xs">
-              专利申请流程
+              {workflow?.title || '专利申请流程'}
             </h1>
             <p className="text-body-sm text-steel">
               任务 ID: {taskId}

@@ -320,10 +320,67 @@ def build_description_drawings_section(
 
 
 def _add_multiline_content(doc: Document, content: str, profile: PatentFeatureProfile) -> None:
-    """Add content that may contain multiple paragraphs."""
+    """Add content that may contain multiple paragraphs. Strips Markdown syntax."""
+    content = _strip_markdown(content)
     paragraphs = [p.strip() for p in content.split("\n") if p.strip()]
     for para_text in paragraphs:
         add_body_paragraph(doc, para_text, profile)
+
+
+def _strip_markdown(text: str) -> str:
+    """Remove Markdown formatting from LLM-generated text for clean docx output.
+    
+    Handles: headings (#), bold (**), italic (*), code (`), lists (- / *), 
+    numbered lists, links [text](url), horizontal rules (---).
+    """
+    import re
+    if not text:
+        return text
+
+    lines = text.split("\n")
+    cleaned_lines = []
+
+    for line in lines:
+        # Skip pure horizontal rules
+        if re.match(r'^[\s]*[-*_]{3,}\s*$', line):
+            continue
+
+        # Remove heading markers (# ## ### etc.)
+        line = re.sub(r'^#{1,6}\s+', '', line)
+
+        # Remove bold markers (**text** or __text__)
+        line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
+        line = re.sub(r'__(.+?)__', r'\1', line)
+
+        # Remove italic markers (*text* or _text_) — careful not to break underscores in words
+        line = re.sub(r'(?<!\w)\*([^*]+?)\*(?!\w)', r'\1', line)
+        line = re.sub(r'(?<!\w)_([^_]+?)_(?!\w)', r'\1', line)
+
+        # Remove inline code backticks
+        line = re.sub(r'`([^`]+?)`', r'\1', line)
+
+        # Remove code block markers
+        if re.match(r'^```', line):
+            continue
+
+        # Convert list markers to proper paragraph text
+        # - item  or  * item  → item
+        line = re.sub(r'^\s*[-*+]\s+', '', line)
+        # 1. item  or  1) item  → item (numbered list — keep number for patent claims context)
+        # Don't strip numbered lists as they might be intentional in patent context
+
+        # Remove link syntax [text](url) → text
+        line = re.sub(r'\[([^\]]+?)\]\([^)]+?\)', r'\1', line)
+
+        # Remove image syntax ![alt](url)
+        line = re.sub(r'!\[([^\]]*?)\]\([^)]+?\)', r'\1', line)
+
+        # Remove blockquote markers
+        line = re.sub(r'^>\s*', '', line)
+
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines)
 
 
 # ─── Main Entry Point ────────────────────────────────────────────────────────

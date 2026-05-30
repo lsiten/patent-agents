@@ -3273,28 +3273,29 @@ async def export_workflow_patent_docx(task_id: str):
             traceback.print_exc(file=f)
         from pathlib import Path
         from docx import Document
+        from src.document_gen.generator import _strip_markdown
 
         doc = Document()
         doc.add_heading(adapted_data["title"], level=0)
 
         doc.add_heading("权利要求书", level=1)
         if isinstance(claims_raw, dict):
-            doc.add_paragraph(claims_raw.get("independent_claim", ""))
+            doc.add_paragraph(_strip_markdown(claims_raw.get("independent_claim", "")))
             for dep in claims_raw.get("dependent_claims", []):
-                doc.add_paragraph(dep)
+                doc.add_paragraph(_strip_markdown(dep))
 
         doc.add_heading("说明书", level=1)
         doc.add_heading("【技术领域】", level=2)
-        doc.add_paragraph(desc_raw.get("technical_field", ""))
+        doc.add_paragraph(_strip_markdown(desc_raw.get("technical_field", "")))
         doc.add_heading("【背景技术】", level=2)
-        doc.add_paragraph(desc_raw.get("background_art", ""))
+        doc.add_paragraph(_strip_markdown(desc_raw.get("background_art", "")))
         doc.add_heading("【发明内容】", level=2)
-        doc.add_paragraph(desc_raw.get("summary_of_invention", ""))
+        doc.add_paragraph(_strip_markdown(desc_raw.get("summary_of_invention", "")))
         doc.add_heading("【具体实施方式】", level=2)
-        doc.add_paragraph(desc_raw.get("detailed_description", ""))
+        doc.add_paragraph(_strip_markdown(desc_raw.get("detailed_description", "")))
 
         doc.add_heading("说明书摘要", level=1)
-        doc.add_paragraph(draft_data.get("abstract", ""))
+        doc.add_paragraph(_strip_markdown(draft_data.get("abstract", "")))
 
         export_dir = Path("./exports") / task_id
         export_dir.mkdir(parents=True, exist_ok=True)
