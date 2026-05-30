@@ -289,17 +289,18 @@ class PatentWorkflowEngine:
                 self._logger.info(f"Executing phase: {agent_id}")
 
                 # 发射 CEO 调度事件
-                await publish_event(AgentDispatchEvent(
-                    task_id=context.task_id,
-                    user_id=context.user_id,
-                    from_agent="CEO Agent",
-                    to_agent=agent_display_name,
-                    task_description=task_desc[:300],
-                ))
                 if event_callback:
                     event_callback("CEO Agent", "agent.dispatch",
                         f"🎯 调度 → {agent_display_name}: {task_desc[:100]}",
                         {"from_agent": "CEO Agent", "to_agent": agent_display_name, "task_description": task_desc[:300]})
+                else:
+                    await publish_event(AgentDispatchEvent(
+                        task_id=context.task_id,
+                        user_id=context.user_id,
+                        from_agent="CEO Agent",
+                        to_agent=agent_display_name,
+                        task_description=task_desc[:300],
+                    ))
 
                 # patent_writer 使用分段生成
                 if agent_id == "patent_writer":
@@ -321,17 +322,18 @@ class PatentWorkflowEngine:
                         context_data = {"agent": agent_id, "output": agent_text, "summary": agent_text[:500]}
 
                 # 发射 Agent 输出完成事件
-                await publish_event(AgentContentEvent(
-                    task_id=context.task_id,
-                    user_id=context.user_id,
-                    agent_name=agent_display_name,
-                    content=agent_text[:500] if agent_text else "",
-                    phase=phase_state.value,
-                ))
                 if event_callback:
                     event_callback(agent_display_name, "agent.content",
                         f"📄 输出: {agent_text[:200] if agent_text else ''}",
                         {"agent_name": agent_display_name, "content": agent_text[:500] if agent_text else "", "phase": phase_state.value})
+                else:
+                    await publish_event(AgentContentEvent(
+                        task_id=context.task_id,
+                        user_id=context.user_id,
+                        agent_name=agent_display_name,
+                        content=agent_text[:500] if agent_text else "",
+                        phase=phase_state.value,
+                    ))
 
                 # 存储结果
                 setattr(context, context_field, context_data)
@@ -1033,13 +1035,14 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
                         "thought": thought,
                         "step": event_data.get("iteration", 0),
                     })
-                    await publish_event(AgentThinkingEvent(
-                        task_id=context.task_id,
-                        user_id=context.user_id,
-                        agent_name=agent_name,
-                        thought=thought,
-                        step=event_data.get("iteration", 0),
-                    ))
+                    if not event_callback:
+                        await publish_event(AgentThinkingEvent(
+                            task_id=context.task_id,
+                            user_id=context.user_id,
+                            agent_name=agent_name,
+                            thought=thought,
+                            step=event_data.get("iteration", 0),
+                        ))
 
                 elif event_type == "tool_call_start":
                     tool_name = event_data.get("name", "")
@@ -1049,13 +1052,14 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
                         "tool_name": tool_name,
                         "parameters": params,
                     })
-                    await publish_event(AgentToolCallStartEvent(
-                        task_id=context.task_id,
-                        user_id=context.user_id,
-                        agent_name=agent_name,
-                        tool_name=tool_name,
-                        parameters=params,
-                    ))
+                    if not event_callback:
+                        await publish_event(AgentToolCallStartEvent(
+                            task_id=context.task_id,
+                            user_id=context.user_id,
+                            agent_name=agent_name,
+                            tool_name=tool_name,
+                            parameters=params,
+                        ))
 
                 elif event_type == "tool_call_end":
                     tool_name = event_data.get("name", "")
@@ -1069,15 +1073,16 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
                         "result": result,
                         "success": success,
                     })
-                    await publish_event(AgentToolCallEndEvent(
-                        task_id=context.task_id,
-                        user_id=context.user_id,
-                        agent_name=agent_name,
-                        tool_name=tool_name,
-                        parameters=event_data.get("parameters", {}),
-                        result=result,
-                        success=success,
-                    ))
+                    if not event_callback:
+                        await publish_event(AgentToolCallEndEvent(
+                            task_id=context.task_id,
+                            user_id=context.user_id,
+                            agent_name=agent_name,
+                            tool_name=tool_name,
+                            parameters=event_data.get("parameters", {}),
+                            result=result,
+                            success=success,
+                        ))
 
                 elif event_type == "content_delta":
                     content_chunks.append(event_data.get("delta", ""))
