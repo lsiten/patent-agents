@@ -75,7 +75,7 @@ class EventType(str, Enum):
 @dataclass
 class BaseEvent:
     """事件基类"""
-    event_type: EventType
+    event_type: EventType = EventType.SYSTEM_ERROR  # 子类 __post_init__ 会覆盖
     event_id: str = field(default_factory=lambda: str(uuid4()))
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     version: str = "1.0"
