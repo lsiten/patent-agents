@@ -196,6 +196,7 @@ function parseWorkflowResponse(value: unknown): WorkflowResponse {
   return {
     task_id: requireString(value.task_id, 'task_id'),
     user_id: requireString(value.user_id, 'user_id'),
+    title: typeof value.title === 'string' ? value.title : undefined,
     current_state: requireString(value.current_state, 'current_state'),
     created_at: requireString(value.created_at, 'created_at'),
     updated_at: typeof value.updated_at === 'string' ? value.updated_at : undefined,
