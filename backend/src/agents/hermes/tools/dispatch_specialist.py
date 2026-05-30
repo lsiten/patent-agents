@@ -1,0 +1,153 @@
+"""
+Dispatch Specialist Tool — CEO Agent 动态调度专业 Agent
+
+允许 CEO Agent 在运行时动态选择并调用具有完整 Profile（SOUL.md + skills + toolset）
+的专业 Agent，实现动态编排而非固定流水线。
+
+与 hermes-agent 内置的 delegate_task 不同：
+- delegate_task: spawn 通用 subagent（无 profile 特性）
+- dispatch_specialist: 调用有完整 SOUL.md + 专业技能的 Profile Agent
+
+使用场景：
+- CEO 判断搜索结果不足 → dispatch retrieval_analyst 补充检索
+- CEO 判断撰写质量不达标 → 分析原因 → dispatch 回对应阶段
+- CEO 判断需要更多讨论 → dispatch brainstorm_partner
+"""
+import asyncio
+import json
+import logging
+from typing import Any, Dict
+
+from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
+
+logger = logging.getLogger(__name__)
+
+# 可调度的专业 Agent 列表
+SPECIALIST_AGENTS = {
+    "brainstorm_partner": {
+        "profile_id": "patent.brainstorm_partner.v1",
+        "name": "头脑风暴伙伴",
+        "description": "帮助梳理发明思路、拓展保护方向、探讨技术细节",
+        "use_when": "需要与用户讨论技术方案、澄清细节、发散思维时",
+    },
+    "requirement_analyst": {
+        "profile_id": "patent.requirement_analyst.v1",
+        "name": "需求分析师",
+        "description": "将技术描述转化为结构化专利需求（技术领域、创新点、IPC分类）",
+        "use_when": "需要结构化分析技术方案、提取创新点、确定专利类型时",
+    },
+    "retrieval_analyst": {
+        "profile_id": "patent.retrieval_analyst.v1",
+        "name": "检索分析师",
+        "description": "检索先有技术、评估专利性（新颖性/创造性/实用性）、识别风险",
+        "use_when": "需要检索现有技术、评估专利性、对比分析差异时",
+    },
+    "patent_writer": {
+        "profile_id": "patent.writer.v1",
+        "name": "专利撰写师",
+        "description": "撰写权利要求书、说明书、摘要等完整专利申请文件",
+        "use_when": "需要撰写或修改专利申请文件时",
+    },
+    "quality_reviewer": {
+        "profile_id": "patent.quality_reviewer.v1",
+        "name": "质量审查师",
+        "description": "审查专利文件质量（形式合规、权利要求、说明书、一致性、审查风险）",
+        "use_when": "需要对已撰写的专利文件进行质量审查时",
+    },
+}
+
+
+class DispatchSpecialistTool(HermesTool):
+    """动态调度专业 Agent 工具"""
+
+    name = "dispatch_specialist"
+    description = (
+        "调度一个专业 Agent 执行特定任务。每个 Agent 有独立的专业知识和工具集。"
+        "可用 Agent: brainstorm_partner(讨论)、requirement_analyst(需求分析)、"
+        "retrieval_analyst(检索分析)、patent_writer(撰写)、quality_reviewer(审查)"
+    )
+
+    def _build_definition(self) -> HermesToolDefinition:
+        return HermesToolDefinition(
+            name=self.name,
+            description=self.description,
+            parameters={
+                "agent_id": HermesToolParameter(
+                    type="string",
+                    description=(
+                        "要调度的 Agent ID。可选值: "
+                        "brainstorm_partner, requirement_analyst, "
+                        "retrieval_analyst, patent_writer, quality_reviewer"
+                    ),
+                    required=True,
+                ),
+                "task": HermesToolParameter(
+                    type="string",
+                    description="交给该 Agent 的具体任务描述，要清晰完整，包含所有必要上下文",
+                    required=True,
+                ),
+                "context": HermesToolParameter(
+                    type="string",
+                    description="附加上下文（前序阶段的输出、用户补充信息等）",
+                    required=False,
+                ),
+            },
+        )
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        agent_id = kwargs.get("agent_id", "")
+        task = kwargs.get("task", "")
+        context = kwargs.get("context", "")
+
+        # 验证 agent_id
+        if agent_id not in SPECIALIST_AGENTS:
+            return {
+                "error": f"未知的 Agent: {agent_id}",
+                "available_agents": list(SPECIALIST_AGENTS.keys()),
+            }
+
+        if not task.strip():
+            return {"error": "task 参数不能为空"}
+
+        specialist = SPECIALIST_AGENTS[agent_id]
+        profile_id = specialist["profile_id"]
+
+        # 构建完整 prompt
+        full_prompt = task
+        if context:
+            full_prompt = f"{task}\n\n【上下文信息】\n{context}"
+
+        logger.info(
+            f"[dispatch_specialist] CEO → {specialist['name']} ({profile_id}): {task[:80]}..."
+        )
+
+        try:
+            from src.agents.hermes_agent_service import get_hermes_agent_service
+
+            service = get_hermes_agent_service()
+            result = await service.run_conversation(
+                profile_id=profile_id,
+                user_input=full_prompt,
+            )
+
+            logger.info(
+                f"[dispatch_specialist] {specialist['name']} 完成，结果长度: {len(result)} chars"
+            )
+
+            return {
+                "agent": specialist["name"],
+                "agent_id": agent_id,
+                "profile_id": profile_id,
+                "task": task[:200],
+                "result": result,
+                "status": "completed",
+            }
+
+        except Exception as e:
+            logger.error(f"[dispatch_specialist] {specialist['name']} 执行失败: {e}")
+            return {
+                "agent": specialist["name"],
+                "agent_id": agent_id,
+                "error": str(e),
+                "status": "failed",
+            }

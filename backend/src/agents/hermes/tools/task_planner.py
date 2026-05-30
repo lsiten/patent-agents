@@ -122,8 +122,3 @@ class TaskPlannerTool(HermesTool):
                 "审查阶段特别关注权利要求的支持性问题",
             ],
         }
-
-
-def register(factory) -> None:
-    """注册此工具到 Agent 工厂"""
-    factory.register_tool_class("task_planner", TaskPlannerTool)

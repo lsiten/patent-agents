@@ -31,5 +31,24 @@
         "next_run": null
       }
     ]
+  },
+  "patent.brainstorm_partner.v1": {
+    "config_overrides": {},
+    "tools_disabled": [],
+    "tools_added": [
+      {
+        "id": "prior_art_comparator",
+        "name": "prior_art_comparator",
+        "description": "对比分析发明与多篇现有技术的技术特征差异",
+        "enabled": true,
+        "category": "analysis",
+        "source_code": "\"\"\"\n对比分析发明与多篇现有技术的技术特征差异\n\"\"\"\nfrom typing import Any, Dict\n\nfrom ..base import HermesTool, HermesToolDefinition, HermesToolParameter\nfrom src.core.logging import get_logger\nfrom src.core.llm_client import get_llm_service, LLMMessage\n\nlogger = get_logger(__name__)\n\n\nclass PriorArtComparatorTool(HermesTool):\n    \"\"\"对比分析发明与多篇现有技术的技术特征差异\"\"\"\n    name = \"prior_art_comparator\"\n    description = \"对比分析发明与多篇现有技术的技术特征差异\"\n\n    def _build_definition(self) -> HermesToolDefinition:\n        return HermesToolDefinition(\n            name=self.name,\n            description=self.description,\n            parameters={\n                \"invention\": HermesToolParameter(\n                    type=\"string\",\n                    description=\"发明技术方案描述\",\n                    required=True,\n                ),\n                \"prior_arts\": HermesToolParameter(\n                    type=\"string\",\n                    description=\"现有技术列表\",\n                    required=True,\n                ),\n            },\n        )\n\n    async def execute(self,     invention: str,     prior_arts: str, **kwargs) -> Dict[str, Any]:\n        \"\"\"执行工具逻辑\"\"\"\n        logger.info(\"Executing tool\", tool=self.name)\n        llm = get_llm_service()\n        response = await llm.chat_completion(\n            messages=[LLMMessage(role=\"user\", content=f\"对比分析发明与多篇现有技术的技术特征差异\")],\n            temperature=0.3,\n        )\n        return {\"result\": response.content, \"tool\": self.name}\n\n\ndef register(factory) -> None:\n    factory.register_tool_class(\"prior_art_comparator\", PriorArtComparatorTool)\n",
+        "is_hermes": true,
+        "config": {}
+      }
+    ],
+    "skills_disabled": [],
+    "skills_added": [],
+    "timers": []
   }
 }

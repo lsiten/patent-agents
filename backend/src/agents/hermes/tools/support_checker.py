@@ -67,7 +67,3 @@ class SupportCheckerTool(HermesTool):
             temperature=0.2,
         )
         return {"support_check": response.content, "tool": self.name}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("support_checker", SupportCheckerTool)

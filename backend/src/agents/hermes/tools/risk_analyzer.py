@@ -195,8 +195,3 @@ class RiskAnalyzerTool(HermesTool):
             f"[{risk['severity'].upper()}] {risk['description']} -> {risk['mitigation']}"
             for risk in sorted_risks
         ]
-
-
-def register(factory) -> None:
-    """注册此工具到 Agent 工厂"""
-    factory.register_tool_class("risk_analyzer", RiskAnalyzerTool)

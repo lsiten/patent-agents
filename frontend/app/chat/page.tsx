@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { ToolCallCard } from '@/components/chat/ToolCallCard';
+import { DispatchPanel, type DispatchActivity } from '@/components/chat/DispatchPanel';
 import { clsx } from 'clsx';
 import { conversationApi, workflowApi } from '@/lib/api';
 import type { ConversationSummary } from '@/lib/api';
@@ -61,6 +62,9 @@ function ChatPageContent() {
   // Recommendations from backend
   const [recommendStartWorkflow, setRecommendStartWorkflow] = useState(false);
   const [suggestedTitle, setSuggestedTitle] = useState<string | null>(null);
+
+  // Dispatch activities (CEO → specialist calls)
+  const [dispatchActivities, setDispatchActivities] = useState<DispatchActivity[]>([]);
 
   const { addToast } = useToast();
 
@@ -249,6 +253,23 @@ function ChatPageContent() {
               ? { ...m, tool_calls: [...(m.tool_calls || []), { ...data, result: null, success: true }] }
               : m
           ));
+          // Track dispatch_specialist calls in panel
+          if (data.name === 'dispatch_specialist') {
+            const params = data.parameters as Record<string, string>;
+            const agentId = params.agent_id || 'unknown';
+            const task = params.task || '';
+            setDispatchActivities((prev) => [
+              ...prev,
+              {
+                id: `dispatch-${Date.now()}-${agentId}`,
+                agentId,
+                agentName: agentId,
+                task,
+                status: 'running',
+                startedAt: new Date().toISOString(),
+              },
+            ]);
+          }
         },
         onToolCallEnd: (data) => {
           setMessages((prev) => prev.map((m) => {
@@ -260,6 +281,22 @@ function ChatPageContent() {
             );
             return { ...m, tool_calls: updatedCalls };
           }));
+          // Update dispatch activity status
+          if (data.name === 'dispatch_specialist') {
+            setDispatchActivities((prev) => {
+              const idx = prev.findLastIndex((a) => a.status === 'running');
+              if (idx === -1) return prev;
+              const updated = [...prev];
+              const result = data.result as Record<string, unknown> | null;
+              updated[idx] = {
+                ...updated[idx],
+                status: data.success ? 'completed' : 'failed',
+                result: typeof result?.result === 'string' ? result.result.slice(0, 300) : JSON.stringify(result).slice(0, 300),
+                completedAt: new Date().toISOString(),
+              };
+              return updated;
+            });
+          }
         },
         onContent: (data) => {
           setMessages((prev) => prev.map((m) =>
@@ -508,6 +545,13 @@ function ChatPageContent() {
             </div>
           </div>
         </div>
+
+        {/* Dispatch Status Panel */}
+        <DispatchPanel
+          activities={dispatchActivities}
+          workflowTaskId={workflowTaskId}
+          isActive={isLoading}
+        />
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto">

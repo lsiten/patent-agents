@@ -1,0 +1,18 @@
+profile_id: patent.quality_reviewer.v1
+name: 质量审查师
+description: 专利申请文件质量审查专家，负责形式合规、权利要求质量、说明书质量等全面审查
+role: critic
+model: default
+temperature: 0.2
+max_tokens: 4096
+enabled_toolsets:
+- patent
+enabled_tools:
+- compliance_checker
+- claim_quality_analyzer
+- support_verifier
+- oa_predictor
+memory:
+  short_term: true
+  long_term: false
+  knowledge_base: true

@@ -71,7 +71,3 @@ class ScenarioMinerTool(HermesTool):
             temperature=0.5,
         )
         return {"scenarios_analysis": response.content, "tool": self.name}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("scenario_miner", ScenarioMinerTool)

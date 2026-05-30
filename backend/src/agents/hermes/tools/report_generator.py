@@ -167,8 +167,3 @@ class ReportGeneratorTool(HermesTool):
 </body>
 </html>"""
         return html
-
-
-def register(factory) -> None:
-    """注册此工具到 Agent 工厂"""
-    factory.register_tool_class("report_generator", ReportGeneratorTool)

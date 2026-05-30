@@ -5,14 +5,12 @@
 
 from .task import TaskService
 from .patent import PatentService
-from .agent_config import AgentConfigService
 from .workflow import WorkflowService
 from .chat import ChatService
 
 __all__ = [
     "TaskService",
     "PatentService",
-    "AgentConfigService",
     "WorkflowService",
     "ChatService",
 ]

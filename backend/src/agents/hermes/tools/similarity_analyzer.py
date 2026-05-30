@@ -70,7 +70,3 @@ class SimilarityAnalyzerTool(HermesTool):
             temperature=0.2,
         )
         return {"similarity_analysis": response.content, "tool": self.name}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("similarity_analyzer", SimilarityAnalyzerTool)

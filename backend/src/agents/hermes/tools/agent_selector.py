@@ -101,7 +101,3 @@ class AgentSelectorTool(HermesTool):
             },
             "tool": self.name,
         }
-
-
-def register(factory) -> None:
-    factory.register_tool_class("agent_selector", AgentSelectorTool)

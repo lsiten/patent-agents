@@ -69,19 +69,7 @@ async def startup_event():
         from src.api.routes import restore_stores_from_db
         await restore_stores_from_db()
 
-        # 注册所有 Hermes 工具到 Agent 工厂
-        from src.agents import get_agent_factory
-        from src.agents.hermes.tools import register_all_tools
-        factory = get_agent_factory()
-        register_all_tools(factory)
-        logger.info("Hermes 工具注册完成")
-
-        # 启动 Agent 定时器调度器
-        from src.core.scheduler import get_scheduler
-        scheduler = get_scheduler()
-        await scheduler.start()
-        logger.info("Agent 定时器调度器已启动")
-
+        # Hermes 专利工具由 hermes_agent_service 按需注册（lazy init）
         logger.info("专利智脑服务启动成功!", port=settings.port)
 
     except Exception as e:
@@ -95,11 +83,6 @@ async def shutdown_event():
     logger.info("专利智脑服务正在关闭...")
 
     try:
-        # 停止调度器
-        from src.core.scheduler import get_scheduler
-        scheduler = get_scheduler()
-        await scheduler.stop()
-
         # 清理容器资源
         await cleanup_container()
         logger.info("资源清理完成")

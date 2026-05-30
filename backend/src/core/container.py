@@ -23,11 +23,9 @@ from src.repositories import (
 from src.services import (
     TaskService,
     PatentService,
-    AgentConfigService,
     WorkflowService,
     ChatService,
 )
-from src.agents.profiles import ProfileRegistry
 from src.core.workflow_engine import PatentWorkflowEngine
 from src.core.events import get_event_bus
 from src.data_sources.base import get_data_source_manager
@@ -225,7 +223,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
             "__main__",
             "src.api.routes",
             "src.core.middleware",
-            "src.agents.base",
             "src.utils",
             "src.utils.time_utils",
             "src.utils.text_utils",
@@ -301,7 +298,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
     )
 
     # ── 基础设施单例 ─────────────────────────────────────
-    profile_registry = providers.Singleton(ProfileRegistry)
     event_bus = providers.Singleton(get_event_bus)
     data_source_manager = providers.Singleton(get_data_source_manager)
     knowledge_base = providers.Singleton(get_knowledge_base)
@@ -313,16 +309,11 @@ class ApplicationContainer(containers.DeclarativeContainer):
     task_service = providers.Singleton(
         TaskService,
         uow_factory=lambda: container.unit_of_work(),
-        ceo_agent_factory=None,
     )
     patent_service = providers.Singleton(
         PatentService,
         data_source_manager=data_source_manager,
         knowledge_base=knowledge_base,
-    )
-    agent_service = providers.Singleton(
-        AgentConfigService,
-        profile_registry=profile_registry,
     )
     workflow_service = providers.Singleton(
         WorkflowService,
@@ -334,13 +325,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
         uow_factory=lambda: container.unit_of_work(),
         workflow_service=workflow_service,
     )
-
-    # Agent (将在 Phase 4 实现)
-    ceo_agent = providers.Dependency()
-    requirement_analyst = providers.Dependency()
-    retrieval_analyst = providers.Dependency()
-    patent_writer = providers.Dependency()
-    quality_reviewer = providers.Dependency()
 
 
 # 全局容器实例
@@ -363,19 +347,6 @@ async def init_container() -> None:
     # 初始化 Redis
     redis = container.redis_provider()
     await redis.init()
-
-    # lazy import to break circular dependency
-    from src.agents.profiles import register_default_profiles
-
-    registry = container.profile_registry()
-    register_default_profiles(registry)
-
-    from src.agents import get_agent_factory
-    from src.agents.hermes.tools import register_all_tools
-
-    factory = get_agent_factory()
-    register_all_tools(factory)
-    logger.info("Hermes tools registered", count=4)
 
     logger.info("Application container initialized successfully")
 
