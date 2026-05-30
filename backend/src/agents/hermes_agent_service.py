@@ -291,26 +291,50 @@ class HermesAgentService:
         """
         运行 Agent 对话（流式，SSE 事件）
 
+        使用 hermes-agent 的回调机制：
+        - stream_delta_callback(delta) — 逐 token 文本流
+        - tool_start_callback(call_id, name, args) — 工具调用开始
+        - tool_complete_callback(call_id, name, args, result) — 工具调用完成
+        - thinking_callback(data) — 思考过程
+        - status_callback(kind, msg) — 状态变化
+
         Yields:
-            {"type": "thinking|tool_call|content|done", "data": {...}}
+            {"type": "thinking|tool_call_start|tool_call_end|content_delta|content|done|error", "data": {...}}
         """
-        events = []
+        events: List[Dict[str, Any]] = []
         events_lock = threading.Lock()
+        content_chunks: List[str] = []
 
         def on_thinking(data):
             with events_lock:
-                events.append({"type": "thinking", "data": {"message": str(data)}})
+                events.append({"type": "thinking", "data": {"iteration": 1, "agent": profile_id, "message": str(data)}})
 
-        def on_tool_start(tool_name, args):
+        def on_tool_start(call_id, name, args):
             with events_lock:
-                events.append({"type": "tool_call_start", "data": {"name": tool_name, "parameters": args}})
+                params = {}
+                if isinstance(args, str):
+                    try:
+                        params = json.loads(args)
+                    except Exception:
+                        params = {"raw": args[:200]}
+                elif isinstance(args, dict):
+                    params = args
+                events.append({"type": "tool_call_start", "data": {"name": name, "parameters": params}})
 
-        def on_tool_complete(tool_name, result):
+        def on_tool_complete(call_id, name, args, result):
             with events_lock:
-                events.append({"type": "tool_call_end", "data": {"name": tool_name, "result": str(result)[:500]}})
+                result_str = str(result)[:500] if result else ""
+                events.append({"type": "tool_call_end", "data": {
+                    "name": name,
+                    "parameters": {},
+                    "result": result_str,
+                    "success": True,
+                    "error": None,
+                }})
 
         def on_stream_delta(delta):
             with events_lock:
+                content_chunks.append(delta)
                 events.append({"type": "content_delta", "data": {"delta": delta}})
 
         def on_status(kind, msg):
@@ -326,7 +350,7 @@ class HermesAgentService:
         }
 
         # 在后台线程运行 Agent
-        result_holder = {"result": None, "error": None, "done": False}
+        result_holder: Dict[str, Any] = {"result": None, "error": None, "done": False}
 
         def run_agent():
             try:
@@ -360,8 +384,29 @@ class HermesAgentService:
         if result_holder["error"]:
             yield {"type": "error", "data": {"error": result_holder["error"]}}
         else:
-            yield {"type": "content", "data": {"content": result_holder["result"] or ""}}
-            yield {"type": "done", "data": {"success": True}}
+            # 提取 final_response
+            result = result_holder["result"]
+            if isinstance(result, dict):
+                final_text = result.get("final_response", "") or ""
+            else:
+                final_text = str(result) if result else ""
+
+            # 如果没有通过 stream_delta 收到内容，则发送完整回复
+            if not content_chunks:
+                yield {"type": "content", "data": {"content": final_text, "has_recommendation": "[CREATE_PATENT_RECOMMENDATION]" in final_text}}
+
+            yield {"type": "done", "data": {
+                "message": {
+                    "id": str(threading.current_thread().ident),
+                    "role": "assistant",
+                    "content": final_text.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip(),
+                    "timestamp": "",
+                    "type": "text",
+                    "tool_calls": None,
+                },
+                "has_recommendation": "[CREATE_PATENT_RECOMMENDATION]" in final_text,
+                "conversation_id": session_id or "",
+            }}
 
 
 # 全局单例
