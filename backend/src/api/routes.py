@@ -170,6 +170,18 @@ async def _persist_conversation(conv_id: str) -> None:
         logger.warning(f"保存对话 {conv_id} 到数据库失败: {e}")
 
 
+async def _persist_workflow(task_id: str) -> None:
+    """持久化WorkflowContext到数据库"""
+    context = workflow_engine.get_workflow(task_id)
+    if context is None:
+        return
+    try:
+        data = _workflow_context_to_response(context).model_dump(mode="json")
+        await _get_persist_store().save("workflows", task_id, data)
+    except Exception as e:
+        logger.warning(f"保存工作流 {task_id} 到数据库失败: {e}")
+
+
 async def _persist_org_tree() -> None:
     if organization_tree_store is None:
         return
@@ -216,6 +228,36 @@ async def restore_stores_from_db() -> None:
     except Exception as e:
         logger.warning(f"恢复对话列表失败: {e}")
 
+    # 恢复工作流
+    restored_workflows = 0
+    try:
+        for key, value in await store.load_all("workflows"):
+            try:
+                # 通过workflow_engine重建WorkflowContext
+                existing = workflow_engine.get_workflow(key)
+                if not existing:
+                    ctx = workflow_engine.create_workflow(
+                        task_id=key,
+                        user_id=value.get("user_id", "unknown"),
+                        description="",  # 从持久化数据恢复
+                    )
+                    # 恢复状态
+                    from src.core.workflow_engine import WorkflowState
+                    ctx.current_phase = WorkflowState(value.get("current_state", "initialized"))
+                    ctx.iteration_count = value.get("iteration_count", 0)
+                    # 恢复输出
+                    outputs = value.get("outputs", {})
+                    ctx.requirement_analysis = outputs.get("requirement_analysis", {})
+                    ctx.retrieval_report = outputs.get("retrieval_report", {})
+                    ctx.patent_draft = outputs.get("patent_draft", {})
+                    ctx.review_report = outputs.get("review_report", {})
+                    ctx.brainstorming_output = outputs.get("brainstorming", {})
+                    restored_workflows += 1
+            except Exception as e:
+                logger.warning(f"恢复工作流 {key} 失败: {e}")
+    except Exception as e:
+        logger.warning(f"恢复工作流列表失败: {e}")
+
     # 恢复组织架构
     try:
         org_val = await store.load("org_tree", "root")
@@ -228,7 +270,8 @@ async def restore_stores_from_db() -> None:
     logger.info(
         f"从数据库恢复: {restored_tasks} 个任务, "
         f"{restored_events} 组事件, "
-        f"{restored_conversations} 个对话"
+        f"{restored_conversations} 个对话, "
+        f"{restored_workflows} 个工作流"
     )
 
 
@@ -531,6 +574,7 @@ async def create_workflow_session(request: WorkflowStartRequest):
             data={"state": context.current_phase.value},
         )
     await _persist_events(task_id)
+    await _persist_workflow(task_id)
     return _workflow_context_to_response(context)
 
 
@@ -610,6 +654,7 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
                     data={"state": context.current_phase.value},
                 )
             await _persist_events(task_id)
+            await _persist_workflow(task_id)
         except Exception as e:
             async with workflow_lock:
                 _append_workflow_event(
@@ -619,6 +664,7 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
                     event_type="workflow.failed",
                 )
             await _persist_events(task_id)
+            await _persist_workflow(task_id)
             raise
 
     background_tasks.add_task(run_workflow)
@@ -2007,6 +2053,7 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
                     data={"state": context.current_phase.value},
                 )
             await _persist_events(task_id)
+            await _persist_workflow(task_id)
         except Exception as e:
             logger.error(f"工作流自动执行失败: {e}")
             async with workflow_lock:
@@ -2017,6 +2064,7 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
                     event_type="workflow.failed",
                 )
             await _persist_events(task_id)
+            await _persist_workflow(task_id)
             # 将失败信息写入对话，让 CEO 与用户沟通
             async with conversations_lock:
                 c = conversations_store.get(conv_id)
