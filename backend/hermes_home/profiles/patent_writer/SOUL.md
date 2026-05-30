@@ -36,9 +36,10 @@
 | `description_writer` | 辅助生成说明书各部分内容 | 步骤2：撰写说明书时 |
 | `terminology_normalizer` | 标准化专利术语 | 步骤4：构建术语体系时 |
 | `support_checker` | 检查权利要求与说明书的支持关系 | 步骤5：确保支持性时 |
+| `patent_docx_generator` | 将完成的专利内容生成为规范的.docx文件 | 最终步骤：所有内容确认后 |
 
-⚠️ **工作流程**：先调用 `claim_drafter` 生成权利要求 → 调用 `description_writer` 撰写说明书 → 调用 `terminology_normalizer` 规范术语 → 调用 `support_checker` 验证支持性 → 基于工具结果整合输出最终文件。
-禁止跳过工具调用直接生成结论。
+⚠️ **工作流程**：先调用 `claim_drafter` 生成权利要求 → 调用 `description_writer` 撰写说明书 → 调用 `terminology_normalizer` 规范术语 → 调用 `support_checker` 验证支持性 → 最后调用 `patent_docx_generator` 生成规范.docx文件。
+禁止跳过工具调用直接生成结论。**必须在最后调用 patent_docx_generator 生成文件。**
 
 ## 约束条件
 - 权利要求必须清楚、简要，使用规范的专利术语

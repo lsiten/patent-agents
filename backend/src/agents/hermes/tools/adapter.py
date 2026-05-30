@@ -192,6 +192,13 @@ def _handle_dispatch_specialist(args: Dict[str, Any], **kw) -> str:
     return _json_result(result)
 
 
+def _handle_patent_docx_generator(args: Dict[str, Any], **kw) -> str:
+    from src.agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
+    tool = PatentDocxGeneratorTool()
+    result = _run_async(tool.execute(**args))
+    return _json_result(result)
+
+
 def _handle_prior_art_comparator(args: Dict[str, Any], **kw) -> str:
     from src.agents.hermes.tools.prior_art_comparator import PriorArtComparatorTool
     tool = PriorArtComparatorTool()
@@ -600,6 +607,41 @@ PATENT_TOOL_DEFINITIONS = [
         },
         "handler": _handle_dispatch_specialist,
         "emoji": "🎯",
+    },
+    {
+        "name": "patent_docx_generator",
+        "schema": {
+            "name": "patent_docx_generator",
+            "description": "将结构化的专利撰写结果生成为符合专利局规范的.docx文件。在完成权利要求书和说明书撰写后调用此工具，输入结构化内容，输出格式规范的专利申请文件。文件格式：楷体14pt、首行缩进、A4页面、标准页边距、文档分节。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "专利标题",
+                    },
+                    "claims": {
+                        "type": "object",
+                        "description": "权利要求书内容，格式: {\"independent_claim\": \"独立权利要求全文\", \"dependent_claims\": [\"从属权利要求1\", \"从属权利要求2\"]}",
+                    },
+                    "description": {
+                        "type": "object",
+                        "description": "说明书内容，格式: {\"technical_field\": \"技术领域\", \"background_art\": \"背景技术\", \"summary_of_invention\": \"发明内容\", \"description_of_drawings\": \"附图说明\", \"detailed_description\": \"具体实施方式\"}",
+                    },
+                    "abstract": {
+                        "type": "string",
+                        "description": "说明书摘要",
+                    },
+                    "task_id": {
+                        "type": "string",
+                        "description": "任务ID，用于文件存储路径",
+                    },
+                },
+                "required": ["title", "claims", "description", "abstract"],
+            },
+        },
+        "handler": _handle_patent_docx_generator,
+        "emoji": "📄",
     },
 ]
 
