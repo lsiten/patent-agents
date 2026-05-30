@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/Button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { CodeBlock } from '@/components/ui/CodeBlock';
 import { workflowApi, type WorkflowResponse } from '@/lib/api';
-import type { WorkflowState, WorkflowEvent, AgentInfo, AgentLogEntry } from '@/types';
+import type { WorkflowState, AgentInfo, AgentLogEntry } from '@/types';
 import {
   RequirementAnalysisView,
   RetrievalReportView,
@@ -136,9 +136,68 @@ function createAgents(currentState: WorkflowState, workflow: WorkflowResponse | 
   ];
 }
 
-function createEvents(_workflow: WorkflowResponse | null, _taskId: string): WorkflowEvent[] {
-  // Kept for potential future use; main log now uses AgentTerminalLog via SSE
-  return [];
+function createHistoryLogs(workflow: WorkflowResponse | null, taskId: string): AgentLogEntry[] {
+  if (!workflow) return [];
+
+  const createdAt = new Date(workflow.created_at).getTime();
+  const logs: AgentLogEntry[] = [
+    {
+      id: `hist_${taskId}_init`,
+      timestamp: workflow.created_at,
+      agent_name: 'CEO Agent',
+      type: 'dispatch',
+      dispatch_to: '工作流引擎',
+      dispatch_task: '启动专利申请流程',
+    },
+  ];
+
+  workflow.phase_history.forEach((phaseResult, index) => {
+    const agentName = phaseAgentMap[phaseResult.phase] ?? 'Workflow Engine';
+    const ts = new Date(createdAt + (index + 1) * 1000).toISOString();
+
+    // CEO调度事件
+    logs.push({
+      id: `hist_${taskId}_dispatch_${index}`,
+      timestamp: ts,
+      agent_name: 'CEO Agent',
+      type: 'dispatch',
+      dispatch_to: agentName,
+      dispatch_task: `执行${agentName}阶段任务`,
+    });
+
+    // Agent完成/失败事件
+    if (phaseResult.success) {
+      logs.push({
+        id: `hist_${taskId}_done_${index}`,
+        timestamp: new Date(createdAt + (index + 1) * 1000 + 500).toISOString(),
+        agent_name: agentName,
+        type: 'content',
+        content: `已完成，用时 ${phaseResult.duration_seconds.toFixed(2)} 秒`,
+        phase: phaseResult.phase,
+      });
+    } else {
+      logs.push({
+        id: `hist_${taskId}_err_${index}`,
+        timestamp: new Date(createdAt + (index + 1) * 1000 + 500).toISOString(),
+        agent_name: agentName,
+        type: 'error',
+        message: `执行失败${phaseResult.issues?.length ? '：' + phaseResult.issues[0] : ''}`,
+      });
+    }
+  });
+
+  if (!terminalStates.has(workflow.current_state)) {
+    const currentLabel = workflowSteps.find((step) => step.state === getWorkflowState(workflow))?.label ?? workflow.current_state;
+    logs.push({
+      id: `hist_${taskId}_progress`,
+      timestamp: new Date().toISOString(),
+      agent_name: 'Workflow Engine',
+      type: 'progress',
+      message: `当前阶段：${currentLabel}`,
+    });
+  }
+
+  return logs;
 }
 
 function getStatusLabel(workflow: WorkflowResponse | null): string {
@@ -286,6 +345,8 @@ export default function WorkflowPage() {
     return workflowSteps.findIndex((step) => step.state === currentState);
   }, [currentState]);
   const agents = useMemo(() => createAgents(currentState, workflow), [currentState, workflow]);
+  const historyLogs = useMemo(() => createHistoryLogs(workflow, taskId), [workflow, taskId]);
+  const allLogs = useMemo(() => [...historyLogs, ...agentLogs], [historyLogs, agentLogs]);
   const isTerminal = workflow ? terminalStates.has(workflow.current_state) : false;
 
   const loadWorkflow = useCallback(async (showLoading = false) => {
@@ -591,7 +652,7 @@ export default function WorkflowPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <AgentTerminalLog entries={agentLogs} />
+                  <AgentTerminalLog entries={allLogs} />
                 </CardContent>
               </Card>
 
