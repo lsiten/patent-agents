@@ -9,7 +9,6 @@ import {
   CheckSquare,
   User,
   ChevronRight,
-  Clock,
   AlertCircle,
   RefreshCw,
   Pause,
@@ -23,7 +22,7 @@ import { Button } from '@/components/ui/Button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { CodeBlock } from '@/components/ui/CodeBlock';
 import { workflowApi, type WorkflowResponse } from '@/lib/api';
-import type { WorkflowState, WorkflowEvent, AgentInfo } from '@/types';
+import type { WorkflowState, WorkflowEvent, AgentInfo, AgentLogEntry } from '@/types';
 import {
   RequirementAnalysisView,
   RetrievalReportView,
@@ -31,6 +30,7 @@ import {
   QualityReviewView,
   MultiRoundView,
 } from '@/components/workflow/AgentOutputRenderers';
+import { AgentTerminalLog } from '@/components/workflow/AgentTerminalLog';
 
 const workflowSteps: { state: WorkflowState; label: string; icon: typeof Brain }[] = [
   { state: 'initial', label: '已提交', icon: User },
@@ -136,44 +136,9 @@ function createAgents(currentState: WorkflowState, workflow: WorkflowResponse | 
   ];
 }
 
-function createEvents(workflow: WorkflowResponse | null, taskId: string): WorkflowEvent[] {
-  if (!workflow) return [];
-
-  const createdAt = new Date(workflow.created_at).getTime();
-  const events: WorkflowEvent[] = [
-    {
-      task_id: taskId,
-      timestamp: workflow.created_at,
-      agent: 'CEO Agent',
-      message: '任务创建成功，等待或执行专利申请流程',
-      type: 'info',
-    },
-    ...workflow.phase_history.map((phaseResult, index) => ({
-      task_id: taskId,
-      timestamp: new Date(createdAt + (index + 1) * 1000).toISOString(),
-      agent: phaseAgentMap[phaseResult.phase] ?? 'Workflow Engine',
-      message: phaseResult.success
-        ? `${phaseAgentMap[phaseResult.phase] ?? phaseResult.phase} 已完成，用时 ${phaseResult.duration_seconds.toFixed(2)} 秒`
-        : `${phaseAgentMap[phaseResult.phase] ?? phaseResult.phase} 执行失败`,
-      type: phaseResult.success ? 'success' as const : 'error' as const,
-      data: {
-        issues: phaseResult.issues,
-        warnings: phaseResult.warnings,
-      },
-    })),
-  ];
-
-  if (!terminalStates.has(workflow.current_state)) {
-    events.push({
-      task_id: taskId,
-      timestamp: new Date().toISOString(),
-      agent: 'Workflow Engine',
-      message: `当前阶段：${workflowSteps.find((step) => step.state === getWorkflowState(workflow))?.label ?? workflow.current_state}`,
-      type: 'progress',
-    });
-  }
-
-  return events.reverse();
+function createEvents(_workflow: WorkflowResponse | null, _taskId: string): WorkflowEvent[] {
+  // Kept for potential future use; main log now uses AgentTerminalLog via SSE
+  return [];
 }
 
 function getStatusLabel(workflow: WorkflowResponse | null): string {
@@ -210,13 +175,117 @@ export default function WorkflowPage() {
   const [error, setError] = useState<string | null>(null);
   const [pollIntervalMs, setPollIntervalMs] = useState(3000);
   const [isPaused, setIsPaused] = useState(false);
+  const [agentLogs, setAgentLogs] = useState<AgentLogEntry[]>([]);
+
+  // SSE连接：监听agent级别实时事件
+  useEffect(() => {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const es = new EventSource(`${baseUrl}/api/v1/tasks/${taskId}/stream`);
+
+    let logIdCounter = 0;
+    const createLogId = () => `log_${Date.now()}_${logIdCounter++}`;
+
+    const addLog = (entry: Omit<AgentLogEntry, 'id'>) => {
+      setAgentLogs((prev) => [...prev, { ...entry, id: createLogId() }]);
+    };
+
+    es.addEventListener('agent.thinking', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        addLog({
+          timestamp: new Date().toISOString(),
+          agent_name: data.agent_name || 'Agent',
+          type: 'thinking',
+          message: data.thought || data.message || '',
+        });
+      } catch {}
+    });
+
+    es.addEventListener('agent.tool_call_start', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        addLog({
+          timestamp: new Date().toISOString(),
+          agent_name: data.agent_name || 'Agent',
+          type: 'tool_start',
+          tool_name: data.tool_name || '',
+          tool_params: data.parameters || {},
+        });
+      } catch {}
+    });
+
+    es.addEventListener('agent.tool_call_end', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        addLog({
+          timestamp: new Date().toISOString(),
+          agent_name: data.agent_name || 'Agent',
+          type: 'tool_end',
+          tool_name: data.tool_name || '',
+          tool_result: data.result || '',
+          tool_success: data.success !== false,
+        });
+      } catch {}
+    });
+
+    es.addEventListener('agent.dispatch', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        addLog({
+          timestamp: new Date().toISOString(),
+          agent_name: data.from_agent || 'CEO Agent',
+          type: 'dispatch',
+          dispatch_to: data.to_agent || '',
+          dispatch_task: data.task_description || '',
+        });
+      } catch {}
+    });
+
+    es.addEventListener('agent.content', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        addLog({
+          timestamp: new Date().toISOString(),
+          agent_name: data.agent_name || 'Agent',
+          type: 'content',
+          content: data.content || '',
+          phase: data.phase || '',
+        });
+      } catch {}
+    });
+
+    es.addEventListener('workflow.progress_updated', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        addLog({
+          timestamp: new Date().toISOString(),
+          agent_name: data.agent_name || 'Workflow Engine',
+          type: 'progress',
+          message: data.message || `阶段 ${data.state} ${data.progress}%`,
+          phase: data.state || '',
+        });
+      } catch {}
+    });
+
+    es.addEventListener('done', () => {
+      es.close();
+    });
+
+    es.onerror = () => {
+      // SSE断连后自动由轮询恢复状态
+      es.close();
+    };
+
+    return () => {
+      es.close();
+    };
+  }, [taskId]);
 
   const currentState = getWorkflowState(workflow);
   const currentStepIndex = useMemo(() => {
     return workflowSteps.findIndex((step) => step.state === currentState);
   }, [currentState]);
   const agents = useMemo(() => createAgents(currentState, workflow), [currentState, workflow]);
-  const events = useMemo(() => createEvents(workflow, taskId), [workflow, taskId]);
   const isTerminal = workflow ? terminalStates.has(workflow.current_state) : false;
 
   const loadWorkflow = useCallback(async (showLoading = false) => {
@@ -268,21 +337,6 @@ export default function WorkflowPage() {
         return <Badge variant="orange">错误</Badge>;
       default:
         return <Badge variant="gray">等待中</Badge>;
-    }
-  };
-
-  const getEventIcon = (type: WorkflowEvent['type']) => {
-    switch (type) {
-      case 'success':
-        return <CheckSquare className="w-4 h-4 text-brand-green-dark" />;
-      case 'warning':
-        return <AlertCircle className="w-4 h-4 text-accent-orange" />;
-      case 'error':
-        return <AlertCircle className="w-4 h-4 text-red-500" />;
-      case 'progress':
-        return <RefreshCw className="w-4 h-4 text-brand-green animate-spin" />;
-      default:
-        return <Clock className="w-4 h-4 text-muted" />;
     }
   };
 
@@ -528,40 +582,16 @@ export default function WorkflowPage() {
 
             {/* Main Content - Event Log and Data Preview */}
             <div className="lg:col-span-2 space-y-xl">
-              {/* Event Log */}
+              {/* Event Log - Agent Terminal */}
               <Card>
                 <CardHeader>
                   <CardTitle>实时工作日志</CardTitle>
                   <CardDescription>
-                    各 Agent 的工作进展和输出记录
+                    各 Agent 的思考过程、工具调用和输出记录
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="bg-canvas-dark rounded-lg p-lg max-h-[500px] overflow-y-auto">
-                    <div className="space-y-md">
-                      {events.map((event, index) => (
-                        <div
-                          key={`${event.timestamp}-${index}`}
-                          className="flex items-start gap-md text-on-dark"
-                        >
-                          <div className="mt-0.5">{getEventIcon(event.type)}</div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-xs">
-                              <span className="text-body-sm-medium font-medium">
-                                {event.agent}
-                              </span>
-                              <span className="text-micro text-on-dark-muted">
-                                {new Date(event.timestamp).toLocaleTimeString()}
-                              </span>
-                            </div>
-                            <p className="text-body-sm text-on-dark-muted">
-                              {event.message}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  <AgentTerminalLog entries={agentLogs} />
                 </CardContent>
               </Card>
 

@@ -153,6 +153,36 @@ export interface WorkflowEvent {
   data?: Record<string, unknown>;
 }
 
+// ============ Agent实时日志类型 ============
+export type AgentLogEntryType =
+  | 'dispatch'       // CEO调度子agent
+  | 'thinking'       // agent思考过程
+  | 'tool_start'     // 工具调用开始
+  | 'tool_end'       // 工具调用完成
+  | 'content'        // agent最终输出
+  | 'progress'       // 阶段进度变化
+  | 'error';         // 错误
+
+export interface AgentLogEntry {
+  id: string;
+  timestamp: string;
+  agent_name: string;
+  type: AgentLogEntryType;
+  // dispatch
+  dispatch_to?: string;
+  dispatch_task?: string;
+  // thinking
+  message?: string;
+  // tool_start / tool_end
+  tool_name?: string;
+  tool_params?: Record<string, unknown>;
+  tool_result?: string;
+  tool_success?: boolean;
+  // content
+  content?: string;
+  phase?: string;
+}
+
 export interface AgentInfo {
   id: string;
   name: string;
