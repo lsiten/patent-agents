@@ -345,7 +345,8 @@ class HermesAgentService:
             "thinking": on_thinking,
             "tool_start": on_tool_start,
             "tool_complete": on_tool_complete,
-            "stream_delta": on_stream_delta,
+            # 注意：不传 stream_delta_callback，让 hermes-agent 在 final_response 中返回完整回复
+            # 如果传了 stream_delta，hermes-agent 可能流式输出但不填充 final_response
             "status": on_status,
         }
 
@@ -391,15 +392,20 @@ class HermesAgentService:
             else:
                 final_text = str(result) if result else ""
 
-            # 如果没有通过 stream_delta 收到内容，则发送完整回复
-            if not content_chunks:
+            # 如果 stream_delta 有内容，用它拼接（streaming 模式下 final_response 可能为空）
+            if content_chunks:
+                final_text = "".join(content_chunks)
+
+            # 如果没有通过 stream_delta 收到内容且 final_text 非空，发送完整回复
+            if not content_chunks and final_text:
                 yield {"type": "content", "data": {"content": final_text, "has_recommendation": "[CREATE_PATENT_RECOMMENDATION]" in final_text}}
 
+            clean_text = final_text.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
             yield {"type": "done", "data": {
                 "message": {
                     "id": str(threading.current_thread().ident),
                     "role": "assistant",
-                    "content": final_text.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip(),
+                    "content": clean_text,
                     "timestamp": "",
                     "type": "text",
                     "tool_calls": None,
