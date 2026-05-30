@@ -372,6 +372,7 @@ class PatentWorkflowEngine:
 
                     # 发射 Agent 输出完成事件
                     await publish_event(AgentContentEvent(
+                        event_type=EventType.AGENT_CONTENT,
                         task_id=context.task_id,
                         user_id=context.user_id,
                         agent_name=agent_display_name,
@@ -1023,6 +1024,7 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
 
                 if event_type == "thinking":
                     await publish_event(AgentThinkingEvent(
+                        event_type=EventType.AGENT_THINKING,
                         task_id=context.task_id,
                         user_id=context.user_id,
                         agent_name=agent_name,
@@ -1032,6 +1034,7 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
 
                 elif event_type == "tool_call_start":
                     await publish_event(AgentToolCallStartEvent(
+                        event_type=EventType.AGENT_TOOL_CALL_START,
                         task_id=context.task_id,
                         user_id=context.user_id,
                         agent_name=agent_name,
@@ -1041,6 +1044,7 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
 
                 elif event_type == "tool_call_end":
                     await publish_event(AgentToolCallEndEvent(
+                        event_type=EventType.AGENT_TOOL_CALL_END,
                         task_id=context.task_id,
                         user_id=context.user_id,
                         agent_name=agent_name,
