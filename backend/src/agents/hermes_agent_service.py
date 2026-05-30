@@ -21,10 +21,13 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-# Agent 配置目录
+# Agent 配置目录（兼容旧格式）
 AGENTS_CONFIG_DIR = Path(__file__).parent.parent.parent / "hermes_agents"
 
-# Hermes Home 重定向到项目目录（而非 ~/.hermes）
+# Hermes Profiles 根目录（新架构：每个 Agent = 独立 Profile）
+HERMES_PROFILES_DIR = Path(__file__).parent.parent.parent / "hermes_home" / "profiles"
+
+# 默认 Hermes Home（共享的 auth、基础配置等）
 HERMES_HOME_DIR = Path(__file__).parent.parent.parent / "hermes_home"
 HERMES_HOME_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -156,16 +159,22 @@ class HermesAgentService:
         self._load_all_configs()
 
     def _load_all_configs(self) -> None:
-        """加载所有 Agent 配置"""
-        if not AGENTS_CONFIG_DIR.exists():
-            logger.warning("Agent config directory not found: %s", AGENTS_CONFIG_DIR)
-            return
+        """加载所有 Agent 配置（优先从 Profiles 目录，兼容旧 hermes_agents 目录）"""
+        # 优先从 Hermes Profiles 目录加载
+        if HERMES_PROFILES_DIR.exists():
+            for subdir in HERMES_PROFILES_DIR.iterdir():
+                if subdir.is_dir() and (subdir / "config.yaml").exists():
+                    config = HermesAgentConfig(subdir)
+                    self._configs[config.profile_id] = config
+                    logger.info("Loaded profile: %s (%s)", config.name, config.profile_id)
 
-        for subdir in AGENTS_CONFIG_DIR.iterdir():
-            if subdir.is_dir() and (subdir / "config.yaml").exists():
-                config = HermesAgentConfig(subdir)
-                self._configs[config.profile_id] = config
-                logger.info("Loaded agent config: %s (%s)", config.name, config.profile_id)
+        # Fallback: 从旧的 hermes_agents 目录加载（兼容）
+        if not self._configs and AGENTS_CONFIG_DIR.exists():
+            for subdir in AGENTS_CONFIG_DIR.iterdir():
+                if subdir.is_dir() and (subdir / "config.yaml").exists():
+                    config = HermesAgentConfig(subdir)
+                    self._configs[config.profile_id] = config
+                    logger.info("Loaded agent config (legacy): %s (%s)", config.name, config.profile_id)
 
     def _ensure_patent_tools(self) -> None:
         """确保专利工具已注册到 hermes-agent registry"""
@@ -218,6 +227,15 @@ class HermesAgentService:
             raise ValueError(f"Agent config not found: {profile_id}")
 
         from run_agent import AIAgent
+
+        # 每个 Agent 使用独立的 Profile 目录作为 HERMES_HOME
+        # 这确保 sessions、memories、skills、cron 完全隔离
+        agent_dir_name = config.dir_path.name  # e.g. "ceo"
+        profile_home = HERMES_PROFILES_DIR / agent_dir_name
+        if profile_home.exists():
+            os.environ["HERMES_HOME"] = str(profile_home)
+        else:
+            os.environ["HERMES_HOME"] = str(HERMES_HOME_DIR)
 
         # 从项目 settings 获取 LLM 基础配置
         try:

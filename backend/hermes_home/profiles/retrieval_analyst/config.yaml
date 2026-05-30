@@ -1,0 +1,18 @@
+profile_id: patent.retrieval_analyst.v1
+name: 检索分析师
+description: 专利检索与分析专家，负责现有技术调研、专利性评估和风险识别
+role: specialist
+model: default
+temperature: 0.3
+max_tokens: 4096
+enabled_toolsets:
+- patent
+enabled_tools:
+- patent_search
+- similarity_analyzer
+- patentability_scorer
+- risk_analyzer
+memory:
+  short_term: true
+  long_term: true
+  knowledge_base: true
