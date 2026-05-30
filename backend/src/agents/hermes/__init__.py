@@ -5,8 +5,8 @@ Hermes Agent 工具层
 旧的 base/memory/profiles 已移除，由 run_agent.AIAgent 替代。
 """
 
-from .tools import register_all_tools
+from .tools import init_patent_tools
 
 __all__ = [
-    "register_all_tools",
+    "init_patent_tools",
 ]
