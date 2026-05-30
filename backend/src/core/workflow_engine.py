@@ -289,9 +289,28 @@ class PatentWorkflowEngine:
                 dispatched = self._extract_dispatch_intent(ceo_text, context)
 
                 if not dispatched:
-                    # CEO 没有调度意图，流程结束
-                    self._logger.info("CEO has no more dispatch intents, finishing")
-                    break
+                    # 检查是否还有未完成阶段
+                    done_fields = {
+                        "requirement_analysis": bool(context.requirement_analysis),
+                        "retrieval_report": bool(context.retrieval_report),
+                        "patent_draft": bool(context.patent_draft),
+                        "review_report": bool(context.review_report),
+                    }
+                    pending = [k for k, v in done_fields.items() if not v]
+                    
+                    if not pending:
+                        # 所有阶段都完成了
+                        self._logger.info("All phases completed, finishing")
+                        break
+                    
+                    # 还有未完成阶段，强制提示 CEO 继续调度
+                    phase_to_agent = {"requirement_analysis": "requirement_analyst", "retrieval_report": "retrieval_analyst", "patent_draft": "patent_writer", "review_report": "quality_reviewer"}
+                    next_agent = phase_to_agent[pending[0]]
+                    self._logger.info(f"CEO didn't dispatch, forcing next: {next_agent}")
+                    
+                    force_prompt = f"你还没有调度下一个Agent。未完成阶段: {pending}。请立即调度下一个Agent：\n\ndispatch_specialist(agent_id=\"{next_agent}\", task=\"请执行你的专业工作\")"
+                    ceo_history.append({"role": "user", "content": force_prompt})
+                    continue
 
                 # 执行 CEO 指示的 Agent 调度
                 for agent_id, task_desc in dispatched:
