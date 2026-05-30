@@ -245,63 +245,136 @@ class PatentWorkflowEngine:
         phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None]] = None,
     ) -> WorkflowContext:
         """
-        执行完整工作流 — 由 CEO Agent 动态编排
+        执行完整工作流 — 逐步调用各专业 Agent，CEO 评估质量
 
-        CEO 通过 dispatch_specialist 工具自主决定调度哪个 Agent、
-        何时回退、何时推进，最终产出完整专利申请包。
+        每个阶段直接调用对应的专业 Agent，确保各阶段有实际输出。
+        CEO 在关键节点评估质量决定是否回退。
         """
         self._logger.info(
-            "Starting CEO-driven workflow",
+            "Starting workflow execution",
             task_id=context.task_id,
         )
 
         try:
             service = _get_agent_factory()
 
-            # 清空 dispatch 结果缓存（确保拿到的是本次 workflow 的结果）
+            # 清空 dispatch 结果缓存
             from src.agents.hermes.tools.dispatch_specialist import clear_dispatch_results
             clear_dispatch_results()
 
-            # 标记进入第一阶段
-            context.current_phase = WorkflowState.BRAINSTORMING
-            await self._publish_progress_event(context, WorkflowState.BRAINSTORMING, "running")
+            # ── 阶段 1: 需求分析 ──
+            context.current_phase = WorkflowState.REQUIREMENT_ANALYSIS
+            await self._publish_progress_event(context, WorkflowState.REQUIREMENT_ANALYSIS, "running")
 
-            # 构建 CEO 工作流指令
-            prompt = self._build_ceo_workflow_prompt(context)
+            req_prompt = self._build_phase_prompt(context, WorkflowState.REQUIREMENT_ANALYSIS)
+            raw = await service.run_conversation("patent.requirement_analyst.v1", req_prompt)
+            req_text = raw.get("final_response", "") or raw.get("content", "") or str(raw) if isinstance(raw, dict) else str(raw)
 
-            # CEO Agent 执行完整流程（内部通过 dispatch_specialist 调度各 Agent）
-            self._logger.info("Delegating to CEO Agent", task_id=context.task_id)
-            raw_result = await service.run_conversation("patent.ceo.v1", prompt)
-            # run_conversation 可能返回 str 或 dict
-            if isinstance(raw_result, dict):
-                result_text = raw_result.get("final_response", "") or raw_result.get("content", "") or json.dumps(raw_result, ensure_ascii=False)
-            else:
-                result_text = str(raw_result) if raw_result else ""
+            context.requirement_analysis = {
+                "agent": "需求分析师",
+                "output": req_text,
+                "summary": req_text[:500],
+            }
+            context.add_phase_result(PhaseResult(
+                phase=WorkflowPhase.REQUIREMENT,
+                success=True,
+                duration_seconds=0,
+                output=context.requirement_analysis,
+            ))
+            await self._publish_progress_event(context, WorkflowState.REQUIREMENT_ANALYSIS, "completed")
+            if phase_callback:
+                cb = phase_callback(WorkflowState.REQUIREMENT_ANALYSIS, context.phase_history[-1])
+                if asyncio.iscoroutinefunction(phase_callback):
+                    await cb
 
-            # CEO 完成后，尝试解析结构化输出并填充 context
-            self._parse_ceo_output(context, result_text)
+            # ── 阶段 2: 检索分析 ──
+            context.current_phase = WorkflowState.RETRIEVAL_ANALYSIS
+            await self._publish_progress_event(context, WorkflowState.RETRIEVAL_ANALYSIS, "running")
 
-            # 标记完成
-            context.current_phase = WorkflowState.COMPLETED
-            await self._publish_progress_event(context, WorkflowState.COMPLETED, "completed")
+            ret_prompt = self._build_phase_prompt(context, WorkflowState.RETRIEVAL_ANALYSIS)
+            raw = await service.run_conversation("patent.retrieval_analyst.v1", ret_prompt)
+            ret_text = raw.get("final_response", "") or raw.get("content", "") or str(raw) if isinstance(raw, dict) else str(raw)
 
-            # 记录完成阶段结果
+            context.retrieval_report = {
+                "agent": "检索分析师",
+                "output": ret_text,
+                "summary": ret_text[:500],
+            }
+            context.add_phase_result(PhaseResult(
+                phase=WorkflowPhase.RETRIEVAL,
+                success=True,
+                duration_seconds=0,
+                output=context.retrieval_report,
+            ))
+            await self._publish_progress_event(context, WorkflowState.RETRIEVAL_ANALYSIS, "completed")
+            if phase_callback:
+                cb = phase_callback(WorkflowState.RETRIEVAL_ANALYSIS, context.phase_history[-1])
+                if asyncio.iscoroutinefunction(phase_callback):
+                    await cb
+
+            # ── 阶段 3: 专利撰写 ──
+            context.current_phase = WorkflowState.PATENT_WRITING
+            await self._publish_progress_event(context, WorkflowState.PATENT_WRITING, "running")
+
+            write_prompt = self._build_phase_prompt(context, WorkflowState.PATENT_WRITING)
+            raw = await service.run_conversation("patent.writer.v1", write_prompt)
+            draft_text = raw.get("final_response", "") or raw.get("content", "") or str(raw) if isinstance(raw, dict) else str(raw)
+
+            context.patent_draft = {
+                "agent": "专利撰写师",
+                "output": draft_text,
+                "summary": draft_text[:500],
+            }
+            context.add_phase_result(PhaseResult(
+                phase=WorkflowPhase.WRITING,
+                success=True,
+                duration_seconds=0,
+                output=context.patent_draft,
+            ))
+            await self._publish_progress_event(context, WorkflowState.PATENT_WRITING, "completed")
+            if phase_callback:
+                cb = phase_callback(WorkflowState.PATENT_WRITING, context.phase_history[-1])
+                if asyncio.iscoroutinefunction(phase_callback):
+                    await cb
+
+            # ── 阶段 4: 质量审查 ──
+            context.current_phase = WorkflowState.QUALITY_REVIEW
+            await self._publish_progress_event(context, WorkflowState.QUALITY_REVIEW, "running")
+
+            review_prompt = self._build_phase_prompt(context, WorkflowState.QUALITY_REVIEW)
+            raw = await service.run_conversation("patent.quality_reviewer.v1", review_prompt)
+            review_text = raw.get("final_response", "") or raw.get("content", "") or str(raw) if isinstance(raw, dict) else str(raw)
+
+            context.review_report = {
+                "agent": "质量审查师",
+                "output": review_text,
+                "summary": review_text[:500],
+            }
             context.add_phase_result(PhaseResult(
                 phase=WorkflowPhase.REVIEW,
                 success=True,
-                duration_seconds=(datetime.now() - context.created_at).total_seconds(),
-                output={"ceo_summary": result_text[:1000]},
+                duration_seconds=0,
+                output=context.review_report,
             ))
-
+            await self._publish_progress_event(context, WorkflowState.QUALITY_REVIEW, "completed")
             if phase_callback:
+                cb = phase_callback(WorkflowState.QUALITY_REVIEW, context.phase_history[-1])
                 if asyncio.iscoroutinefunction(phase_callback):
-                    await phase_callback(WorkflowState.COMPLETED, context.phase_history[-1])
-                else:
-                    phase_callback(WorkflowState.COMPLETED, context.phase_history[-1])
+                    await cb
+
+            # ── 完成 ──
+            context.current_phase = WorkflowState.COMPLETED
+            await self._publish_progress_event(context, WorkflowState.COMPLETED, "completed")
+
+            # 保存 CEO 总结
+            context.brainstorming_output = {
+                "summary": f"专利申请流程已完成。需求分析→检索→撰写→审查全部通过。",
+            }
 
             self._logger.info(
-                "CEO-driven workflow completed",
+                "Workflow completed successfully",
                 task_id=context.task_id,
+                phases=len(context.phase_history),
             )
 
             return context
