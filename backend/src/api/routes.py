@@ -205,8 +205,9 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
 
 
 def _get_agent_memory_stats(profile_id: str, dir_name: str) -> Dict[str, Any]:
-    """从 hermes session 文件读取 Agent 的实际记忆统计数据"""
+    """从 hermes session 文件读取 Agent 的实际记忆统计数据和条目"""
     import os as _mem_os
+    import json as _mem_json
     from pathlib import Path as _MemPath
 
     hermes_home = _MemPath(__file__).parent.parent.parent / "hermes_home"
@@ -217,51 +218,102 @@ def _get_agent_memory_stats(profile_id: str, dir_name: str) -> Dict[str, Any]:
     total_sessions = 0
     total_size = 0
     last_updated = None
+    entries: List[Dict[str, Any]] = []  # 记忆条目
 
     # 1. Profile-specific sessions (short_term memory)
     if profile_sessions_dir.is_dir():
-        for f in profile_sessions_dir.glob("*.json"):
+        for f in sorted(profile_sessions_dir.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
             try:
-                import json as _mem_json
                 with open(f, "r", encoding="utf-8") as fh:
                     data = _mem_json.load(fh)
                 if isinstance(data, dict):
-                    total_messages += data.get("message_count", 0)
+                    msg_count = data.get("message_count", 0)
+                    total_messages += msg_count
                     total_sessions += 1
                     total_size += f.stat().st_size
                     updated = data.get("last_updated")
                     if updated and (last_updated is None or updated > last_updated):
                         last_updated = updated
+                    # 提取消息作为记忆条目
+                    for msg in data.get("messages", [])[-20:]:  # 最近20条
+                        role = msg.get("role", "unknown")
+                        content = msg.get("content", "")
+                        if content and role in ("user", "assistant"):
+                            ts = msg.get("timestamp") or updated or ""
+                            entries.append({
+                                "id": f"{f.stem}_{len(entries)}",
+                                "type": "context" if role == "assistant" else "event",
+                                "key": f"[{role}] {content[:50]}",
+                                "value": content[:300],
+                                "score": None,
+                                "created_at": ts,
+                                "updated_at": ts,
+                                "tags": [role, data.get("session_id", "")[:20]],
+                            })
             except Exception:
                 pass
 
-    # 2. Global sessions that match this profile (conv_* sessions used by CEO)
+    # 2. Global sessions that match this profile
     if global_sessions_dir.is_dir():
-        for f in global_sessions_dir.glob("*.json"):
+        for f in sorted(global_sessions_dir.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
             try:
                 with open(f, "r", encoding="utf-8") as fh:
                     data = _mem_json.load(fh)
                 if isinstance(data, dict):
-                    # Check if session belongs to this agent
                     session_id = data.get("session_id", "")
                     sys_prompt = data.get("system_prompt", "")
                     if dir_name in session_id or dir_name in sys_prompt:
-                        total_messages += data.get("message_count", 0)
+                        msg_count = data.get("message_count", 0)
+                        total_messages += msg_count
                         total_sessions += 1
                         total_size += f.stat().st_size
                         updated = data.get("last_updated")
                         if updated and (last_updated is None or updated > last_updated):
                             last_updated = updated
+                        # 提取消息
+                        for msg in data.get("messages", [])[-10:]:
+                            role = msg.get("role", "unknown")
+                            content = msg.get("content", "")
+                            if content and role in ("user", "assistant"):
+                                ts = msg.get("timestamp") or updated or ""
+                                entries.append({
+                                    "id": f"{f.stem}_{len(entries)}",
+                                    "type": "context" if role == "assistant" else "event",
+                                    "key": f"[{role}] {content[:50]}",
+                                    "value": content[:300],
+                                    "score": None,
+                                    "created_at": ts,
+                                    "updated_at": ts,
+                                    "tags": [role, session_id[:20]],
+                                })
             except Exception:
                 pass
+
+    # 限制总条目数（前端性能）
+    entries = entries[:50]
 
     return {
         "short_term_count": total_messages,
         "short_term_size": total_size,
-        "long_term_count": total_sessions,  # sessions = long term memory entries
+        "short_term_entries": entries,
+        "long_term_count": total_sessions,
         "long_term_size": total_size,
+        "long_term_entries": [
+            {
+                "id": f"session_{i}",
+                "type": "fact",
+                "key": f"会话 {i+1}",
+                "value": e["key"][:80],
+                "score": None,
+                "created_at": e.get("created_at", ""),
+                "updated_at": e.get("updated_at", ""),
+                "tags": ["session"],
+            }
+            for i, e in enumerate(entries[:total_sessions])
+        ] if entries else [],
         "knowledge_base_count": total_sessions,
         "knowledge_base_size": total_size,
+        "knowledge_base_entries": [],
         "last_updated": last_updated,
     }
 
@@ -1135,7 +1187,7 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
                 "item_count": mem_stats["short_term_count"],
                 "last_updated": mem_stats["last_updated"] or now,
                 "content": None,
-                "entries": [],
+                "entries": mem_stats["short_term_entries"],
             })
         if memory_cfg.get("long_term", False):
             memories.append({
@@ -1146,7 +1198,7 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
                 "item_count": mem_stats["long_term_count"],
                 "last_updated": mem_stats["last_updated"] or now,
                 "content": None,
-                "entries": [],
+                "entries": mem_stats["long_term_entries"],
             })
         if memory_cfg.get("knowledge_base", False):
             memories.append({
@@ -1157,7 +1209,7 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
                 "item_count": mem_stats["knowledge_base_count"],
                 "last_updated": mem_stats["last_updated"] or now,
                 "content": None,
-                "entries": [],
+                "entries": mem_stats["knowledge_base_entries"],
             })
 
         config_overrides = _override_store.get_config_overrides(agent_id)
