@@ -408,6 +408,7 @@ export default function ResultPage() {
                   <Tabs value={activeTab} onValueChange={setActiveTab}>
                     <TabsList variant="segmented">
                       <TabsTrigger value="overview">概览</TabsTrigger>
+                      <TabsTrigger value="retrieval">检索报告</TabsTrigger>
                       <TabsTrigger value="claims">权利要求书</TabsTrigger>
                       <TabsTrigger value="description">说明书</TabsTrigger>
                       <TabsTrigger value="review">审查意见</TabsTrigger>
@@ -457,6 +458,125 @@ export default function ResultPage() {
                                 </CardContent>
                               </Card>
                             )}
+                          </div>
+                        </div>
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="retrieval">
+                      <div className="space-y-lg">
+                        {/* 检索策略 */}
+                        <div>
+                          <h3 className="text-heading-5 font-euclid font-medium text-ink mb-md">检索策略</h3>
+                          <div className="space-y-sm">
+                            {(() => {
+                              const strategy = (workflow?.outputs.retrieval_report as Record<string, unknown>)?.retrieval_strategy as Record<string, unknown> | undefined;
+                              if (!strategy) return <p className="text-body-sm text-steel">暂无检索策略数据</p>;
+                              return (
+                                <>
+                                  <div>
+                                    <span className="text-body-sm-medium text-ink">检索数据库：</span>
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {(strategy.databases_used as string[] || []).map((db: string) => (
+                                        <Badge key={db} variant="green-soft">{db}</Badge>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <span className="text-body-sm-medium text-ink">检索关键词：</span>
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {(strategy.keywords as string[] || []).map((kw: string) => (
+                                        <Badge key={kw} variant="soft" color="blue">{kw}</Badge>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  {(strategy.classifications as string[] || []).length > 0 && (
+                                    <div>
+                                      <span className="text-body-sm-medium text-ink">IPC/CPC 分类号：</span>
+                                      <div className="flex flex-wrap gap-1 mt-1">
+                                        {(strategy.classifications as string[] || []).map((cls: string) => (
+                                          <Badge key={cls} variant="soft" color="purple">{cls}</Badge>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+
+                        {/* 相似专利列表 */}
+                        <div>
+                          <h3 className="text-heading-5 font-euclid font-medium text-ink mb-md">
+                            相似专利 ({((workflow?.outputs.retrieval_report as Record<string, unknown>)?.similar_patents as unknown[] || []).length} 项)
+                          </h3>
+                          <div className="space-y-md">
+                            {(((workflow?.outputs.retrieval_report as Record<string, unknown>)?.similar_patents as Record<string, unknown>[]) || []).map((patent, idx) => {
+                              const patentId = String(patent.patent_id || '');
+                              const source = String(patent.source || '');
+                              const getPatentUrl = (id: string, src: string) => {
+                                if (src === 'CNIPA' || id.startsWith('CN')) return `https://patents.google.com/patent/${id}`;
+                                if (src === 'USPTO' || id.startsWith('US')) return `https://patents.google.com/patent/${id.replace('/', '')}`;
+                                if (src === 'EPO' || id.startsWith('EP')) return `https://patents.google.com/patent/${id}`;
+                                if (src === 'WIPO' || id.startsWith('WO')) return `https://patents.google.com/patent/${id.replace('/', '')}`;
+                                return `https://patents.google.com/patent/${id}`;
+                              };
+                              const similarityScore = Number(patent.similarity_score || 0);
+                              const riskLevel = String(patent.risk_level || 'low');
+                              const riskColor = riskLevel === 'high' ? 'text-red-600' : riskLevel === 'medium' ? 'text-amber-600' : 'text-green-600';
+
+                              return (
+                                <div key={idx} className="p-4 border border-hairline rounded-xl bg-surface/50 hover:bg-surface transition-colors">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <a
+                                          href={getPatentUrl(patentId, source)}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-body-sm-medium text-brand-green-dark hover:underline font-mono"
+                                        >
+                                          {patentId}
+                                        </a>
+                                        <Badge variant="soft" color="blue">{source}</Badge>
+                                        <span className={`text-xs font-medium ${riskColor}`}>
+                                          风险: {riskLevel}
+                                        </span>
+                                      </div>
+                                      <p className="text-body-sm font-medium text-ink truncate">{String(patent.title || '')}</p>
+                                      <p className="text-body-xs text-steel mt-0.5">
+                                        {String(patent.applicant || '')} · {String(patent.publication_date || '')}
+                                      </p>
+                                    </div>
+                                    <div className="flex-shrink-0 text-right">
+                                      <div className="text-lg font-semibold text-ink">{Math.round(similarityScore * 100)}%</div>
+                                      <div className="text-body-xs text-steel">相似度</div>
+                                    </div>
+                                  </div>
+                                  {((patent.key_similarities as string[]) || []).length > 0 && (
+                                    <div className="mt-2 pt-2 border-t border-hairline">
+                                      <p className="text-body-xs text-steel mb-1">相似点：</p>
+                                      <ul className="text-body-xs text-ink space-y-0.5">
+                                        {((patent.key_similarities as string[]) || []).map((s: string, i: number) => (
+                                          <li key={i}>• {s}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {((patent.key_differences as string[]) || []).length > 0 && (
+                                    <div className="mt-1">
+                                      <p className="text-body-xs text-steel mb-1">区别点：</p>
+                                      <ul className="text-body-xs text-green-700 space-y-0.5">
+                                        {((patent.key_differences as string[]) || []).map((d: string, i: number) => (
+                                          <li key={i}>✓ {d}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       </div>
