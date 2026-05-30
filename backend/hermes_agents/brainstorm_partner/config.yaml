@@ -1,0 +1,16 @@
+profile_id: patent.brainstorm_partner.v1
+name: 头脑风暴伙伴
+description: 专利申请前的创意探讨伙伴，帮助用户梳理发明思路，拓展保护方向
+role: assistant
+model: default
+temperature: 0.6
+max_tokens: 4096
+enabled_toolsets:
+- patent
+enabled_tools:
+- creative_thinking
+- patent_strategy_guide
+memory:
+  short_term: true
+  long_term: false
+  knowledge_base: false
