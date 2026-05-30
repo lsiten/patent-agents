@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from src.core.logging import get_logger
 from src.core.events import (
     publish_event,
+    EventType,
     AgentThinkingEvent,
     AgentToolCallStartEvent,
     AgentToolCallEndEvent,
@@ -336,6 +337,7 @@ class PatentWorkflowEngine:
 
                     # 发射 CEO 调度事件
                     await publish_event(AgentDispatchEvent(
+                        event_type=EventType.AGENT_DISPATCH,
                         task_id=context.task_id,
                         user_id=context.user_id,
                         from_agent="CEO Agent",
