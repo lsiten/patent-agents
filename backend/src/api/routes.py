@@ -71,6 +71,11 @@ from ..core.override_store import get_override_store
 
 _override_store = get_override_store()
 
+# ── Hermes Agent Service (真实 hermes-agent 集成) ──
+from ..agents.hermes_agent_service import get_hermes_agent_service
+
+_hermes_service = get_hermes_agent_service()
+
 # ── 持久化存储辅助 ──
 _store_instance = None
 
@@ -1308,6 +1313,103 @@ async def delete_agent_skill_endpoint(agent_id: str, skill_id: str) -> dict:
     if not success:
         raise HTTPException(status_code=404, detail="技能不存在")
     return {"success": True, "skill_id": skill_id}
+
+
+# ============ Hermes Agent 对话 (基于真实 hermes-agent) ============
+@router.post("/agents/{agent_id}/chat")
+async def hermes_agent_chat(agent_id: str, body: dict) -> dict:
+    """使用真实 hermes-agent AIAgent 进行对话"""
+    content = body.get("content", "").strip()
+    session_id = body.get("session_id")
+    user_id = body.get("user_id", "default_user")
+
+    if not content:
+        raise HTTPException(status_code=400, detail="对话内容不能为空")
+
+    # 使用 HermesAgentService 运行对话
+    try:
+        result = await _hermes_service.run_conversation(
+            profile_id=agent_id,
+            user_input=content,
+            session_id=session_id,
+            user_id=user_id,
+        )
+        return {
+            "success": True,
+            "agent_id": agent_id,
+            "response": result,
+            "session_id": session_id,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Hermes agent chat failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Agent 对话失败: {str(e)[:200]}")
+
+
+@router.post("/agents/{agent_id}/chat/stream")
+async def hermes_agent_chat_stream(agent_id: str, body: dict):
+    """使用真实 hermes-agent AIAgent 进行流式对话（SSE）"""
+    import json as _json
+
+    content = body.get("content", "").strip()
+    session_id = body.get("session_id")
+    user_id = body.get("user_id", "default_user")
+
+    if not content:
+        raise HTTPException(status_code=400, detail="对话内容不能为空")
+
+    async def event_generator():
+        try:
+            async for event in _hermes_service.run_conversation_stream(
+                profile_id=agent_id,
+                user_input=content,
+                session_id=session_id,
+                user_id=user_id,
+            ):
+                event_type = event.get("type", "status")
+                event_data = event.get("data", {})
+                yield f"event: {event_type}\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
+        except ValueError as e:
+            yield f"event: error\ndata: {_json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"event: error\ndata: {_json.dumps({'error': str(e)[:200]}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/agents/{agent_id}/hermes-info")
+async def get_hermes_agent_info(agent_id: str) -> dict:
+    """获取 Hermes Agent 的运行时信息（基于真实 hermes-agent）"""
+    config = _hermes_service.get_config(agent_id)
+    if not config:
+        raise HTTPException(status_code=404, detail=f"Hermes Agent 未找到: {agent_id}")
+
+    return {
+        "profile_id": config.profile_id,
+        "name": config.name,
+        "description": config.description,
+        "role": config.role,
+        "model": config.model,
+        "temperature": config.temperature,
+        "max_tokens": config.max_tokens,
+        "enabled_toolsets": config.enabled_toolsets,
+        "enabled_tools": config.enabled_tools,
+        "skills": config.skills,
+        "hermes_agent_version": "0.15.1",
+        "capabilities": {
+            "tool_calling": True,
+            "memory_persistent": True,
+            "skills_self_improving": True,
+            "cron_scheduling": True,
+            "context_compression": True,
+            "session_search": True,
+        },
+    }
 
 
 # ============ 组织架构相关 ============
