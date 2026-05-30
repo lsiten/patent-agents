@@ -109,6 +109,8 @@ def _on_agent_event(event: BaseEvent):
     else:
         message = "事件"
 
+    logger.info(f"[AgentEvent] {event_type_str} | {agent_name} | {message[:80]}")
+
     task_events.setdefault(task_id, []).append(
         WorkflowEventResponse(
             task_id=task_id,
@@ -579,9 +581,26 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
                 },
             )
 
+    def _workflow_event_callback(agent_name: str, event_type: str, message: str, data: Dict[str, Any]):
+        """直接将agent事件写入task_events（绕过事件总线）"""
+        task_events.setdefault(task_id, []).append(
+            WorkflowEventResponse(
+                task_id=task_id,
+                timestamp=datetime.now(),
+                agent=agent_name,
+                message=message,
+                event_type=event_type,
+                data=data,
+            )
+        )
+
     async def run_workflow():
         try:
-            await workflow_engine.execute_full_workflow(context, phase_callback=phase_callback)
+            await workflow_engine.execute_full_workflow(
+                context,
+                phase_callback=phase_callback,
+                event_callback=_workflow_event_callback,
+            )
             async with workflow_lock:
                 _append_workflow_event(
                     task_id=task_id,
@@ -1944,6 +1963,19 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
     # 自动启动工作流（后台执行）
     async def auto_start_workflow():
         """自动启动工作流的后台任务"""
+        def _workflow_event_callback(agent_name: str, event_type: str, message: str, data: Dict[str, Any]):
+            """直接将agent事件写入task_events"""
+            task_events.setdefault(task_id, []).append(
+                WorkflowEventResponse(
+                    task_id=task_id,
+                    timestamp=datetime.now(),
+                    agent=agent_name,
+                    message=message,
+                    event_type=event_type,
+                    data=data,
+                )
+            )
+
         async def phase_callback(phase, result):
             async with workflow_lock:
                 _append_workflow_event(
@@ -1961,7 +1993,11 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             await _persist_events(task_id)
 
         try:
-            await workflow_engine.execute_full_workflow(context, phase_callback=phase_callback)
+            await workflow_engine.execute_full_workflow(
+                context,
+                phase_callback=phase_callback,
+                event_callback=_workflow_event_callback,
+            )
             async with workflow_lock:
                 _append_workflow_event(
                     task_id=task_id,
