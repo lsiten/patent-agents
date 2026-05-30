@@ -184,7 +184,8 @@ class OpenAIClient(BaseLLMClient):
         max_tokens: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
-        **kwargs,
+        response_format: Optional[Dict[str, str]] = None,
+        **extra_kwargs,
     ) -> LLMResponse:
         """执行聊天补全，带自动重试"""
         start_time = time.perf_counter()
@@ -202,7 +203,7 @@ class OpenAIClient(BaseLLMClient):
 
         for attempt in range(self.max_retries + 1):
             try:
-                kwargs = {
+                request_kwargs = {
                     "model": model,
                     "messages": openai_messages,
                     "temperature": temperature,
@@ -210,11 +211,21 @@ class OpenAIClient(BaseLLMClient):
                 }
 
                 if tools:
-                    kwargs["tools"] = tools
+                    request_kwargs["tools"] = tools
                     if tool_choice:
-                        kwargs["tool_choice"] = tool_choice
+                        request_kwargs["tool_choice"] = tool_choice
 
-                response = await self._client.chat.completions.create(**kwargs)
+                if response_format:
+                    request_kwargs["response_format"] = response_format
+
+                # 使用 asyncio.wait_for 防止请求永远挂起
+                try:
+                    response = await asyncio.wait_for(
+                        self._client.chat.completions.create(**request_kwargs),
+                        timeout=float(self.timeout),
+                    )
+                except asyncio.TimeoutError:
+                    raise LLMError(f"LLM request timed out after {self.timeout}s")
 
                 latency = (time.perf_counter() - start_time) * 1000
 
@@ -435,33 +446,30 @@ class AnthropicClient(BaseLLMClient):
         max_tokens: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
-        **kwargs,
+        response_format: Optional[Dict[str, str]] = None,
+        **extra_kwargs,
     ) -> LLMResponse:
-        """执行聊天补全（Anthropic Messages API），带自动重试"""
+        """执行聊天补全，带自动重试"""
         start_time = time.perf_counter()
 
         await self._init_client()
 
         if self._client is None:
-            raise LLMAuthError("Anthropic API key or package is not configured")
+            raise LLMAuthError("OpenAI API key or package is not configured")
 
         model = model or self.default_model
         temperature = temperature if temperature is not None else self.default_temperature
         max_tokens = max_tokens or self.default_max_tokens
 
-        # 提取 system 消息和格式化 messages
-        system_text, api_messages = self._extract_system_and_messages(messages)
-
-        if not api_messages:
-            api_messages = [{"role": "user", "content": "你好"}]
+        openai_messages = [m.to_openai_format() for m in messages]
 
         for attempt in range(self.max_retries + 1):
             try:
-                request_kwargs: Dict[str, Any] = {
+                request_kwargs = {
                     "model": model,
-                    "messages": api_messages,
-                    "max_tokens": max_tokens,
+                    "messages": openai_messages,
                     "temperature": temperature,
+                    "max_tokens": max_tokens,
                 }
 
                 if system_text:
@@ -632,7 +640,8 @@ class LLMService:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
-        use_fallback: bool = True,
+        tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+        response_format: Optional[Dict[str, str]] = None,
         **kwargs,
     ) -> LLMResponse:
         """
@@ -658,6 +667,7 @@ class LLMService:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     tools=tools,
+                    response_format=response_format,
                     **kwargs,
                 )
 
@@ -733,6 +743,7 @@ class LLMService:
                     messages=request_messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    response_format={"type": "json_object"},
                 )
 
                 if not response.content:

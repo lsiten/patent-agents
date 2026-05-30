@@ -100,7 +100,7 @@ class WorkflowContext:
 
         # 元数据
         self.iteration_count: int = 0
-        self.max_iterations: int = 5  # 增加迭代上限以支持质量分数达标的迭代
+        self.max_iterations: int = 1  # 最多1次迭代优化
         self.current_phase: WorkflowState = WorkflowState.INITIALIZED
         self.phase_history: List[PhaseResult] = []
         self.metadata: Dict[str, Any] = {}
@@ -685,6 +685,60 @@ class PatentWritingPhaseExecutor(WorkflowPhaseExecutor):
             }
             abstract_result = await llm_service.structured_output(abstract_messages, abstract_schema, max_tokens=2048)
 
+            # Step 6: 生成附图说明和图表描述
+            self._logger.info("正在生成附图说明和图表描述...", task_id=self.context.task_id)
+            figures_messages = [
+                LLMMessage(role="system", content=system_prompt),
+                LLMMessage(role="user", content=f"""
+已生成的权利要求书：
+独立权利要求：{claims_result.get('independent_claim', '')}
+
+发明内容摘要：{summary_result.get('summary_of_invention', '')[:500]}
+
+请生成：
+1. 附图说明文字（描述每幅图的内容）
+2. 两个图表的结构化描述数据：
+   - 图1: 系统架构图（展示系统各模块及其连接关系）
+   - 图2: 方法流程图（展示核心方法的步骤流程）
+
+要求：
+- 附图说明中用"图1"、"图2"来引用
+- 系统架构图需要列出主要模块及模块间的数据流/控制流
+- 方法流程图需要列出核心方法的步骤（5-8步）
+"""),
+            ]
+            figures_schema = {
+                "type": "object",
+                "properties": {
+                    "description_of_drawings": {"type": "string", "description": "附图说明文字"},
+                    "figures": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "enum": ["system_architecture", "flowchart"]},
+                                "title": {"type": "string"},
+                                "data": {"type": "object"},
+                            },
+                            "required": ["type", "title", "data"],
+                        },
+                    },
+                },
+                "required": ["description_of_drawings", "figures"],
+            }
+            figures_result = await llm_service.structured_output(figures_messages, figures_schema, max_tokens=4096)
+
+            # 生成附图图片
+            figure_paths = []
+            try:
+                from src.document_gen.patent_figures import generate_patent_figures
+                figure_specs = figures_result.get("figures", [])
+                if figure_specs:
+                    figure_paths = generate_patent_figures(figure_specs, self.context.task_id)
+                    self._logger.info(f"已生成 {len(figure_paths)} 张附图", task_id=self.context.task_id)
+            except Exception as fig_err:
+                self._logger.warning(f"附图生成失败（不影响主流程）: {fig_err}", task_id=self.context.task_id)
+
             # 合并结果
             result = {
                 "claims": claims_result,
@@ -692,9 +746,11 @@ class PatentWritingPhaseExecutor(WorkflowPhaseExecutor):
                     "technical_field": bg_result.get("technical_field", ""),
                     "background_art": bg_result.get("background_art", ""),
                     "summary_of_invention": summary_result.get("summary_of_invention", ""),
+                    "description_of_drawings": figures_result.get("description_of_drawings", ""),
                     "detailed_description": detailed_result.get("detailed_description", ""),
                 },
                 "abstract": abstract_result.get("abstract", ""),
+                "figures": figure_paths,
             }
 
             self.context.patent_draft = result
@@ -1048,7 +1104,7 @@ class PatentWorkflowEngine:
                     review_result = result.output
                     overall_score = review_result.get("overall_score", 0)
                     needs_iteration = (
-                        overall_score < 90
+                        overall_score < 70
                         or review_result.get("recommendation") in ["revise", "reject"]
                     )
                     if needs_iteration and context.iteration_count < context.max_iterations:
@@ -1057,7 +1113,7 @@ class PatentWorkflowEngine:
                             task_id=context.task_id,
                             iteration=context.iteration_count + 1,
                             score=overall_score,
-                            reason="score<90" if overall_score < 90 else review_result.get("recommendation"),
+                            reason="score<90" if overall_score < 70 else review_result.get("recommendation"),
                         )
                         context.current_phase = WorkflowState.ITERATION
                         context.iteration_count += 1
@@ -1188,7 +1244,7 @@ class PatentWorkflowEngine:
                     review_result = result.output
                     overall_score = review_result.get("overall_score", 0)
                     needs_iteration = (
-                        overall_score < 90
+                        overall_score < 70
                         or review_result.get("recommendation") in ["revise", "reject"]
                     )
                     if needs_iteration and context.iteration_count < context.max_iterations:
@@ -1197,7 +1253,7 @@ class PatentWorkflowEngine:
                             task_id=context.task_id,
                             iteration=context.iteration_count + 1,
                             score=overall_score,
-                            reason="score<90" if overall_score < 90 else review_result.get("recommendation"),
+                            reason="score<90" if overall_score < 70 else review_result.get("recommendation"),
                         )
                         context.current_phase = WorkflowState.ITERATION
                         context.iteration_count += 1

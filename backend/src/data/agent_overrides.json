@@ -4,9 +4,7 @@
       "temperature": 0.5,
       "max_tokens": 4096
     },
-    "tools_disabled": [
-      "task_planner"
-    ],
+    "tools_disabled": [],
     "tools_added": [],
     "skills_disabled": [],
     "skills_added": [

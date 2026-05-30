@@ -418,7 +418,12 @@ export default function WorkflowPage() {
                 variant="default"
                 size="sm"
                 onClick={() => {
-                  window.open(workflowApi.exportDocx(taskId), '_blank');
+                  const link = document.createElement('a');
+                  link.href = workflowApi.exportDocx(taskId);
+                  link.download = `patent_${taskId}.docx`;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
                 }}
               >
                 <Download className="w-4 h-4 mr-1" />

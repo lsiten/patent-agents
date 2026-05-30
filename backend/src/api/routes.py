@@ -2250,9 +2250,11 @@ async def export_workflow_patent_docx(task_id: str):
         "technical_field": desc_raw.get("technical_field", ""),
         "background_art": {"section_name": "背景技术", "content": desc_raw.get("background_art", ""), "word_count": len(desc_raw.get("background_art", ""))},
         "summary_of_invention": {"section_name": "发明内容", "content": desc_raw.get("summary_of_invention", ""), "word_count": len(desc_raw.get("summary_of_invention", ""))},
+        "description_of_drawings": {"section_name": "附图说明", "content": desc_raw.get("description_of_drawings", ""), "word_count": len(desc_raw.get("description_of_drawings", ""))} if desc_raw.get("description_of_drawings") else None,
         "detailed_description": {"section_name": "具体实施方式", "content": desc_raw.get("detailed_description", ""), "word_count": len(desc_raw.get("detailed_description", ""))},
         "claims": [],
         "abstract": draft_data.get("abstract", ""),
+        "figures": draft_data.get("figures", []),
     }
 
     # 转换权利要求

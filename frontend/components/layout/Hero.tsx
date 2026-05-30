@@ -47,7 +47,7 @@ export function Hero() {
               将技术发明转化为专业、合规的专利申请文件
             </p>
             <div className="flex flex-col sm:flex-row gap-md justify-center">
-              <Link href="/submit">
+              <Link href="/chat">
                 <Button size="lg" className="w-full sm:w-auto">
                   开始专利申请
                   <ArrowRight className="ml-2 w-5 h-5" />

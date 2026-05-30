@@ -229,11 +229,19 @@ def build_abstract_section(doc: Document, draft: PatentDraft, profile: PatentFea
     add_body_paragraph(doc, draft.abstract, profile)
 
 
-def build_abstract_drawings_section(doc: Document, draft: PatentDraft, profile: PatentFeatureProfile) -> None:
+def build_abstract_drawings_section(doc: Document, draft: PatentDraft, profile: PatentFeatureProfile, figure_paths: Optional[List[Dict]] = None) -> None:
     """Generate 摘要附图 section."""
     add_new_section(doc, "摘要附图", profile)
     add_document_heading(doc, "摘要附图", profile)
-    add_body_paragraph(doc, "（无附图）", profile, first_line_indent=False)
+    if figure_paths and len(figure_paths) > 0:
+        # 插入第一张图作为摘要附图
+        from docx.shared import Inches
+        try:
+            doc.add_picture(figure_paths[0]["path"], width=Inches(5.5))
+        except Exception:
+            add_body_paragraph(doc, "（附图生成失败）", profile, first_line_indent=False)
+    else:
+        add_body_paragraph(doc, "（无附图）", profile, first_line_indent=False)
 
 
 def build_claims_section(doc: Document, draft: PatentDraft, profile: PatentFeatureProfile) -> None:
@@ -289,12 +297,26 @@ def build_description_section(doc: Document, draft: PatentDraft, profile: Patent
 
 
 def build_description_drawings_section(
-    doc: Document, draft: PatentDraft, profile: PatentFeatureProfile
+    doc: Document, draft: PatentDraft, profile: PatentFeatureProfile, figure_paths: Optional[List[Dict]] = None
 ) -> None:
     """Generate 说明书附图 section."""
     add_new_section(doc, "说明书附图", profile)
     add_document_heading(doc, "说明书附图", profile)
-    add_body_paragraph(doc, "（无附图）", profile, first_line_indent=False)
+    if figure_paths and len(figure_paths) > 0:
+        from docx.shared import Inches
+        for fig_info in figure_paths:
+            try:
+                # 添加图标题
+                fig_title = f"图{fig_info.get('figure_number', '')}: {fig_info.get('title', '')}"
+                add_body_paragraph(doc, fig_title, profile, first_line_indent=False, bold=True)
+                # 插入图片
+                doc.add_picture(fig_info["path"], width=Inches(5.5))
+                # 空行
+                doc.add_paragraph("")
+            except Exception:
+                add_body_paragraph(doc, f"（图{fig_info.get('figure_number', '')}生成失败）", profile, first_line_indent=False)
+    else:
+        add_body_paragraph(doc, "（无附图）", profile, first_line_indent=False)
 
 
 def _add_multiline_content(doc: Document, content: str, profile: PatentFeatureProfile) -> None:
@@ -335,9 +357,12 @@ def generate_patent_docx(
         Absolute path to the generated .docx file.
     """
     # Normalize inputs to (draft_dict, task_id)
+    figure_paths: Optional[List[Dict]] = None
     if isinstance(patent_data, dict):
         draft_dict: dict = patent_data
         task_id: str = task_id_or_patent  # type: ignore[assignment]
+        # 提取附图路径（如果有）
+        figure_paths = patent_data.get("figures") if isinstance(patent_data.get("figures"), list) else None
     elif isinstance(patent_data, FinalPatent):
         draft_dict = patent_data.patent_draft.model_dump()
         task_id = patent_data.task_id
@@ -375,10 +400,10 @@ def generate_patent_docx(
 
     # Build all 5 sections per document structure
     build_abstract_section(doc, draft, profile)
-    build_abstract_drawings_section(doc, draft, profile)
+    build_abstract_drawings_section(doc, draft, profile, figure_paths)
     build_claims_section(doc, draft, profile)
     build_description_section(doc, draft, profile)
-    build_description_drawings_section(doc, draft, profile)
+    build_description_drawings_section(doc, draft, profile, figure_paths)
 
     doc.save(str(file_path))
     return str(file_path)

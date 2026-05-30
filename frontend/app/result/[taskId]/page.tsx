@@ -558,9 +558,9 @@ export default function ResultPage() {
                 <CardContent>
                   <div className="grid md:grid-cols-3 gap-md">
                     {[
-                      { name: '权利要求书', format: 'TXT', content: draft.claims, filename: `${taskId}-claims.txt` },
-                      { name: '专利说明书', format: 'TXT', content: draft.description, filename: `${taskId}-description.txt` },
-                      { name: '完整申请包', format: 'JSON', content: workflow ? JSON.stringify(workflow.outputs, null, 2) : '', filename: `${taskId}-outputs.json` },
+                      { name: '专利申请书', format: 'DOCX', isDocx: true, content: hasDraft ? 'docx' : '', filename: `patent_${taskId}.docx` },
+                      { name: '权利要求书', format: 'TXT', isDocx: false, content: draft.claims, filename: `${taskId}-claims.txt` },
+                      { name: '完整数据包', format: 'JSON', isDocx: false, content: workflow ? JSON.stringify(workflow.outputs, null, 2) : '', filename: `${taskId}-outputs.json` },
                     ].map((file) => (
                       <div key={file.name} className="flex items-center justify-between p-md rounded-lg border border-hairline hover:border-stone transition-colors">
                         <div className="flex items-center gap-3">
@@ -572,7 +572,23 @@ export default function ResultPage() {
                             <p className="text-caption text-muted">{file.format}</p>
                           </div>
                         </div>
-                        <Button variant="ghost" size="sm" onClick={() => downloadText(file.filename, file.content)} disabled={!file.content}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            if (file.isDocx) {
+                              const link = document.createElement('a');
+                              link.href = workflowApi.exportDocx(taskId);
+                              link.download = `patent_${taskId}.docx`;
+                              document.body.appendChild(link);
+                              link.click();
+                              document.body.removeChild(link);
+                            } else {
+                              downloadText(file.filename, file.content);
+                            }
+                          }}
+                          disabled={!file.content}
+                        >
                           <Download className="w-4 h-4" />
                         </Button>
                       </div>
@@ -583,9 +599,16 @@ export default function ResultPage() {
                   <p className="text-body-sm text-muted">
                     {hasDraft ? '已生成可下载申请文件' : '申请文件尚未生成'}
                   </p>
-                  <Button onClick={downloadPackage} disabled={!workflow}>
+                  <Button onClick={() => {
+                    const link = document.createElement('a');
+                    link.href = workflowApi.exportDocx(taskId);
+                    link.download = `patent_${taskId}.docx`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }} disabled={!hasDraft}>
                     <Download className="w-4 h-4 mr-2" />
-                    下载全部
+                    下载专利申请书 (DOCX)
                   </Button>
                 </CardFooter>
               </Card>
