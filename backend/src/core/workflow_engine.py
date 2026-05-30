@@ -15,7 +15,14 @@ from typing import Any, Callable, Dict, List, Optional, Type, TypeVar
 from pydantic import BaseModel, Field
 
 from src.core.logging import get_logger
-from src.core.events import publish_event
+from src.core.events import (
+    publish_event,
+    AgentThinkingEvent,
+    AgentToolCallStartEvent,
+    AgentToolCallEndEvent,
+    AgentDispatchEvent,
+    AgentContentEvent,
+)
 from src.core.llm_client import LLMError
 
 
@@ -275,12 +282,11 @@ class PatentWorkflowEngine:
             }
 
             for round_num in range(max_rounds):
-                # CEO 回复
-                raw = await service.run_conversation("patent.ceo.v1", ceo_history[-1]["content"])
-                if isinstance(raw, dict):
-                    ceo_text = raw.get("final_response", "") or raw.get("content", "") or json.dumps(raw, ensure_ascii=False)
-                else:
-                    ceo_text = str(raw) if raw else ""
+                # CEO 回复（流式，发射thinking事件）
+                ceo_text = await self._run_agent_stream(
+                    service, "patent.ceo.v1", ceo_history[-1]["content"],
+                    context, agent_name="CEO Agent",
+                )
 
                 self._logger.info(f"CEO round {round_num+1}: {ceo_text[:100]}...")
                 ceo_history.append({"role": "assistant", "content": ceo_text})
@@ -319,16 +325,33 @@ class PatentWorkflowEngine:
 
                     profile_id, context_field, phase_state, phase_enum = phase_agents[agent_id]
 
+                    # Agent名称映射（用于前端展示）
+                    agent_display_names = {
+                        "requirement_analyst": "需求分析 Agent",
+                        "retrieval_analyst": "检索分析 Agent",
+                        "patent_writer": "专利撰写 Agent",
+                        "quality_reviewer": "质量审查 Agent",
+                    }
+                    agent_display_name = agent_display_names.get(agent_id, agent_id)
+
+                    # 发射 CEO 调度事件
+                    await publish_event(AgentDispatchEvent(
+                        task_id=context.task_id,
+                        user_id=context.user_id,
+                        from_agent="CEO Agent",
+                        to_agent=agent_display_name,
+                        task_description=task_desc[:300],
+                    ))
+
                     context.current_phase = phase_state
                     await self._publish_progress_event(context, phase_state, "running")
 
-                    # 直接调用对应的专业 Agent
+                    # 流式调用专业 Agent（发射thinking/tool_call事件）
                     self._logger.info(f"CEO dispatched: {agent_id} → {profile_id}")
-                    agent_raw = await service.run_conversation(profile_id, task_desc)
-                    if isinstance(agent_raw, dict):
-                        agent_text = agent_raw.get("final_response", "") or agent_raw.get("content", "") or json.dumps(agent_raw, ensure_ascii=False)
-                    else:
-                        agent_text = str(agent_raw) if agent_raw else ""
+                    agent_text = await self._run_agent_stream(
+                        service, profile_id, task_desc,
+                        context, agent_name=agent_display_name,
+                    )
 
                     # 尝试解析 Agent 输出中的 JSON 结构化数据
                     parsed_output = self._try_parse_json(agent_text)
@@ -344,6 +367,15 @@ class PatentWorkflowEngine:
                             "output": agent_text,
                             "summary": agent_text[:500],
                         }
+
+                    # 发射 Agent 输出完成事件
+                    await publish_event(AgentContentEvent(
+                        task_id=context.task_id,
+                        user_id=context.user_id,
+                        agent_name=agent_display_name,
+                        content=agent_text[:500],
+                        phase=phase_state.value,
+                    ))
 
                     # 存储到 context
                     setattr(context, context_field, context_data)
@@ -795,6 +827,95 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
 
         # 返回原始文本
         return {"raw_output": text}
+
+    async def _run_agent_stream(
+        self,
+        service,
+        profile_id: str,
+        user_input: str,
+        context: WorkflowContext,
+        agent_name: str,
+    ) -> str:
+        """
+        流式调用 Agent 并实时发射事件到前端。
+        返回 agent 的最终文本输出。
+        """
+        content_chunks: List[str] = []
+        final_text = ""
+
+        try:
+            async for event in service.run_conversation_stream(
+                profile_id=profile_id,
+                user_input=user_input,
+            ):
+                event_type = event.get("type", "")
+                event_data = event.get("data", {})
+
+                if event_type == "thinking":
+                    await publish_event(AgentThinkingEvent(
+                        task_id=context.task_id,
+                        user_id=context.user_id,
+                        agent_name=agent_name,
+                        thought=event_data.get("message", ""),
+                        step=event_data.get("iteration", 0),
+                    ))
+
+                elif event_type == "tool_call_start":
+                    await publish_event(AgentToolCallStartEvent(
+                        task_id=context.task_id,
+                        user_id=context.user_id,
+                        agent_name=agent_name,
+                        tool_name=event_data.get("name", ""),
+                        parameters=event_data.get("parameters", {}),
+                    ))
+
+                elif event_type == "tool_call_end":
+                    await publish_event(AgentToolCallEndEvent(
+                        task_id=context.task_id,
+                        user_id=context.user_id,
+                        agent_name=agent_name,
+                        tool_name=event_data.get("name", ""),
+                        parameters=event_data.get("parameters", {}),
+                        result=str(event_data.get("result", ""))[:500],
+                        success=event_data.get("success", True),
+                    ))
+
+                elif event_type == "content_delta":
+                    content_chunks.append(event_data.get("delta", ""))
+
+                elif event_type == "content":
+                    final_text = event_data.get("content", "")
+
+                elif event_type == "done":
+                    msg = event_data.get("message", {})
+                    if isinstance(msg, dict) and msg.get("content"):
+                        final_text = msg["content"]
+
+                elif event_type == "error":
+                    self._logger.error(
+                        "Agent stream error",
+                        agent=agent_name,
+                        error=event_data.get("error", ""),
+                    )
+
+        except Exception as e:
+            self._logger.error(
+                "Agent stream failed, falling back to sync",
+                agent=agent_name,
+                error=str(e),
+            )
+            # Fallback: 同步调用
+            raw = await service.run_conversation(profile_id, user_input)
+            if isinstance(raw, dict):
+                final_text = raw.get("final_response", "") or raw.get("content", "") or json.dumps(raw, ensure_ascii=False)
+            else:
+                final_text = str(raw) if raw else ""
+
+        # 如果有 stream delta chunks 则拼接
+        if content_chunks and not final_text:
+            final_text = "".join(content_chunks)
+
+        return final_text
 
     async def _publish_progress_event(
         self,

@@ -52,6 +52,10 @@ class EventType(str, Enum):
     AGENT_COMPLETED = "agent.completed"
     AGENT_FAILED = "agent.failed"
     AGENT_THINKING = "agent.thinking"
+    AGENT_TOOL_CALL_START = "agent.tool_call_start"
+    AGENT_TOOL_CALL_END = "agent.tool_call_end"
+    AGENT_DISPATCH = "agent.dispatch"
+    AGENT_CONTENT = "agent.content"
 
     # 聊天事件
     CHAT_MESSAGE_CREATED = "chat.message.created"
@@ -148,6 +152,98 @@ class AgentThinkingEvent(BaseEvent):
 
 
 @dataclass
+class AgentToolCallStartEvent(BaseEvent):
+    """Agent工具调用开始事件"""
+    task_id: str = ""
+    user_id: str = ""
+    agent_name: str = ""
+    tool_name: str = ""
+    parameters: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.event_type = EventType.AGENT_TOOL_CALL_START
+
+    def _get_payload_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "user_id": self.user_id,
+            "agent_name": self.agent_name,
+            "tool_name": self.tool_name,
+            "parameters": self.parameters,
+        }
+
+
+@dataclass
+class AgentToolCallEndEvent(BaseEvent):
+    """Agent工具调用完成事件"""
+    task_id: str = ""
+    user_id: str = ""
+    agent_name: str = ""
+    tool_name: str = ""
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    result: str = ""
+    success: bool = True
+
+    def __post_init__(self):
+        self.event_type = EventType.AGENT_TOOL_CALL_END
+
+    def _get_payload_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "user_id": self.user_id,
+            "agent_name": self.agent_name,
+            "tool_name": self.tool_name,
+            "parameters": self.parameters,
+            "result": self.result,
+            "success": self.success,
+        }
+
+
+@dataclass
+class AgentDispatchEvent(BaseEvent):
+    """CEO调度子Agent事件"""
+    task_id: str = ""
+    user_id: str = ""
+    from_agent: str = ""
+    to_agent: str = ""
+    task_description: str = ""
+
+    def __post_init__(self):
+        self.event_type = EventType.AGENT_DISPATCH
+
+    def _get_payload_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "user_id": self.user_id,
+            "from_agent": self.from_agent,
+            "to_agent": self.to_agent,
+            "task_description": self.task_description,
+        }
+
+
+@dataclass
+class AgentContentEvent(BaseEvent):
+    """Agent最终输出内容事件"""
+    task_id: str = ""
+    user_id: str = ""
+    agent_name: str = ""
+    content: str = ""
+    phase: str = ""
+
+    def __post_init__(self):
+        self.event_type = EventType.AGENT_CONTENT
+
+    def _get_payload_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "user_id": self.user_id,
+            "agent_name": self.agent_name,
+            "content": self.content,
+            "phase": self.phase,
+        }
+
+
+@dataclass
 class TaskCompletedEvent(BaseEvent):
     """任务完成事件"""
     task_id: str = ""
@@ -217,6 +313,10 @@ class InMemoryEventBus(EventBus):
         self._sse_events = {
             EventType.WORKFLOW_PROGRESS_UPDATED,
             EventType.AGENT_THINKING,
+            EventType.AGENT_TOOL_CALL_START,
+            EventType.AGENT_TOOL_CALL_END,
+            EventType.AGENT_DISPATCH,
+            EventType.AGENT_CONTENT,
             EventType.CHAT_BRAINSTORMING_UPDATED,
             EventType.TASK_COMPLETED,
         }
@@ -340,6 +440,10 @@ class RedisEventBus(EventBus):
         event_classes = {
             EventType.WORKFLOW_PROGRESS_UPDATED: TaskProgressUpdatedEvent,
             EventType.AGENT_THINKING: AgentThinkingEvent,
+            EventType.AGENT_TOOL_CALL_START: AgentToolCallStartEvent,
+            EventType.AGENT_TOOL_CALL_END: AgentToolCallEndEvent,
+            EventType.AGENT_DISPATCH: AgentDispatchEvent,
+            EventType.AGENT_CONTENT: AgentContentEvent,
             EventType.TASK_COMPLETED: TaskCompletedEvent,
             EventType.CHAT_BRAINSTORMING_UPDATED: ChatMessageEvent,
         }
