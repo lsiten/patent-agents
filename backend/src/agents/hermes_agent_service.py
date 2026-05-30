@@ -31,6 +31,24 @@ HERMES_HOME_DIR.mkdir(parents=True, exist_ok=True)
 # 在模块加载时设置 HERMES_HOME 环境变量
 os.environ["HERMES_HOME"] = str(HERMES_HOME_DIR)
 
+# 在模块加载时立即注册专利工具（必须在任何 AIAgent 实例化之前）
+def _register_patent_tools_early():
+    """模块级别注册专利工具，确保在 AIAgent 创建前可用"""
+    try:
+        import importlib.util
+        import sys
+        adapter_path = Path(__file__).parent / "hermes" / "tools" / "adapter.py"
+        spec = importlib.util.spec_from_file_location("patent_adapter", str(adapter_path))
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.init_patent_tools()
+            logger.info("Patent tools registered at module load time (21 tools)")
+    except Exception as e:
+        logger.warning(f"Failed to register patent tools at module load: {e}")
+
+_register_patent_tools_early()
+
 
 class HermesAgentConfig:
     """单个 Agent 的配置"""
