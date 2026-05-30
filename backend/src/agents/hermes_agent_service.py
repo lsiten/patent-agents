@@ -265,6 +265,12 @@ class HermesAgentService:
             platform="api",
         )
 
+        # 验证工具是否正确加载
+        logger.info(
+            f"AIAgent created: model={model}, tools={len(agent.tools)}, "
+            f"valid_names={len(agent.valid_tool_names)}, toolsets={config.enabled_toolsets}"
+        )
+
         return agent
 
     async def run_conversation(
