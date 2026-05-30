@@ -86,10 +86,28 @@ from ..core.events import (
 
 
 def _on_agent_event(event: BaseEvent):
-    """将Agent事件存入task_events供/stream端点回放"""
+    """将Agent事件存入task_events供/stream端点回放（备份路径）
+    
+    当workflow通过event_callback直接写入时，此处会产生重复。
+    通过检查最近事件避免重复。
+    """
     task_id = getattr(event, "task_id", None)
     if not task_id:
         return
+
+    # 如果task_events中最后一条事件时间戳在1秒内且类型相同，跳过（已由callback写入）
+    existing = task_events.get(task_id, [])
+    if existing:
+        last = existing[-1]
+        if last.event_type == event.event_type.value:
+            last_ts = last.timestamp
+            now = datetime.now()
+            if hasattr(last_ts, 'timestamp'):
+                diff = (now - last_ts).total_seconds()
+            else:
+                diff = 0
+            if diff < 2:
+                return  # 跳过重复
 
     agent_name = getattr(event, "agent_name", "") or getattr(event, "from_agent", "Agent")
     event_type_str = event.event_type.value
@@ -128,6 +146,9 @@ subscribe_event(EventType.AGENT_TOOL_CALL_START, _on_agent_event)
 subscribe_event(EventType.AGENT_TOOL_CALL_END, _on_agent_event)
 subscribe_event(EventType.AGENT_DISPATCH, _on_agent_event)
 subscribe_event(EventType.AGENT_CONTENT, _on_agent_event)
+# NOTE: 上述订阅作为备份路径（无event_callback时的fallback）
+# 当workflow传入event_callback时，事件会通过callback直接写入task_events
+# 为避免重复，_on_agent_event只在task_events中无该task的最近同类事件时才写入
 
 # ── 持久化存储辅助 ──
 _store_instance = None
