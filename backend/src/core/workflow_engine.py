@@ -496,15 +496,44 @@ class PatentWorkflowEngine:
     def _build_default_task_for_agent(self, agent_id: str, context: "WorkflowContext" = None) -> str:
         """为调度生成包含完整技术描述的任务 prompt"""
         tech_desc = context.original_description if context else "（未提供技术描述）"
-        req_summary = json.dumps(context.requirement_analysis, ensure_ascii=False)[:800] if context and context.requirement_analysis else ""
-        ret_summary = json.dumps(context.retrieval_report, ensure_ascii=False)[:800] if context and context.retrieval_report else ""
-        draft_summary = json.dumps(context.patent_draft, ensure_ascii=False)[:800] if context and context.patent_draft else ""
+        req_summary = json.dumps(context.requirement_analysis, ensure_ascii=False)[:1500] if context and context.requirement_analysis else ""
+        ret_summary = json.dumps(context.retrieval_report, ensure_ascii=False)[:1000] if context and context.retrieval_report else ""
+
+        # 为 quality_reviewer 展开 patent_draft 的完整内容
+        draft_text = ""
+        if context and context.patent_draft and isinstance(context.patent_draft, dict):
+            claims = context.patent_draft.get("claims", {})
+            desc = context.patent_draft.get("description", {})
+            abstract = context.patent_draft.get("abstract", "")
+            full_claims = context.patent_draft.get("full_claims_text", "")
+            full_spec = context.patent_draft.get("full_specification_text", "")
+
+            if full_claims:
+                draft_text += f"【权利要求书】\n{full_claims}\n\n"
+            elif claims:
+                draft_text += f"【权利要求书】\n独立权利要求：\n{claims.get('independent_claim', '')}\n\n从属权利要求：\n"
+                for c in claims.get("dependent_claims", []):
+                    draft_text += f"{c}\n"
+                draft_text += "\n"
+
+            if full_spec:
+                draft_text += f"【说明书】\n{full_spec}\n\n"
+            elif desc:
+                for section, content in desc.items():
+                    if content:
+                        draft_text += f"【{section}】\n{content}\n\n"
+
+            if abstract:
+                draft_text += f"【摘要】\n{abstract}\n"
+
+        if not draft_text:
+            draft_text = json.dumps(context.patent_draft, ensure_ascii=False)[:2000] if context and context.patent_draft else "（未提供专利文件）"
 
         tasks = {
             "requirement_analyst": f"对以下技术方案进行结构化需求分析，提取创新点、确定IPC分类、输出结构化需求文档。\n\n技术方案：\n{tech_desc}",
             "retrieval_analyst": f"基于以下需求分析结果进行先有技术检索和专利性评估（新颖性、创造性、实用性）。\n\n需求分析结果：\n{req_summary}\n\n原始技术描述：\n{tech_desc[:500]}",
             "patent_writer": f"基于以下需求分析和检索结果，撰写完整的专利申请文件（权利要求书+说明书+摘要）。\n\n需求分析：\n{req_summary}\n\n检索结果：\n{ret_summary}",
-            "quality_reviewer": f"对以下专利申请文件进行形式审查和实质审查。\n\n专利文件：\n{draft_summary}",
+            "quality_reviewer": f"对以下专利申请文件进行全面质量审查（形式合规+实质审查+一致性检查）。\n\n{draft_text}",
         }
         return tasks.get(agent_id, f"执行专业分析任务。\n\n技术描述：\n{tech_desc}")
 
