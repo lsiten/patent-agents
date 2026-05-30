@@ -352,7 +352,11 @@ export default function WorkflowPage() {
   }, [currentState]);
   const agents = useMemo(() => createAgents(currentState, workflow), [currentState, workflow]);
   const historyLogs = useMemo(() => createHistoryLogs(workflow, taskId), [workflow, taskId]);
-  const allLogs = useMemo(() => [...historyLogs, ...agentLogs], [historyLogs, agentLogs]);
+  // SSE事件优先；如果有实时事件则只用SSE数据（更详细），否则用历史回放
+  const allLogs = useMemo(
+    () => (agentLogs.length > 0 ? agentLogs : historyLogs),
+    [historyLogs, agentLogs]
+  );
   const isTerminal = workflow ? terminalStates.has(workflow.current_state) : false;
 
   const loadWorkflow = useCallback(async (showLoading = false) => {

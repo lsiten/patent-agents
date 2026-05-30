@@ -908,8 +908,7 @@ async def stream_task_events(task_id: str):
             raise HTTPException(status_code=404, detail="任务不存在")
 
     async def event_generator():
-        async with workflow_lock:
-            last_sent = len(task_events.get(task_id, []))
+        last_sent = 0  # 从头回放所有事件（包含子agent的thinking/tool_call）
         while True:
             async with workflow_lock:
                 events = list(task_events.get(task_id, []))
