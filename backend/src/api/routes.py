@@ -204,6 +204,68 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
     )
 
 
+def _get_agent_memory_stats(profile_id: str, dir_name: str) -> Dict[str, Any]:
+    """从 hermes session 文件读取 Agent 的实际记忆统计数据"""
+    import os as _mem_os
+    from pathlib import Path as _MemPath
+
+    hermes_home = _MemPath(__file__).parent.parent.parent / "hermes_home"
+    profile_sessions_dir = hermes_home / "profiles" / dir_name / "sessions"
+    global_sessions_dir = hermes_home / "sessions"
+
+    total_messages = 0
+    total_sessions = 0
+    total_size = 0
+    last_updated = None
+
+    # 1. Profile-specific sessions (short_term memory)
+    if profile_sessions_dir.is_dir():
+        for f in profile_sessions_dir.glob("*.json"):
+            try:
+                import json as _mem_json
+                with open(f, "r", encoding="utf-8") as fh:
+                    data = _mem_json.load(fh)
+                if isinstance(data, dict):
+                    total_messages += data.get("message_count", 0)
+                    total_sessions += 1
+                    total_size += f.stat().st_size
+                    updated = data.get("last_updated")
+                    if updated and (last_updated is None or updated > last_updated):
+                        last_updated = updated
+            except Exception:
+                pass
+
+    # 2. Global sessions that match this profile (conv_* sessions used by CEO)
+    if global_sessions_dir.is_dir():
+        for f in global_sessions_dir.glob("*.json"):
+            try:
+                with open(f, "r", encoding="utf-8") as fh:
+                    data = _mem_json.load(fh)
+                if isinstance(data, dict):
+                    # Check if session belongs to this agent
+                    session_id = data.get("session_id", "")
+                    sys_prompt = data.get("system_prompt", "")
+                    if dir_name in session_id or dir_name in sys_prompt:
+                        total_messages += data.get("message_count", 0)
+                        total_sessions += 1
+                        total_size += f.stat().st_size
+                        updated = data.get("last_updated")
+                        if updated and (last_updated is None or updated > last_updated):
+                            last_updated = updated
+            except Exception:
+                pass
+
+    return {
+        "short_term_count": total_messages,
+        "short_term_size": total_size,
+        "long_term_count": total_sessions,  # sessions = long term memory entries
+        "long_term_size": total_size,
+        "knowledge_base_count": total_sessions,
+        "knowledge_base_size": total_size,
+        "last_updated": last_updated,
+    }
+
+
 def _hermes_role_to_ui(role_str: str) -> str:
     """将 hermes config 中的 role 字符串映射为前端 UI role"""
     mapping = {
@@ -1059,17 +1121,19 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
         # 定时器
         timers = _override_store.get_timers(agent_id)
 
-        # 记忆（从 hermes-agent 配置读取）
+        # 记忆（从 hermes-agent session 文件读取实际数据）
         memory_cfg = cfg.config.get("memory", {})
         memories = []
+        mem_stats = _get_agent_memory_stats(cfg.profile_id, cfg.dir_path.name)
+
         if memory_cfg.get("short_term", True):
             memories.append({
                 "id": "short_term",
                 "type": "short_term",
                 "name": "短期对话记忆 (Hermes SessionDB)",
-                "size": 0,
-                "item_count": 0,
-                "last_updated": now,
+                "size": mem_stats["short_term_size"],
+                "item_count": mem_stats["short_term_count"],
+                "last_updated": mem_stats["last_updated"] or now,
                 "content": None,
                 "entries": [],
             })
@@ -1078,9 +1142,9 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
                 "id": "long_term",
                 "type": "long_term",
                 "name": "长期记忆 (Hermes Persistent Memory)",
-                "size": 0,
-                "item_count": 0,
-                "last_updated": now,
+                "size": mem_stats["long_term_size"],
+                "item_count": mem_stats["long_term_count"],
+                "last_updated": mem_stats["last_updated"] or now,
                 "content": None,
                 "entries": [],
             })
@@ -1089,9 +1153,9 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
                 "id": "knowledge_base",
                 "type": "knowledge_base",
                 "name": "知识库 (Hermes Session Search)",
-                "size": 0,
-                "item_count": 0,
-                "last_updated": now,
+                "size": mem_stats["knowledge_base_size"],
+                "item_count": mem_stats["knowledge_base_count"],
+                "last_updated": mem_stats["last_updated"] or now,
                 "content": None,
                 "entries": [],
             })

@@ -12,5 +12,5 @@ enabled_tools:
 - patent_strategy_guide
 memory:
   short_term: true
-  long_term: false
-  knowledge_base: false
+  long_term: true
+  knowledge_base: true

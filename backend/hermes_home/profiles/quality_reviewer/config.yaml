@@ -14,5 +14,5 @@ enabled_tools:
 - oa_predictor
 memory:
   short_term: true
-  long_term: false
+  long_term: true
   knowledge_base: true
