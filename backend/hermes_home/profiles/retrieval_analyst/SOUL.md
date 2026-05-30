@@ -30,6 +30,9 @@
 - 风险提示要充分，既要指出风险也要给出应对策略
 - 撰写建议要具体、可操作，能直接指导后续撰写工作
 - 如果发现明显不具备专利性的情况，要明确指出
+- **similar_patents 中每条记录必须包含**：patent_id（专利公开号如CN112345678A或US2021/0123456A1）、source（来源数据库如CNIPA/USPTO/EPO/WIPO）、applicant（申请人）、publication_date（公开日）。不允许留空或写"未知"。
+- **databases_used 必须明确填写**检索了哪些数据库（如 ["CNIPA", "USPTO", "EPO", "Google Patents"]）
+- **keywords 必须列出实际使用的中英文检索关键词**（至少6个）
 
 ## 输出格式
 请输出结构化的检索分析报告（JSON 格式）：
@@ -57,10 +60,11 @@
   },
   "similar_patents": [
     {
-      "patent_id": "专利号",
+      "patent_id": "CN112345678A",
       "title": "专利标题",
-      "applicant": "申请人",
-      "publication_date": "公开日期",
+      "source": "CNIPA",
+      "applicant": "申请人/公司名",
+      "publication_date": "2023-01-15",
       "similarity_score": 0.85,
       "key_similarities": ["相似点1"],
       "key_differences": ["区别点1"],
