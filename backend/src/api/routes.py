@@ -1493,11 +1493,22 @@ async def hermes_agent_chat(agent_id: str, body: dict) -> dict:
             session_id=session_id,
             user_id=user_id,
         )
+        # hermes-agent 返回字典，提取 final_response
+        if isinstance(result, dict):
+            response_text = result.get("final_response", "") or ""
+        else:
+            response_text = str(result) if result else ""
+
         return {
             "success": True,
             "agent_id": agent_id,
-            "response": result,
+            "response": response_text,
             "session_id": session_id,
+            "metadata": {
+                "model": result.get("model") if isinstance(result, dict) else None,
+                "input_tokens": result.get("input_tokens") if isinstance(result, dict) else None,
+                "output_tokens": result.get("output_tokens") if isinstance(result, dict) else None,
+            },
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -1732,7 +1743,11 @@ USER: {content}
 """
         # 使用真实 hermes-agent AIAgent（run_conversation 是同步方法）
         response = await asyncio.to_thread(agent.run_conversation, prompt)
-        response_text = str(response) if response else ""
+        # hermes-agent 返回字典或字符串
+        if isinstance(response, dict):
+            response_text = response.get("final_response", "") or str(response)
+        else:
+            response_text = str(response) if response else ""
 
         # hermes-agent 的工具调用记录在 agent 内部，无需手动收集
         tool_calls_data = []
