@@ -285,7 +285,7 @@ class PatentWorkflowEngine:
                 agent_display_name = agent_display_names.get(agent_id, agent_id)
 
                 # 构建任务 prompt
-                task_desc = self._build_default_task_for_agent(agent_id, context)
+                task_desc = self._build_phase_prompt(context, phase_state)
                 self._logger.info(f"Executing phase: {agent_id}")
 
                 # 发射 CEO 调度事件
