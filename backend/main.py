@@ -121,6 +121,7 @@ if __name__ == "__main__":
         host=settings.host,
         port=settings.port,
         reload=settings.is_development,
+        reload_excludes=["hermes_home/*", "*.db", "*.sqlite", "exports/*", "finalized_patents/*"],
         log_level=settings.log_level.value.lower(),
         workers=1 if settings.is_development else 4,
     )

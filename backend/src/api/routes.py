@@ -844,6 +844,39 @@ async def cancel_workflow(task_id: str):
     return {"task_id": task_id, "status": "cancelled"}
 
 
+@router.get("/workflows/{task_id}/stream")
+async def stream_workflow_events(task_id: str):
+    """SSE 实时事件流 — 工作流各阶段 Agent 的思考/调度/输出事件"""
+    context = workflow_engine.get_workflow(task_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+
+    async def event_generator():
+        last_sent = 0
+        while True:
+            async with workflow_lock:
+                events = list(task_events.get(task_id, []))
+
+            # 发送新事件
+            for event in events[last_sent:]:
+                yield f"event: {event.event_type}\ndata: {event.json()}\n\n"
+                last_sent += 1
+
+            # 检查是否结束
+            current_phase = context.current_phase.value
+            if current_phase in ("completed", "failed", "cancelled"):
+                yield f"event: done\ndata: {current_phase}\n\n"
+                break
+
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
 @router.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 async def create_task(request: CreateTaskRequest, background_tasks: BackgroundTasks):
     """创建新的专利申请任务"""
@@ -878,33 +911,74 @@ async def create_task(request: CreateTaskRequest, background_tasks: BackgroundTa
 
 
 async def _execute_workflow(task_id: str):
-    """在后台执行工作流（通过 Hermes Agent Service）"""
+    """在后台执行工作流 — 通过 WorkflowEngine 依次调度各专业 Agent"""
     try:
         async with workflow_lock:
             task = tasks_store[task_id]
 
-        # 使用 Hermes Agent Service 执行对话
-        result = await _hermes_service.chat(
-            agent_id="patent.ceo.v1",
-            message=task.tech_description,
-        )
+        # 1. 创建 WorkflowContext（如果不存在）
+        context = workflow_engine.get_workflow(task_id)
+        if not context:
+            context = workflow_engine.create_workflow(
+                task_id=task_id,
+                user_id=task.user_id,
+                description=task.tech_description,
+                patent_type_preference=task.patent_type_preference,
+            )
 
-        # 记录完成事件
-        async with workflow_lock:
+        # 2. 事件回调：将 agent 事件写入 task_events 供 SSE stream 读取
+        def _workflow_event_callback(
+            agent_name: str, event_type: str, message: str, data: Dict[str, Any]
+        ):
             task_events.setdefault(task_id, []).append(
                 WorkflowEventResponse(
                     task_id=task_id,
                     timestamp=datetime.now(),
-                    agent="ceo",
-                    message="工作流已完成",
-                    event_type="workflow.completed",
-                    data={"response": result.get("content", "")},
+                    agent=agent_name,
+                    message=message,
+                    event_type=event_type,
+                    data=data,
                 )
+            )
+
+        # 3. 阶段完成回调
+        async def phase_callback(phase, result):
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent=phase.value,
+                    message=f"阶段 {phase.value} 已完成",
+                    event_type="workflow.phase.completed",
+                    data={
+                        "phase": phase.value,
+                        "success": result.success,
+                        "duration_seconds": result.duration_seconds,
+                        "issues": result.issues,
+                    },
+                )
+            await _persist_events(task_id)
+
+        # 4. 执行完整工作流（依次调度各 Agent）
+        await workflow_engine.execute_full_workflow(
+            context,
+            phase_callback=phase_callback,
+            event_callback=_workflow_event_callback,
+        )
+
+        # 5. 同步状态到 tasks_store
+        async with workflow_lock:
+            _append_workflow_event(
+                task_id=task_id,
+                agent="workflow_engine",
+                message="专利申请流程已完成",
+                event_type="workflow.completed",
+                data={"state": context.current_phase.value},
             )
             tasks_store[task_id].current_state = WorkflowState.COMPLETED
         await _persist_task(task_id)
         await _persist_events(task_id)
-        logger.info(f"任务 {task_id} 执行完成")
+        await _persist_workflow(task_id)
+        logger.info(f"任务 {task_id} 工作流执行完成")
 
     except Exception as e:
         logger.exception(f"任务 {task_id} 执行失败: {e}")
@@ -912,7 +986,14 @@ async def _execute_workflow(task_id: str):
             if task_id in tasks_store:
                 tasks_store[task_id].current_state = WorkflowState.FAILED
                 tasks_store[task_id].error_message = str(e)
+            _append_workflow_event(
+                task_id=task_id,
+                agent="workflow_engine",
+                message=str(e),
+                event_type="workflow.failed",
+            )
         await _persist_task(task_id)
+        await _persist_events(task_id)
 
 
 @router.get("/tasks", response_model=TaskListResponse)

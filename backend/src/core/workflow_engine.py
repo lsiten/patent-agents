@@ -335,7 +335,8 @@ class PatentWorkflowEngine:
                         phase=phase_state.value,
                     ))
 
-                # 存储结果
+                # 存储结果（适配前端期望的数据格式）
+                context_data = self._normalize_phase_output(context_field, context_data)
                 setattr(context, context_field, context_data)
 
                 # 记录阶段完成
@@ -902,6 +903,79 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
                 return content[:end_idx].strip()
             return content.strip()
         return text
+
+    def _normalize_phase_output(self, context_field: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """将 Agent 输出规范化为前端期望的数据格式
+
+        不同阶段的 Agent 输出字段名可能与前端渲染器期望的不完全匹配，
+        此方法做必要的字段映射和结构转换。
+        """
+        if not isinstance(data, dict) or "raw_output" in data:
+            return data
+
+        if context_field == "requirement_analysis":
+            # key_features → key_innovative_features
+            if "key_features" in data and "key_innovative_features" not in data:
+                features = data.get("key_features", [])
+                if isinstance(features, list):
+                    normalized = []
+                    for f in features:
+                        if isinstance(f, dict):
+                            normalized.append({
+                                "name": f.get("name", ""),
+                                "description": f.get("description", ""),
+                                "technical_significance": f.get("technical_significance", "")
+                                    or ("创新特征" if f.get("is_innovative") else ""),
+                            })
+                        elif isinstance(f, str):
+                            normalized.append({"name": f, "description": "", "technical_significance": ""})
+                    data["key_innovative_features"] = normalized
+
+            # patent_type + recommendation_rationale → patent_type_recommendation
+            if "patent_type" in data and "patent_type_recommendation" not in data:
+                data["patent_type_recommendation"] = {
+                    "suggested_type": data.get("patent_type", ""),
+                    "rationale": data.get("recommendation_rationale", ""),
+                }
+
+        elif context_field == "retrieval_report":
+            # novelty + novelty_rationale → novelty_assessment
+            if "novelty" in data and "novelty_assessment" not in data:
+                data["novelty_assessment"] = {
+                    "rating": data.get("novelty", ""),
+                    "rationale": data.get("novelty_rationale", ""),
+                }
+            # inventive_step + inventive_step_rationale → inventive_step_assessment
+            if "inventive_step" in data and "inventive_step_assessment" not in data:
+                data["inventive_step_assessment"] = {
+                    "rating": data.get("inventive_step", ""),
+                    "rationale": data.get("inventive_step_rationale", ""),
+                }
+            # utility + utility_rationale → utility_assessment
+            if "utility" in data and "utility_assessment" not in data:
+                data["utility_assessment"] = {
+                    "rating": data.get("utility", ""),
+                    "rationale": data.get("utility_rationale", ""),
+                }
+
+        elif context_field == "review_report":
+            # score → overall_score (如果 Agent 用了 score 字段)
+            if "score" in data and "overall_score" not in data:
+                data["overall_score"] = data["score"]
+            # issues → 按类型分组到 formal_compliance / claims_review / description_review
+            if "issues" in data and isinstance(data["issues"], list):
+                if "formal_compliance" not in data:
+                    formal = [i for i in data["issues"] if isinstance(i, dict) and i.get("type", "").startswith("form")]
+                    claims = [i for i in data["issues"] if isinstance(i, dict) and "claim" in i.get("type", "").lower()]
+                    desc = [i for i in data["issues"] if isinstance(i, dict) and i not in formal and i not in claims]
+                    if formal:
+                        data["formal_compliance"] = {"issues": formal}
+                    if claims:
+                        data["claims_review"] = {"issues": claims}
+                    if desc:
+                        data["description_review"] = {"issues": desc}
+
+        return data
 
     def _try_parse_json(self, text: str) -> Dict[str, Any]:
         """尝试从文本中解析 JSON，支持处理截断的 JSON"""
