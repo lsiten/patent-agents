@@ -2220,7 +2220,11 @@ async def get_agent_related_files(
                 raise HTTPException(status_code=404, detail=f"工具未找到: {tool_id}")
 
         rel_path = _KNOWN_TOOL_IMPL_FILES.get(tool_id)
-        source_code = _read_file(rel_path) if rel_path else None
+        if not rel_path:
+            raise HTTPException(status_code=404, detail=f"工具实现文件未配置: {tool_id}")
+        source_code = _read_file(rel_path)
+        if source_code is None:
+            raise HTTPException(status_code=404, detail=f"工具实现文件不存在: {rel_path}")
 
         # 提取工具结构元数据
         structure_info = _extract_tool_structure(source_code, tool_id)
@@ -2231,7 +2235,7 @@ async def get_agent_related_files(
             "source_code": source_code,
             "source_markdown": None,
             "structure": structure_info,
-            "files": [{"path": rel_path, "content": source_code}] if rel_path and source_code else [],
+            "files": [{"path": rel_path, "content": source_code}],
         }
 
     else:
@@ -2246,17 +2250,14 @@ async def get_agent_related_files(
         # 结构元数据
         structure_info = _extract_skill_structure(None, skill_meta)
 
-        # 读取实际的 .md 文件内容（而非硬编码模板）
-        source_markdown = None
+        # 读取实际的 .md 文件内容
         skill_file = skill_meta.get("file", "")
-        if skill_file:
-            skill_path = cfg.dir_path / "skills" / skill_file
-            if skill_path.exists():
-                source_markdown = skill_path.read_text(encoding="utf-8")
-
-        # 如果文件不存在或为空，回退到基础描述
-        if not source_markdown:
-            source_markdown = f"# {skill_meta.get('name', skill_id)}\n\n{skill_meta.get('description', '')}\n"
+        if not skill_file:
+            raise HTTPException(status_code=404, detail=f"技能文件未配置: {skill_id}")
+        skill_path = cfg.dir_path / "skills" / skill_file
+        if not skill_path.exists():
+            raise HTTPException(status_code=404, detail=f"技能文件不存在: {skill_path}")
+        source_markdown = skill_path.read_text(encoding="utf-8")
 
         return {
             "type": "skill",

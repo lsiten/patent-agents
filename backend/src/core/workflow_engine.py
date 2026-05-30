@@ -286,7 +286,7 @@ class PatentWorkflowEngine:
                 ceo_history.append({"role": "assistant", "content": ceo_text})
 
                 # 解析 CEO 回复中的调度意图
-                dispatched = self._extract_dispatch_intent(ceo_text)
+                dispatched = self._extract_dispatch_intent(ceo_text, context)
 
                 if not dispatched:
                     # CEO 没有调度意图，流程结束
@@ -334,10 +334,26 @@ class PatentWorkflowEngine:
 
                 # 将执行结果回传给 CEO 进行下一轮决策
                 results_summary = "\n".join([
-                    f"[{aid}] 已完成，输出摘要: {getattr(context, phase_agents[aid][1], {}).get('summary', '')[:200]}"
+                    f"[{aid}] 已完成，输出内容:\n{getattr(context, phase_agents[aid][1], {}).get('output', '')[:800]}"
                     for aid, _ in dispatched if aid in phase_agents
                 ])
-                ceo_history.append({"role": "user", "content": f"以上 Agent 已执行完毕：\n{results_summary}\n\n请评估结果并决定下一步。如果需要继续调度其他Agent请指明，如果全部完成请说'流程完成'。"})
+
+                # 确定已完成和未完成的阶段
+                done_phases = [k for k, v in {
+                    "requirement_analysis": context.requirement_analysis,
+                    "retrieval_report": context.retrieval_report,
+                    "patent_draft": context.patent_draft,
+                    "review_report": context.review_report,
+                }.items() if v]
+                pending_phases = [k for k in ["requirement_analysis", "retrieval_report", "patent_draft", "review_report"] if k not in done_phases]
+                phase_to_agent = {"requirement_analysis": "requirement_analyst", "retrieval_report": "retrieval_analyst", "patent_draft": "patent_writer", "review_report": "quality_reviewer"}
+
+                if pending_phases:
+                    next_hint = f"\n\n下一步应调度: dispatch_specialist(agent_id=\"{phase_to_agent[pending_phases[0]]}\", task=\"...\")"
+                else:
+                    next_hint = "\n\n所有阶段已完成，请说'流程完成'。"
+
+                ceo_history.append({"role": "user", "content": f"Agent 执行结果：\n{results_summary}\n\n已完成阶段: {done_phases}\n未完成阶段: {pending_phases}{next_hint}"})
 
             # 标记完成
             context.current_phase = WorkflowState.COMPLETED
@@ -359,19 +375,11 @@ class PatentWorkflowEngine:
             self._logger.error("Workflow failed", task_id=context.task_id, error=str(e), exc_info=True)
             raise
 
-    def _extract_dispatch_intent(self, ceo_text: str) -> list:
-        """从 CEO 回复文本中解析调度意图
-
-        CEO 可能以多种方式表达调度意图：
-        - "调度 requirement_analyst"
-        - "dispatch_specialist(agent_id='xxx', task='xxx')"
-        - "需求分析师" / "检索分析师" / "撰写师" / "审查师"
-        - "派发给需求分析" / "交给检索分析"
-        """
+    def _extract_dispatch_intent(self, ceo_text: str, context: "WorkflowContext" = None) -> list:
+        """从 CEO 回复文本中解析调度意图"""
         import re
 
         results = []
-        text = ceo_text.lower()
 
         # Agent 名称映射
         name_to_id = {
@@ -389,9 +397,9 @@ class PatentWorkflowEngine:
 
         # 模式1: dispatch_specialist(agent_id="xxx", task="xxx")
         pattern1 = r'dispatch_specialist\s*\(\s*agent_id\s*=\s*["\'](\w+)["\'](?:\s*,\s*task\s*=\s*["\'](.+?)["\'])?\s*\)'
-        for m in re.finditer(pattern1, ceo_text, re.IGNORECASE):
+        for m in re.finditer(pattern1, ceo_text, re.IGNORECASE | re.DOTALL):
             agent_id = m.group(1)
-            task = m.group(2) or context_text_for_agent(agent_id, ceo_text)
+            task = m.group(2) or self._build_default_task_for_agent(agent_id, context)
             results.append((agent_id, task))
 
         if results:
@@ -405,27 +413,31 @@ class PatentWorkflowEngine:
             ]
             for p in patterns:
                 if re.search(p, ceo_text):
-                    # 提取任务描述（取 CEO 回复的核心技术描述部分）
-                    task = self._build_default_task_for_agent(agent_id, ceo_text)
+                    task = self._build_default_task_for_agent(agent_id, context)
                     if agent_id not in [r[0] for r in results]:
                         results.append((agent_id, task))
                     break
 
         # 模式3: 检测"流程完成"/"全部完成"信号
         if re.search(r'流程完成|全部完成|交付用户|专利文件已完成', ceo_text):
-            return []  # 空列表表示不需要继续调度
+            return []
 
         return results
 
-    def _build_default_task_for_agent(self, agent_id: str, ceo_context: str) -> str:
-        """为没有明确 task 描述的调度生成默认任务"""
-        defaults = {
-            "requirement_analyst": "对技术方案进行结构化需求分析，提取创新点、确定IPC分类",
-            "retrieval_analyst": "基于需求分析结果进行先有技术检索和专利性评估",
-            "patent_writer": "基于需求分析和检索结果撰写完整专利申请文件（权利要求书+说明书+摘要）",
-            "quality_reviewer": "对专利申请文件进行形式审查和实质审查",
+    def _build_default_task_for_agent(self, agent_id: str, context: "WorkflowContext" = None) -> str:
+        """为调度生成包含完整技术描述的任务 prompt"""
+        tech_desc = context.original_description if context else "（未提供技术描述）"
+        req_summary = json.dumps(context.requirement_analysis, ensure_ascii=False)[:800] if context and context.requirement_analysis else ""
+        ret_summary = json.dumps(context.retrieval_report, ensure_ascii=False)[:800] if context and context.retrieval_report else ""
+        draft_summary = json.dumps(context.patent_draft, ensure_ascii=False)[:800] if context and context.patent_draft else ""
+
+        tasks = {
+            "requirement_analyst": f"对以下技术方案进行结构化需求分析，提取创新点、确定IPC分类、输出结构化需求文档。\n\n技术方案：\n{tech_desc}",
+            "retrieval_analyst": f"基于以下需求分析结果进行先有技术检索和专利性评估（新颖性、创造性、实用性）。\n\n需求分析结果：\n{req_summary}\n\n原始技术描述：\n{tech_desc[:500]}",
+            "patent_writer": f"基于以下需求分析和检索结果，撰写完整的专利申请文件（权利要求书+说明书+摘要）。\n\n需求分析：\n{req_summary}\n\n检索结果：\n{ret_summary}",
+            "quality_reviewer": f"对以下专利申请文件进行形式审查和实质审查。\n\n专利文件：\n{draft_summary}",
         }
-        return defaults.get(agent_id, "执行专业分析任务")
+        return tasks.get(agent_id, f"执行专业分析任务。\n\n技术描述：\n{tech_desc}")
 
     async def resume_workflow(
         self,
