@@ -267,7 +267,12 @@ class PatentWorkflowEngine:
 
             # CEO Agent 执行完整流程（内部通过 dispatch_specialist 调度各 Agent）
             self._logger.info("Delegating to CEO Agent", task_id=context.task_id)
-            result_text = await service.run_conversation("patent.ceo.v1", prompt)
+            raw_result = await service.run_conversation("patent.ceo.v1", prompt)
+            # run_conversation 可能返回 str 或 dict
+            if isinstance(raw_result, dict):
+                result_text = raw_result.get("final_response", "") or raw_result.get("content", "") or json.dumps(raw_result, ensure_ascii=False)
+            else:
+                result_text = str(raw_result) if raw_result else ""
 
             # CEO 完成后，尝试解析结构化输出并填充 context
             self._parse_ceo_output(context, result_text)
@@ -341,6 +346,10 @@ class PatentWorkflowEngine:
             prompt = self._build_ceo_resume_prompt(context, force_start_from)
 
             result_text = await service.run_conversation("patent.ceo.v1", prompt)
+            if isinstance(result_text, dict):
+                result_text = result_text.get("final_response", "") or result_text.get("content", "") or json.dumps(result_text, ensure_ascii=False)
+            else:
+                result_text = str(result_text) if result_text else ""
 
             self._parse_ceo_output(context, result_text)
 
@@ -393,6 +402,10 @@ class PatentWorkflowEngine:
             prompt = self._build_phase_prompt(context, phase)
 
             result_text = await service.run_conversation(profile_id, prompt)
+            if isinstance(result_text, dict):
+                result_text = result_text.get("final_response", "") or result_text.get("content", "") or json.dumps(result_text, ensure_ascii=False)
+            else:
+                result_text = str(result_text) if result_text else ""
 
             duration = (datetime.now() - start_time).total_seconds()
 
@@ -451,11 +464,15 @@ class PatentWorkflowEngine:
 """
 
             response = await service.run_conversation("patent.brainstorm_partner.v1", prompt)
-            context.add_message("assistant", str(response))
+            if isinstance(response, dict):
+                response_text = response.get("final_response", "") or response.get("content", "") or str(response)
+            else:
+                response_text = str(response) if response else ""
+            context.add_message("assistant", response_text)
 
             return {
                 "role": "assistant",
-                "content": str(response),
+                "content": response_text,
                 "phase": context.current_phase.value,
             }
 

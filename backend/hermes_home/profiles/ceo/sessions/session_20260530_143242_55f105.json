@@ -1,0 +1,566 @@
+{
+  "session_id": "20260530_143242_55f105",
+  "model": "claude-opus-4-6",
+  "base_url": "http://deepseek-work.intsig.net/proxy/aws/claude/v1",
+  "platform": "api",
+  "session_start": "2026-05-30T14:32:42.081157",
+  "last_updated": "2026-05-30T14:33:40.575620",
+  "system_prompt": "# 专利申请 CEO — 动态编排者\n\n你是专利申请全流程的统筹协调者。你的核心职责是**评估质量、做出决策、调度专业Agent**，而非亲自执行专业工作。\n\n## 工作模式\n\n你通过 `dispatch_specialist` 工具将具体工作派发给专业 Agent，自己负责：\n1. 与用户对话，理解技术方案\n2. 评估每步结果的质量和完整性\n3. 决定下一步动作（前进/补充/回退）\n4. 处理异常和迭代循环\n\n## 可调度的专业 Agent\n\n| Agent ID | 专长 | 何时调用 |\n|----------|------|----------|\n| `brainstorm_partner` | 技术讨论、思路发散、方向探索 | 技术方案模糊、需要用户补充、需要拓展保护范围时 |\n| `requirement_analyst` | 需求结构化、创新点提取、IPC分类 | 技术方案明确后，需要结构化分析时 |\n| `retrieval_analyst` | 先有技术检索、专利性评估、风险识别 | 有了结构化需求后，需要评估新颖性/创造性时 |\n| `patent_writer` | 撰写权利要求、说明书、摘要 | 检索通过后，需要撰写正式文件时 |\n| `quality_reviewer` | 形式审查、实质审查、一致性检查 | 文件撰写完成后，需要质量把关时 |\n\n## 决策规则\n\n### 正常流程推进\n```\n用户描述技术 → 你评估是否足够清晰\n  → 不够清晰：直接追问 或 dispatch brainstorm_partner 深入讨论\n  → 足够清晰：dispatch requirement_analyst 做需求分析\n需求分析完成 → 你评估结果完整性\n  → 缺少关键信息：dispatch brainstorm_partner 补充讨论\n  → 完整：dispatch retrieval_analyst 做先有技术检索\n检索完成 → 你评估专利性\n  → 风险过高：告知用户，建议调整方案\n  → 可行：dispatch patent_writer 撰写文件\n撰写完成 → dispatch quality_reviewer 审查\n审查完成 → 你评估审查结果\n  → 通过（≥80分）：交付用户\n  → 不通过：分析原因，决定回退到哪一步（见下方）\n```\n\n### 质量不达标时的决策\n审查发现问题时，根据问题类型决定下一步：\n\n| 问题类型 | 决策 |\n|----------|------|\n| 权利要求撰写质量差 | dispatch patent_writer 重写，附上具体修改意见 |\n| 说明书与权利要求不一致 | dispatch patent_writer 修正，附上不一致点 |\n| 保护范围过窄/过宽 | dispatch brainstorm_partner 重新讨论保护策略 |\n| 缺少先有技术对比 | dispatch retrieval_analyst 补充检索 |\n| 技术方案描述不清 | 直接问用户补充，或 dispatch brainstorm_partner |\n| 形式问题（格式/编号） | dispatch patent_writer 修正，附上具体问题 |\n\n### 检索不足时的决策\n| 情况 | 决策 |\n|------|------|\n| 相关文献 < 3 篇 | dispatch retrieval_analyst 扩大检索范围 |\n| 发现高度相似专利 | 告知用户风险，dispatch brainstorm_partner 讨论方案调整 |\n| 检索方向偏移 | dispatch retrieval_analyst 重新检索，提供更精准关键词 |\n\n## 行为准则\n- 简短、直接、专业\n- 有问题直接问用户，不铺垫\n- 需要具体分析时调用工具，不编造数据\n- 每次 dispatch 后评估结果，不盲目推进\n- 发现质量问题时主动回退，不强行交付\n- 最多迭代 3 轮（撰写→审查→修改），超过 3 轮向用户报告困难\n\n## 工具使用\n- 技术分类 → ipc_classifier\n- 风险快速评估 → risk_analyzer\n- 工作规划 → task_planner\n- 专利检索 → patent_search\n- 特征提取 → tech_feature_extractor\n- **调度专业Agent → dispatch_specialist**（核心能力）\n\n## 回复格式\n- 与用户对话时：3-5句话 + 关键追问\n- 调度Agent后：简要说明正在做什么\n- 收到Agent结果后：总结关键发现 + 你的判断 + 下一步计划\n\nIf the user asks about configuring, setting up, or using Hermes Agent itself, load the `hermes-agent` skill with skill_view(name='hermes-agent') before answering. Docs: https://hermes-agent.nousresearch.com/docs\n\nHost: macOS (15.6)\nUser home directory: /Users/shicheng_lei\nCurrent working directory: /Users/shicheng_lei/code/patent-agents/backend\n\nConversation started: Saturday, May 30, 2026 02:32 PM\nModel: claude-opus-4-6",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "agent_selector",
+        "description": "根据任务描述选择最适合的专业Agent来处理任务",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task_description": {
+              "type": "string",
+              "description": "需要处理的任务描述"
+            },
+            "exclude_agents": {
+              "type": "string",
+              "description": "排除的Agent ID(逗号分隔)"
+            }
+          },
+          "required": [
+            "task_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "claim_drafter",
+        "description": "根据技术特征撰写独立权利要求和从属权利要求",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "features": {
+              "type": "string",
+              "description": "技术特征列表或描述"
+            },
+            "protection_scope": {
+              "type": "string",
+              "description": "期望的保护范围说明"
+            }
+          },
+          "required": [
+            "features"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "claim_quality_analyzer",
+        "description": "分析权利要求的清楚性、保护范围、层次结构等质量指标",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "string",
+              "description": "权利要求书完整内容"
+            }
+          },
+          "required": [
+            "claims"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "compliance_checker",
+        "description": "检查专利申请文件的格式和形式合规性",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "patent_document": {
+              "type": "string",
+              "description": "专利文件内容"
+            }
+          },
+          "required": [
+            "patent_document"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "creative_thinking",
+        "description": "基于技术方案激发创新思维，探索替代方案和拓展方向",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tech_description": {
+              "type": "string",
+              "description": "技术发明描述"
+            }
+          },
+          "required": [
+            "tech_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "description_writer",
+        "description": "撰写专利说明书各章节(技术领域/背景/发明内容/具体实施方式)",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "section_type": {
+              "type": "string",
+              "description": "章节类型: technical_field/background/summary/drawings/detailed",
+              "enum": [
+                "technical_field",
+                "background",
+                "summary",
+                "drawings",
+                "detailed"
+              ]
+            },
+            "technical_content": {
+              "type": "string",
+              "description": "该章节涉及的技术内容"
+            },
+            "claims": {
+              "type": "string",
+              "description": "相关权利要求"
+            }
+          },
+          "required": [
+            "section_type",
+            "technical_content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "dispatch_specialist",
+        "description": "调度专业Agent执行任务。CEO通过此工具将工作派发给专业Agent，每个Agent有独立专业知识。可用Agent: brainstorm_partner(讨论发散)、requirement_analyst(需求分析)、retrieval_analyst(先有技术检索)、patent_writer(专利撰写)、quality_reviewer(质量审查)",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "agent_id": {
+              "type": "string",
+              "description": "Agent ID: brainstorm_partner/requirement_analyst/retrieval_analyst/patent_writer/quality_reviewer",
+              "enum": [
+                "brainstorm_partner",
+                "requirement_analyst",
+                "retrieval_analyst",
+                "patent_writer",
+                "quality_reviewer"
+              ]
+            },
+            "task": {
+              "type": "string",
+              "description": "交给该Agent的具体任务描述，要清晰完整，包含所有必要上下文和期望输出格式"
+            },
+            "context": {
+              "type": "string",
+              "description": "附加上下文（前序阶段输出、用户补充信息、修改建议等）"
+            }
+          },
+          "required": [
+            "agent_id",
+            "task"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ipc_classifier",
+        "description": "根据技术描述进行 IPC 国际专利分类，返回主分类号和次要分类号",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tech_description": {
+              "type": "string",
+              "description": "技术发明描述文本"
+            }
+          },
+          "required": [
+            "tech_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "oa_predictor",
+        "description": "预测专利审查中可能收到的审查意见，提供应对策略",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "patent_document": {
+              "type": "string",
+              "description": "专利申请文件内容"
+            }
+          },
+          "required": [
+            "patent_document"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "patent_search",
+        "description": "在多源专利数据库(USPTO/EPO/CNIPA)中检索相关现有技术",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "检索查询关键词或技术描述"
+            },
+            "sources": {
+              "type": "string",
+              "description": "数据源(逗号分隔): uspto,epo,cnipa"
+            },
+            "limit": {
+              "type": "string",
+              "description": "最大结果数量"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "patent_strategy_guide",
+        "description": "基于技术方案和市场情况提供专利申请策略和保护策略建议",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tech_description": {
+              "type": "string",
+              "description": "技术方案描述"
+            },
+            "market_info": {
+              "type": "string",
+              "description": "市场和竞争信息"
+            }
+          },
+          "required": [
+            "tech_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "patentability_scorer",
+        "description": "评估技术方案的新颖性、创造性和实用性，给出综合专利性评分",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "invention": {
+              "type": "string",
+              "description": "待评估的技术方案"
+            },
+            "prior_art": {
+              "type": "string",
+              "description": "相关现有技术"
+            }
+          },
+          "required": [
+            "invention"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "prior_art_comparator",
+        "description": "对比分析发明与多篇现有技术的技术特征差异，识别区别特征",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "invention": {
+              "type": "string",
+              "description": "发明技术方案描述"
+            },
+            "prior_arts": {
+              "type": "string",
+              "description": "现有技术列表（JSON格式或文本描述）"
+            }
+          },
+          "required": [
+            "invention",
+            "prior_arts"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "quality_assessor",
+        "description": "对专利申请文件进行质量评估，给出改进建议",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "document": {
+              "type": "string",
+              "description": "待评估的文件内容"
+            },
+            "assessment_type": {
+              "type": "string",
+              "description": "评估类型"
+            }
+          },
+          "required": [
+            "document"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "report_generator",
+        "description": "生成专利申请相关的各类报告(检索报告/分析报告/审查意见答复)",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "report_type": {
+              "type": "string",
+              "description": "报告类型"
+            },
+            "content": {
+              "type": "string",
+              "description": "报告内容素材"
+            }
+          },
+          "required": [
+            "report_type",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "risk_analyzer",
+        "description": "分析专利申请过程中的各类风险(驳回/无效/侵权)",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "patent_document": {
+              "type": "string",
+              "description": "专利相关文件"
+            },
+            "risk_type": {
+              "type": "string",
+              "description": "风险类型"
+            }
+          },
+          "required": [
+            "patent_document"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "scenario_miner",
+        "description": "根据技术描述和特征挖掘潜在应用场景、目标用户和市场价值",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tech_description": {
+              "type": "string",
+              "description": "技术发明描述"
+            },
+            "features": {
+              "type": "string",
+              "description": "关键技术特征列表"
+            }
+          },
+          "required": [
+            "tech_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "similarity_analyzer",
+        "description": "分析发明方案与现有技术的相似度，识别关键差异和风险",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "invention": {
+              "type": "string",
+              "description": "待分析的发明技术方案"
+            },
+            "prior_art": {
+              "type": "string",
+              "description": "对比的现有技术描述"
+            }
+          },
+          "required": [
+            "invention",
+            "prior_art"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "support_checker",
+        "description": "检查权利要求与说明书之间的支持关系，识别支持性缺陷",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "string",
+              "description": "权利要求书内容"
+            },
+            "description": {
+              "type": "string",
+              "description": "说明书内容"
+            }
+          },
+          "required": [
+            "claims",
+            "description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "support_verifier",
+        "description": "验证说明书对权利要求的支持充分性(专利法第26条第4款)",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "string",
+              "description": "权利要求书内容"
+            },
+            "description": {
+              "type": "string",
+              "description": "说明书内容"
+            }
+          },
+          "required": [
+            "claims",
+            "description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "task_planner",
+        "description": "制定专利申请的工作计划和时间线，分解任务，设定里程碑",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tech_description": {
+              "type": "string",
+              "description": "技术发明描述"
+            },
+            "patent_type": {
+              "type": "string",
+              "description": "专利类型: invention/utility_model"
+            },
+            "priority": {
+              "type": "string",
+              "description": "优先级: high/medium/low"
+            }
+          },
+          "required": [
+            "tech_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "tech_feature_extractor",
+        "description": "从技术描述中提取关键技术特征、创新点和解决的技术问题",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tech_description": {
+              "type": "string",
+              "description": "技术发明描述文本"
+            }
+          },
+          "required": [
+            "tech_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "terminology_normalizer",
+        "description": "规范专利文件中的技术术语，确保全文一致性和专业性",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "需要规范化的文本"
+            },
+            "domain": {
+              "type": "string",
+              "description": "技术领域"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    }
+  ],
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "继续输出。从权利要求11（系统独立权利要求）开始，接着输出：\n- 权利要求11-18（系统权利要求）\n- 说明书全文（技术领域、背景技术、发明内容、附图说明、具体实施方式）\n- 说明书摘要\n\n直接输出内容，不要解释。"
+    },
+    {
+      "role": "assistant",
+      "content": "权利要求11. 一种基于多Agent协作的专利申请文件生成系统，其特征在于，包括：\n\nCEO编排模块，配置为接收用户输入的技术方案描述，评估所述技术方案描述的完整性和清晰度，并基于评估结果生成调度决策；\n\n头脑风暴模块，配置为响应所述CEO编排模块的调度，与用户进行多轮交互式技术讨论，提取技术方案的核心创新点并拓展保护范围；\n\n需求分析模块，配置为响应所述CEO编排模块的调度，将所述技术方案描述转换为结构化的需求文档，所述结构化的需求文档包括技术问题定义、技术方案要素分解和预期技术效果量化描述；\n\n检索分析模块，配置为响应所述CEO编排模块的调度，基于所述结构化的需求文档执行先有技术检索，生成专利性评估报告，所述专利性评估报告包括新颖性评分、创造性评分和风险等级；\n\n专利撰写模块，配置为响应所述CEO编排模块的调度，基于所述结构化的需求文档和所述专利性评估报告，生成包含权利要求书、说明书和摘要的专利申请文件；\n\n质量审查模块，配置为响应所述CEO编排模块的调度，对所述专利申请文件执行形式审查和实质审查，输出包含质量评分和具体问题列表的审查报告；\n\n其中，所述CEO编排模块根据所述审查报告中的质量评分决定交付所述专利申请文件或将所述审查报告中的具体问题列表回传至对应模块进行迭代修正。\n\n权利要求12. 根据权利要求11所述的系统，其特征在于，所述CEO编排模块包括：\n\n状态评估单元，配置为维护当前流程状态，并对每个模块输出的结果执行完整性校验；\n\n决策引擎，配置为基于预设的决策规则集，根据所述完整性校验的结果生成前进、补充或回退的调度指令；\n\n异常处理单元，配置为在迭代次数超过预设阈值时生成异常报告并暂停流程等待用户介入。\n\n权利要求13. 根据权利要求11所述的系统，其特征在于，所述检索分析模块包括：\n\n关键词生成单元，配置为从所述结构化的需求文档中提取技术特征词，并通过同义词扩展和上下位概念扩展生成检索关键词集；\n\n多库检索单元，配置为将所述检索关键词集分别提交至多个专利数据库执行并行检索，获取候选文献集合；\n\n相似度计算单元，配置为计算所述候选文献集合中每篇文献与所述结构化的需求文档之间的技术特征重合度；\n\n评估报告生成单元，配置为基于所述技术特征重合度生成所述专利性评估报告。\n\n权利要求14. 根据权利要求11所述的系统，其特征在于，所述质量审查模块包括：\n\n形式审查单元，配置为检查所述专利申请文件的格式规范性，包括权利要求编号连续性、引用关系正确性和术语一致性；\n\n实质审查单元，配置为检查权利要求的保护范围合理性、说明书对权利要求的支持充分性以及技术方案的清楚性；\n\n评分单元，配置为基于所述形式审查单元和所述实质审查单元的检查结果，按预设权重计算综合质量评分。\n\n权利要求15. 根据权利要求11所述的系统，其特征在于，所述专利撰写模块采用分层生成策略，包括：\n\n框架生成层，配置为首先确定独立权利要求的技术特征集合和从属权利要求的层级结构；\n\n内容填充层，配置为基于所述框架逐项生成权利要求的具体文本；\n\n一致性保障层，配置为在生成说明书时以所述权利要求的文本为锚点，确保说明书中的技术术语和技术特征描述与所述权利要求完全一致。\n\n权利要求16. 根据权利要求11所述的系统，其特征在于，所述CEO编排模块在所述质量审查模块输出的质量评分低于预设阈值时，根据所述具体问题列表中问题的类型执行差异化回退：\n\n当问题类型为撰写质量问题时，将所述具体问题列表发送至所述专利撰写模块；\n\n当问题类型为保护范围问题时，将所述具体问题列表发送至所述头脑风暴模块重新讨论保护策略；\n\n当问题类型为先有技术覆盖不足时，将所述具体问题列表发送至所述检索分析模块补充检索。\n\n权利要求17. 根据权利要求11所述的系统，其特征在于，所述头脑风暴模块配置为通过以下方式拓展保护范围：\n\n对用户描述的核心技术方案进行上位概括，生成抽象层技术特征；\n\n基于所述核心技术方案推导可替代的实现方式，生成等效技术方案集；\n\n识别所述核心技术方案可应用的其他技术场景，生成应用场景扩展列表。\n\n权利要求18. 根据权利要求11所述的系统，其特征在于，还包括：\n\n会话管理模块，配置为存储所述用户与各模块之间的交互历史，使各模块在被调度时能够访问完整的上下文信息；\n\n版本管理模块，配置为对每次迭代产生的专利申请文件进行版本标记，支持版本对比和回溯。\n\n---\n\n# 说明书\n\n## 一种基于多Agent协作的专利申请文件生成方法及系统\n\n### 技术领域\n\n[0001] 本发明涉及人工智能与知识产权服务的交叉技术领域，具体涉及一种基于多Agent协作的专利申请文件生成方法及系统。\n\n### 背景技术\n\n[0002] 专利申请文件的撰写是一项高度专业化的工作，要求撰写者同时具备深厚的技术理解能力和严格的法律文书撰写能力。一份高质量的专利申请文件需要包含清晰的技术问题定义、完整的技术方案描述、合理的权利要求布局以及充分的先有技术对比分析。传统的专利撰写主要依赖专利代理人的个人经验和专业技能，存在效率低、成本高、质量波动大等问题。\n\n[0003] 随着人工智能技术的发展，已有一些尝试将大语言模型应用于专利文件的辅助生成。然而，现有方案主要存在以下技术问题：\n\n[0004] 第一，单一模型方案的能力瓶颈。单一大语言模型难以同时胜任技术理解、先有技术检索、法律文书撰写和质量审查等多种截然不同的任务。当一个模型被要求完成全部工作时，往往在某些环节表现不佳，导致最终输出质量不稳定。\n\n[0005] 第二，缺乏有效的质量控制机制。现有方案通常是一次性生成文件后直接输出，缺少系统化的审查和迭代优化环节。文件中的格式错误、逻辑不一致、保护范围不当等问题无法被自动识别和修正。\n\n[0006] 第三，流程的刚性和不可调节性。现有方案通常按照固定的线性流程执行，当中间环节出现问题时（如检索发现高度相似的先有技术），无法动态调整策略，只能终止流程或强行继续，导致最终结果不满足实际需求。\n\n[0007] 第四，用户交互的不充分性。专利撰写本质上是一个需要深入理解发明人意图的过程。现有方案通常只接受一次性输入，缺少引导用户补充技术细节、明确保护意图的交互机制，导致生成的文件偏离发明人的真实需求。\n\n[0008] 因此，需要一种能够通过多Agent协作实现全流程自动化，同时具备动态决策能力和质量闭环控制机制的专利申请文件生成方法。\n\n### 发明内容\n\n[0009] 针对现有技术存在的上述问题，本发明的目的在于提供一种基于多Agent协作的专利申请文件生成方法及系统，通过将专利申请流程分解为多个专业化环节并由对应的专业Agent执行，配合中心化的编排Agent进行动态决策和质量控制，实现高质量专利申请文件的自动化生成。\n\n[0010] 为实现上述目的，本发明采用如下技术方案：\n\n[0011] 第一方面，本发明提供一种基于多Agent协作的专利申请文件生成方法，包括以下步骤：\n\n[0012] CEO编排Agent接收用户输入的技术方案描述，对所述技术方案描述进行完整性评估；基于完整性评估结果，决定直接进入需求分析或先进行交互式技术讨论以补充技术细节；\n\n[0013] 所述CEO编排Agent调度需求分析Agent，将所述技术方案描述转换为结构化的需求文档，所述结构化的需求文档包括技术问题定义、技术方案要素分解和预期技术效果量化描述；\n\n[0014] 所述CEO编排Agent调度检索分析Agent，基于所述结构化的需求文档执行先有技术检索并生成专利性评估报告；所述CEO编排Agent根据所述专利性评估报告中的风险等级决定是否继续后续流程；\n\n[0015] 在风险等级允许的情况下，所述CEO编排Agent调度专利撰写Agent，基于所述结构化的需求文档和所述专利性评估报告生成专利申请文件；\n\n[0016] 所述CEO编排Agent调度质量审查Agent，对所述专利申请文件进行形式审查和实质审查，生成包含质量评分和具体问题列表的审查报告；\n\n[0017] 所述CEO编排Agent根据所述质量评分判断是否交付：当质量评分达到预设阈值时，将所述专利申请文件交付给用户；当质量评分未达到预设阈值时，根据所述具体问题列表中的问题类型将修改指令回传至对应的Agent进行迭代修正。\n\n[0018] 进一步地，所述完整性评估包括：检查所述技术方案描述是否包含技术问题、技术手段和技术效果三个核心要素；对缺失要素进行标记；当缺失要素的数量超过预设值时，调度头脑风暴Agent与用户进行多轮对话以补充缺失信息。\n\n[0019] 进一步地，所述将所述技术方案描述转换为结构化的需求文档包括：从所述技术方案描述中提取核心创新点，并区分主要创新点和辅助创新点；将技术方案分解为多个技术特征，并标注每个技术特征的必要性等级；对技术效果进行量化描述，建立技术特征与技术效果之间的映射关系。\n\n[0020] 进一步地，所述执行先有技术检索并生成专利性评估报告包括：从所述结构化的需求文档中提取技术特征词，通过同义词扩展和上下位概念扩展构建检索关键词集；基于所述检索关键词集在多个专利数据库中执行并行检索，获取候选文献集合；计算所述候选文献集合中每篇文献与所述结构化的需求文档之间的技术特征重合度；基于技术特征重合度的分布生成新颖性评分、创造性评分和风险等级。\n\n[0021] 进一步地，所述根据所述具体问题列表中的问题类型将修改指令回传至对应的Agent包括：当问题类型为权利要求撰写质量问题或形式问题时，将修改指令发送至所述专利撰写Agent；当问题类型为保护范围不当时，将修改指令发送至头脑风暴Agent重新讨论保护策略后再调度所述专利撰写Agent修改；当问题类型为先有技术对比不充分时，将修改指令发送至所述检索分析Agent执行补充检索。\n\n[0022] 进一步地，所述迭代修正的最大次数为预设轮次阈值，当迭代次数达到所述预设轮次阈值但质量评分仍未达标时，所述CEO编排Agent生成包含当前最优版本文件和未解决问题清单的异常报告，并呈现给用户请求人工介入。\n\n[0023] 进一步地，所述专利撰写Agent采用分层生成策略生成所述专利申请文件，包括：框架层生成步骤，确定独立权利要求的必要技术特征集合以及从属权利要求的分层结构；内容层生成步",
+      "reasoning": null,
+      "finish_reason": "max_tokens"
+    }
+  ]
+}
