@@ -2246,23 +2246,17 @@ async def get_agent_related_files(
         # 结构元数据
         structure_info = _extract_skill_structure(None, skill_meta)
 
-        markdown_lines = [
-            f"# {skill_meta.get('name', skill_id)}",
-            "",
-            "## 描述",
-            "",
-            skill_meta.get("description", ""),
-            "",
-            "## 工作原理",
-            "",
-            "技能通过以下方式影响 Agent 行为：",
-            "1. 技能定义添加到 Agent Profile skills 目录",
-            "2. Agent 创建时，所有技能信息注入到 system_prompt",
-            "3. LLM 根据技能描述和关键词在回复中运用相应能力",
-            "",
-        ]
+        # 读取实际的 .md 文件内容（而非硬编码模板）
+        source_markdown = None
+        skill_file = skill_meta.get("file", "")
+        if skill_file:
+            skill_path = cfg.dir_path / "skills" / skill_file
+            if skill_path.exists():
+                source_markdown = skill_path.read_text(encoding="utf-8")
 
-        source_markdown = "\n".join(markdown_lines)
+        # 如果文件不存在或为空，回退到基础描述
+        if not source_markdown:
+            source_markdown = f"# {skill_meta.get('name', skill_id)}\n\n{skill_meta.get('description', '')}\n"
 
         return {
             "type": "skill",

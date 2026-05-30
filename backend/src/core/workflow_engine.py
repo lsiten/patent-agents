@@ -245,154 +245,187 @@ class PatentWorkflowEngine:
         phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None]] = None,
     ) -> WorkflowContext:
         """
-        执行完整工作流 — 逐步调用各专业 Agent，CEO 评估质量
+        执行完整工作流 — CEO Agent 动态调度各专业 Agent
 
-        每个阶段直接调用对应的专业 Agent，确保各阶段有实际输出。
-        CEO 在关键节点评估质量决定是否回退。
+        CEO 通过文本回复表达调度意图，workflow_engine 解析并执行，
+        将结果返回给 CEO 继续决策。模拟 tool calling loop。
         """
-        self._logger.info(
-            "Starting workflow execution",
-            task_id=context.task_id,
-        )
+        self._logger.info("Starting CEO-driven workflow", task_id=context.task_id)
 
         try:
             service = _get_agent_factory()
 
-            # 清空 dispatch 结果缓存
             from src.agents.hermes.tools.dispatch_specialist import clear_dispatch_results
             clear_dispatch_results()
 
-            # ── 阶段 1: 需求分析 ──
             context.current_phase = WorkflowState.REQUIREMENT_ANALYSIS
             await self._publish_progress_event(context, WorkflowState.REQUIREMENT_ANALYSIS, "running")
 
-            req_prompt = self._build_phase_prompt(context, WorkflowState.REQUIREMENT_ANALYSIS)
-            raw = await service.run_conversation("patent.requirement_analyst.v1", req_prompt)
-            req_text = raw.get("final_response", "") or raw.get("content", "") or str(raw) if isinstance(raw, dict) else str(raw)
+            # CEO 驱动循环：CEO 决策 → 解析调度意图 → 执行 Agent → 回传结果
+            ceo_history = []
+            initial_prompt = self._build_ceo_workflow_prompt(context)
+            ceo_history.append({"role": "user", "content": initial_prompt})
 
-            context.requirement_analysis = {
-                "agent": "需求分析师",
-                "output": req_text,
-                "summary": req_text[:500],
+            max_rounds = 6  # 最多 6 轮（防止死循环）
+            phase_agents = {
+                "requirement_analyst": ("patent.requirement_analyst.v1", "requirement_analysis", WorkflowState.REQUIREMENT_ANALYSIS, WorkflowPhase.REQUIREMENT),
+                "retrieval_analyst": ("patent.retrieval_analyst.v1", "retrieval_report", WorkflowState.RETRIEVAL_ANALYSIS, WorkflowPhase.RETRIEVAL),
+                "patent_writer": ("patent.writer.v1", "patent_draft", WorkflowState.PATENT_WRITING, WorkflowPhase.WRITING),
+                "quality_reviewer": ("patent.quality_reviewer.v1", "review_report", WorkflowState.QUALITY_REVIEW, WorkflowPhase.REVIEW),
             }
-            context.add_phase_result(PhaseResult(
-                phase=WorkflowPhase.REQUIREMENT,
-                success=True,
-                duration_seconds=0,
-                output=context.requirement_analysis,
-            ))
-            await self._publish_progress_event(context, WorkflowState.REQUIREMENT_ANALYSIS, "completed")
-            if phase_callback:
-                cb = phase_callback(WorkflowState.REQUIREMENT_ANALYSIS, context.phase_history[-1])
-                if asyncio.iscoroutinefunction(phase_callback):
-                    await cb
 
-            # ── 阶段 2: 检索分析 ──
-            context.current_phase = WorkflowState.RETRIEVAL_ANALYSIS
-            await self._publish_progress_event(context, WorkflowState.RETRIEVAL_ANALYSIS, "running")
+            for round_num in range(max_rounds):
+                # CEO 回复
+                raw = await service.run_conversation("patent.ceo.v1", ceo_history[-1]["content"])
+                if isinstance(raw, dict):
+                    ceo_text = raw.get("final_response", "") or raw.get("content", "") or json.dumps(raw, ensure_ascii=False)
+                else:
+                    ceo_text = str(raw) if raw else ""
 
-            ret_prompt = self._build_phase_prompt(context, WorkflowState.RETRIEVAL_ANALYSIS)
-            raw = await service.run_conversation("patent.retrieval_analyst.v1", ret_prompt)
-            ret_text = raw.get("final_response", "") or raw.get("content", "") or str(raw) if isinstance(raw, dict) else str(raw)
+                self._logger.info(f"CEO round {round_num+1}: {ceo_text[:100]}...")
+                ceo_history.append({"role": "assistant", "content": ceo_text})
 
-            context.retrieval_report = {
-                "agent": "检索分析师",
-                "output": ret_text,
-                "summary": ret_text[:500],
-            }
-            context.add_phase_result(PhaseResult(
-                phase=WorkflowPhase.RETRIEVAL,
-                success=True,
-                duration_seconds=0,
-                output=context.retrieval_report,
-            ))
-            await self._publish_progress_event(context, WorkflowState.RETRIEVAL_ANALYSIS, "completed")
-            if phase_callback:
-                cb = phase_callback(WorkflowState.RETRIEVAL_ANALYSIS, context.phase_history[-1])
-                if asyncio.iscoroutinefunction(phase_callback):
-                    await cb
+                # 解析 CEO 回复中的调度意图
+                dispatched = self._extract_dispatch_intent(ceo_text)
 
-            # ── 阶段 3: 专利撰写 ──
-            context.current_phase = WorkflowState.PATENT_WRITING
-            await self._publish_progress_event(context, WorkflowState.PATENT_WRITING, "running")
+                if not dispatched:
+                    # CEO 没有调度意图，流程结束
+                    self._logger.info("CEO has no more dispatch intents, finishing")
+                    break
 
-            write_prompt = self._build_phase_prompt(context, WorkflowState.PATENT_WRITING)
-            raw = await service.run_conversation("patent.writer.v1", write_prompt)
-            draft_text = raw.get("final_response", "") or raw.get("content", "") or str(raw) if isinstance(raw, dict) else str(raw)
+                # 执行 CEO 指示的 Agent 调度
+                for agent_id, task_desc in dispatched:
+                    if agent_id not in phase_agents:
+                        continue
 
-            context.patent_draft = {
-                "agent": "专利撰写师",
-                "output": draft_text,
-                "summary": draft_text[:500],
-            }
-            context.add_phase_result(PhaseResult(
-                phase=WorkflowPhase.WRITING,
-                success=True,
-                duration_seconds=0,
-                output=context.patent_draft,
-            ))
-            await self._publish_progress_event(context, WorkflowState.PATENT_WRITING, "completed")
-            if phase_callback:
-                cb = phase_callback(WorkflowState.PATENT_WRITING, context.phase_history[-1])
-                if asyncio.iscoroutinefunction(phase_callback):
-                    await cb
+                    profile_id, context_field, phase_state, phase_enum = phase_agents[agent_id]
 
-            # ── 阶段 4: 质量审查 ──
-            context.current_phase = WorkflowState.QUALITY_REVIEW
-            await self._publish_progress_event(context, WorkflowState.QUALITY_REVIEW, "running")
+                    context.current_phase = phase_state
+                    await self._publish_progress_event(context, phase_state, "running")
 
-            review_prompt = self._build_phase_prompt(context, WorkflowState.QUALITY_REVIEW)
-            raw = await service.run_conversation("patent.quality_reviewer.v1", review_prompt)
-            review_text = raw.get("final_response", "") or raw.get("content", "") or str(raw) if isinstance(raw, dict) else str(raw)
+                    # 直接调用对应的专业 Agent
+                    self._logger.info(f"CEO dispatched: {agent_id} → {profile_id}")
+                    agent_raw = await service.run_conversation(profile_id, task_desc)
+                    if isinstance(agent_raw, dict):
+                        agent_text = agent_raw.get("final_response", "") or agent_raw.get("content", "") or json.dumps(agent_raw, ensure_ascii=False)
+                    else:
+                        agent_text = str(agent_raw) if agent_raw else ""
 
-            context.review_report = {
-                "agent": "质量审查师",
-                "output": review_text,
-                "summary": review_text[:500],
-            }
-            context.add_phase_result(PhaseResult(
-                phase=WorkflowPhase.REVIEW,
-                success=True,
-                duration_seconds=0,
-                output=context.review_report,
-            ))
-            await self._publish_progress_event(context, WorkflowState.QUALITY_REVIEW, "completed")
-            if phase_callback:
-                cb = phase_callback(WorkflowState.QUALITY_REVIEW, context.phase_history[-1])
-                if asyncio.iscoroutinefunction(phase_callback):
-                    await cb
+                    # 存储到 context
+                    setattr(context, context_field, {
+                        "agent": agent_id,
+                        "output": agent_text,
+                        "summary": agent_text[:500],
+                    })
 
-            # ── 完成 ──
+                    context.add_phase_result(PhaseResult(
+                        phase=phase_enum,
+                        success=True,
+                        duration_seconds=0,
+                        output=getattr(context, context_field),
+                    ))
+                    await self._publish_progress_event(context, phase_state, "completed")
+
+                    if phase_callback:
+                        if asyncio.iscoroutinefunction(phase_callback):
+                            await phase_callback(phase_state, context.phase_history[-1])
+                        else:
+                            phase_callback(phase_state, context.phase_history[-1])
+
+                # 将执行结果回传给 CEO 进行下一轮决策
+                results_summary = "\n".join([
+                    f"[{aid}] 已完成，输出摘要: {getattr(context, phase_agents[aid][1], {}).get('summary', '')[:200]}"
+                    for aid, _ in dispatched if aid in phase_agents
+                ])
+                ceo_history.append({"role": "user", "content": f"以上 Agent 已执行完毕：\n{results_summary}\n\n请评估结果并决定下一步。如果需要继续调度其他Agent请指明，如果全部完成请说'流程完成'。"})
+
+            # 标记完成
             context.current_phase = WorkflowState.COMPLETED
             await self._publish_progress_event(context, WorkflowState.COMPLETED, "completed")
 
-            # 保存 CEO 总结
             context.brainstorming_output = {
-                "summary": f"专利申请流程已完成。需求分析→检索→撰写→审查全部通过。",
+                "summary": ceo_text[:500] if ceo_text else "流程已完成",
+                "ceo_rounds": round_num + 1,
             }
 
-            self._logger.info(
-                "Workflow completed successfully",
-                task_id=context.task_id,
-                phases=len(context.phase_history),
-            )
-
+            self._logger.info("CEO-driven workflow completed", task_id=context.task_id, rounds=round_num+1)
             return context
 
         except asyncio.CancelledError:
             context.current_phase = WorkflowState.CANCELLED
-            self._logger.info("Workflow cancelled", task_id=context.task_id)
             raise
-
         except Exception as e:
             context.current_phase = WorkflowState.FAILED
-            self._logger.error(
-                "Workflow failed",
-                task_id=context.task_id,
-                error=str(e),
-                exc_info=True,
-            )
+            self._logger.error("Workflow failed", task_id=context.task_id, error=str(e), exc_info=True)
             raise
+
+    def _extract_dispatch_intent(self, ceo_text: str) -> list:
+        """从 CEO 回复文本中解析调度意图
+
+        CEO 可能以多种方式表达调度意图：
+        - "调度 requirement_analyst"
+        - "dispatch_specialist(agent_id='xxx', task='xxx')"
+        - "需求分析师" / "检索分析师" / "撰写师" / "审查师"
+        - "派发给需求分析" / "交给检索分析"
+        """
+        import re
+
+        results = []
+        text = ceo_text.lower()
+
+        # Agent 名称映射
+        name_to_id = {
+            "需求分析": "requirement_analyst",
+            "requirement_analyst": "requirement_analyst",
+            "检索分析": "retrieval_analyst",
+            "retrieval_analyst": "retrieval_analyst",
+            "专利撰写": "patent_writer",
+            "patent_writer": "patent_writer",
+            "撰写师": "patent_writer",
+            "质量审查": "quality_reviewer",
+            "quality_reviewer": "quality_reviewer",
+            "审查师": "quality_reviewer",
+        }
+
+        # 模式1: dispatch_specialist(agent_id="xxx", task="xxx")
+        pattern1 = r'dispatch_specialist\s*\(\s*agent_id\s*=\s*["\'](\w+)["\'](?:\s*,\s*task\s*=\s*["\'](.+?)["\'])?\s*\)'
+        for m in re.finditer(pattern1, ceo_text, re.IGNORECASE):
+            agent_id = m.group(1)
+            task = m.group(2) or context_text_for_agent(agent_id, ceo_text)
+            results.append((agent_id, task))
+
+        if results:
+            return results
+
+        # 模式2: "调度/派发给 XXX" 中文表达
+        for name, agent_id in name_to_id.items():
+            patterns = [
+                f"(?:调度|派发|交给|启动|调用).*?{name}",
+                f"{name}.*?(?:Agent|agent|专家|师)",
+            ]
+            for p in patterns:
+                if re.search(p, ceo_text):
+                    # 提取任务描述（取 CEO 回复的核心技术描述部分）
+                    task = self._build_default_task_for_agent(agent_id, ceo_text)
+                    if agent_id not in [r[0] for r in results]:
+                        results.append((agent_id, task))
+                    break
+
+        # 模式3: 检测"流程完成"/"全部完成"信号
+        if re.search(r'流程完成|全部完成|交付用户|专利文件已完成', ceo_text):
+            return []  # 空列表表示不需要继续调度
+
+        return results
+
+    def _build_default_task_for_agent(self, agent_id: str, ceo_context: str) -> str:
+        """为没有明确 task 描述的调度生成默认任务"""
+        defaults = {
+            "requirement_analyst": "对技术方案进行结构化需求分析，提取创新点、确定IPC分类",
+            "retrieval_analyst": "基于需求分析结果进行先有技术检索和专利性评估",
+            "patent_writer": "基于需求分析和检索结果撰写完整专利申请文件（权利要求书+说明书+摘要）",
+            "quality_reviewer": "对专利申请文件进行形式审查和实质审查",
+        }
+        return defaults.get(agent_id, "执行专业分析任务")
 
     async def resume_workflow(
         self,
@@ -567,23 +600,27 @@ class PatentWorkflowEngine:
     # ============ 内部辅助方法 ============
 
     def _build_ceo_workflow_prompt(self, context: WorkflowContext) -> str:
-        """构建 CEO 完整工作流 prompt"""
+        """构建 CEO 工作流 prompt — 引导 CEO 表达调度意图"""
         patent_type = context.metadata.get("patent_type_preference", "未指定")
-        return f"""执行完整的专利申请流程。
+        return f"""执行完整的专利申请流程。你是调度者，通过指示我调用对应的专业Agent来完成各阶段工作。
+
+【你的指令格式】
+当你需要调度某个Agent时，请明确写出：
+  dispatch_specialist(agent_id="xxx", task="具体任务描述")
+
+可用的 agent_id：
+- requirement_analyst：需求分析（提取创新点、IPC分类）
+- retrieval_analyst：检索分析（先有技术检索、专利性评估）
+- patent_writer：专利撰写（权利要求书+说明书+摘要）
+- quality_reviewer：质量审查（形式+实质审查）
 
 【技术描述】
 {context.original_description}
 
 【用户偏好专利类型】{patent_type}
 
-请使用 dispatch_specialist 工具，按照你的专业判断依次调度专业Agent完成以下工作：
-1. 需求分析 — 提取创新点、技术领域、应用场景
-2. 先有技术检索 — 评估新颖性和创造性
-3. 专利文件撰写 — 权利要求书 + 说明书
-4. 质量审查 — 形式合规 + 实质审查
-
-每完成一个阶段，评估结果质量。如果不满足要求，自主决定补充或回退。
-所有阶段完成后，输出最终专利申请文件包的摘要。"""
+请评估技术方案后，调度第一个Agent。输出格式示例：
+dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案进行结构化需求分析...")"""
 
     def _build_ceo_resume_prompt(
         self, context: WorkflowContext, force_start_from: Optional[WorkflowState]
