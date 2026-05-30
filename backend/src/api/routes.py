@@ -3273,29 +3273,72 @@ async def export_workflow_patent_docx(task_id: str):
             traceback.print_exc(file=f)
         from pathlib import Path
         from docx import Document
-        from src.document_gen.generator import _strip_markdown
+        from src.document_gen.generator import (
+            _strip_markdown, _get_profile, add_document_heading, add_section_heading,
+            add_body_paragraph, _add_multiline_content, add_new_section, _set_page_size,
+            _get_margins_for_section, _set_section_margins,
+        )
 
+        profile = _get_profile()
         doc = Document()
-        doc.add_heading(adapted_data["title"], level=0)
 
-        doc.add_heading("权利要求书", level=1)
+        # 配置首页（摘要）
+        first_section = doc.sections[0]
+        _set_page_size(first_section, profile)
+        margins = _get_margins_for_section("摘要", profile)
+        _set_section_margins(first_section, margins)
+
+        # 说明书摘要
+        add_document_heading(doc, "说明书摘要", profile)
+        add_body_paragraph(doc, _strip_markdown(draft_data.get("abstract", "")), profile)
+
+        # 摘要附图
+        add_new_section(doc, "摘要附图", profile)
+        add_document_heading(doc, "摘要附图", profile)
+        add_body_paragraph(doc, "（无附图）", profile, first_line_indent=False)
+
+        # 权利要求书
+        add_new_section(doc, "权利要求书", profile)
+        add_document_heading(doc, "权利要求书", profile)
         if isinstance(claims_raw, dict):
-            doc.add_paragraph(_strip_markdown(claims_raw.get("independent_claim", "")))
-            for dep in claims_raw.get("dependent_claims", []):
-                doc.add_paragraph(_strip_markdown(dep))
+            ind_claim = _strip_markdown(claims_raw.get("independent_claim", ""))
+            if ind_claim:
+                add_body_paragraph(doc, f"1、{_strip_claim_prefix(ind_claim)}", profile)
+            for i, dep in enumerate(claims_raw.get("dependent_claims", []), 2):
+                dep_text = _strip_markdown(_strip_claim_prefix(dep))
+                add_body_paragraph(doc, f"{i}、{dep_text}", profile)
 
-        doc.add_heading("说明书", level=1)
-        doc.add_heading("【技术领域】", level=2)
-        doc.add_paragraph(_strip_markdown(desc_raw.get("technical_field", "")))
-        doc.add_heading("【背景技术】", level=2)
-        doc.add_paragraph(_strip_markdown(desc_raw.get("background_art", "")))
-        doc.add_heading("【发明内容】", level=2)
-        doc.add_paragraph(_strip_markdown(desc_raw.get("summary_of_invention", "")))
-        doc.add_heading("【具体实施方式】", level=2)
-        doc.add_paragraph(_strip_markdown(desc_raw.get("detailed_description", "")))
+        # 说明书
+        add_new_section(doc, "说明书", profile)
+        add_document_heading(doc, "说明书", profile)
 
-        doc.add_heading("说明书摘要", level=1)
-        doc.add_paragraph(_strip_markdown(draft_data.get("abstract", "")))
+        # 专利名称（16pt）
+        title_para = doc.add_paragraph()
+        from docx.shared import Pt as _Pt
+        from src.document_gen.generator import _set_run_font
+        title_run = title_para.add_run(adapted_data["title"])
+        _set_run_font(title_run, "楷体", 16.0)
+
+        add_section_heading(doc, "技术领域", profile)
+        _add_multiline_content(doc, desc_raw.get("technical_field", ""), profile)
+
+        add_section_heading(doc, "背景技术", profile)
+        _add_multiline_content(doc, desc_raw.get("background_art", ""), profile)
+
+        add_section_heading(doc, "发明内容", profile)
+        _add_multiline_content(doc, desc_raw.get("summary_of_invention", ""), profile)
+
+        if desc_raw.get("description_of_drawings"):
+            add_section_heading(doc, "附图说明", profile)
+            _add_multiline_content(doc, desc_raw.get("description_of_drawings", ""), profile)
+
+        add_section_heading(doc, "具体实施方式", profile)
+        _add_multiline_content(doc, desc_raw.get("detailed_description", ""), profile)
+
+        # 说明书附图
+        add_new_section(doc, "说明书附图", profile)
+        add_document_heading(doc, "说明书附图", profile)
+        add_body_paragraph(doc, "（无附图）", profile, first_line_indent=False)
 
         export_dir = Path("./exports") / task_id
         export_dir.mkdir(parents=True, exist_ok=True)
