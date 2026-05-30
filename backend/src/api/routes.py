@@ -218,6 +218,23 @@ def _agent_ui_role(role: AgentRole) -> str:
     return "specialist"
 
 
+def _hermes_role_to_ui(role_str: str) -> str:
+    """将 hermes config 中的 role 字符串映射为前端 UI role"""
+    mapping = {
+        "orchestrator": "orchestrator",
+        "ceo": "orchestrator",
+        "specialist": "specialist",
+        "requirement_analyst": "specialist",
+        "retrieval_analyst": "specialist",
+        "patent_writer": "specialist",
+        "assistant": "assistant",
+        "brainstorm_partner": "assistant",
+        "critic": "critic",
+        "quality_reviewer": "critic",
+    }
+    return mapping.get(role_str, "specialist")
+
+
 def _agent_parent_id(profile: AgentProfile) -> str | None:
     if profile.report_to_roles:
         parent_role = profile.report_to_roles[0]
@@ -1071,45 +1088,187 @@ async def get_chat_messages(session_id: str = "default", task_id: str = None):
 # ============ Agent管理相关 ============
 @router.get("/agents", response_model=AgentListResponse)
 async def list_agents() -> AgentListResponse:
-    """列出所有 Hermes Profile Agent"""
-    profiles = profile_registry.list_all()
-    return {
-        "agents": [_agent_config_from_profile(profile) for profile in profiles],
-        "total": len(profiles),
-    }
+    """列出所有 Agent（基于真实 hermes-agent 配置）"""
+    now = datetime.now().isoformat()
+    agents = []
+
+    # 从 HermesAgentService 获取真实配置
+    for cfg in _hermes_service.get_all_configs():
+        agents.append({
+            "id": cfg.profile_id,
+            "name": cfg.name,
+            "description": cfg.description,
+            "role": _hermes_role_to_ui(cfg.role),
+            "system_prompt": cfg.soul_md[:200] + "..." if len(cfg.soul_md) > 200 else cfg.soul_md,
+            "model": cfg.model or "default",
+            "temperature": cfg.temperature,
+            "max_tokens": cfg.max_tokens,
+            "working_directory": f"./hermes_agents/{cfg.dir_path.name}",
+            "enabled": True,
+            "created_at": now,
+            "updated_at": now,
+            "parent_id": None,
+            "child_ids": [],
+        })
+
+    return {"agents": agents, "total": len(agents)}
 
 
 @router.get("/agents/{agent_id}", response_model=AgentDetailResponse)
 async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
-    """获取 Hermes Profile Agent 详情，包括工具、技能与定时器（合并持久化覆盖）"""
+    """获取 Agent 详情（基于真实 hermes-agent 配置 + registry 工具）"""
+    now = datetime.now().isoformat()
+
+    # 优先从 HermesAgentService 获取
+    cfg = _hermes_service.get_config(agent_id)
+    if cfg:
+        # 确保专利工具已注册
+        _hermes_service._ensure_patent_tools()
+
+        # 从 hermes registry 获取真实工具信息
+        from tools.registry import registry as hermes_registry
+        all_patent_tools = {
+            name: entry for name, entry in hermes_registry._tools.items()
+            if entry.toolset == "patent"
+        }
+
+        # 该 Agent 启用的工具
+        agent_tools = []
+        for tool_name in cfg.enabled_tools:
+            entry = all_patent_tools.get(tool_name)
+            is_disabled = _override_store.is_tool_disabled(agent_id, tool_name)
+            agent_tools.append({
+                "id": tool_name,
+                "name": tool_name,
+                "description": entry.description if entry else f"Hermes 工具: {tool_name}",
+                "enabled": not is_disabled,
+                "category": _agent_tool_category(tool_name),
+                "config": {},
+                "is_hermes": True,
+                "source_code": None,
+                "related_files": [_KNOWN_TOOL_IMPL_FILES.get(tool_name)] if _KNOWN_TOOL_IMPL_FILES.get(tool_name) else [],
+            })
+
+        # 用户添加的额外工具
+        added_tools = _override_store.get_added_tools(agent_id)
+        agent_tools.extend(added_tools)
+
+        # 从文件系统获取真实技能
+        agent_skills = []
+        for skill_info in cfg.skills:
+            skill_name = skill_info.get("name", "")
+            is_disabled = _override_store.is_skill_disabled(agent_id, skill_name)
+            agent_skills.append({
+                "id": skill_name,
+                "name": skill_name,
+                "description": skill_info.get("description", ""),
+                "enabled": not is_disabled,
+                "version": "1.0.0",
+                "tags": [],
+                "source_code": None,
+                "source_markdown": None,
+                "related_files": [f"hermes_agents/{cfg.dir_path.name}/skills/{skill_info.get('file', '')}"],
+            })
+
+        # 用户添加的额外技能
+        added_skills = _override_store.get_added_skills(agent_id)
+        agent_skills.extend(added_skills)
+
+        # 定时器
+        timers = _override_store.get_timers(agent_id)
+
+        # 记忆（从 hermes-agent 配置读取）
+        memory_cfg = cfg.config.get("memory", {})
+        memories = []
+        if memory_cfg.get("short_term", True):
+            memories.append({
+                "id": "short_term",
+                "type": "short_term",
+                "name": "短期对话记忆 (Hermes SessionDB)",
+                "size": 0,
+                "item_count": 0,
+                "last_updated": now,
+                "content": None,
+                "entries": [],
+            })
+        if memory_cfg.get("long_term", False):
+            memories.append({
+                "id": "long_term",
+                "type": "long_term",
+                "name": "长期记忆 (Hermes Persistent Memory)",
+                "size": 0,
+                "item_count": 0,
+                "last_updated": now,
+                "content": None,
+                "entries": [],
+            })
+        if memory_cfg.get("knowledge_base", False):
+            memories.append({
+                "id": "knowledge_base",
+                "type": "knowledge_base",
+                "name": "知识库 (Hermes Session Search)",
+                "size": 0,
+                "item_count": 0,
+                "last_updated": now,
+                "content": None,
+                "entries": [],
+            })
+
+        config_overrides = _override_store.get_config_overrides(agent_id)
+        config_data = {
+            "id": cfg.profile_id,
+            "name": cfg.name,
+            "description": cfg.description,
+            "role": _hermes_role_to_ui(cfg.role),
+            "system_prompt": cfg.soul_md,
+            "model": config_overrides.get("model", cfg.model) or "default",
+            "temperature": config_overrides.get("temperature", cfg.temperature),
+            "max_tokens": config_overrides.get("max_tokens", cfg.max_tokens),
+            "working_directory": f"./hermes_agents/{cfg.dir_path.name}",
+            "enabled": True,
+            "created_at": now,
+            "updated_at": now,
+            "parent_id": None,
+            "child_ids": [],
+        }
+
+        return {
+            "config": config_data,
+            "tools": agent_tools,
+            "skills": agent_skills,
+            "timers": timers,
+            "memories": memories,
+        }
+
+    # Fallback: 旧的 profile_registry（兼容）
     profile = _require_agent_profile(agent_id)
     config_overrides = _override_store.get_config_overrides(agent_id)
-
-    # 合并配置
     config = _agent_config_from_profile(profile)
     if config_overrides:
         for key in ("temperature", "max_tokens", "model"):
             if key in config_overrides:
                 config[key] = config_overrides[key]
-
-    # 工具列表 = Profile 工具 + 用户添加的工具，应用禁用状态
     profile_tools = _agent_tools_from_profile(profile)
     for tool in profile_tools:
         if _override_store.is_tool_disabled(agent_id, tool["name"]):
             tool["enabled"] = False
     added_tools = _override_store.get_added_tools(agent_id)
     all_tools = profile_tools + added_tools
-
-    # 技能列表 = Profile 技能 + 用户添加的技能，应用禁用状态
     profile_skills = _agent_skills_from_profile(profile)
     for skill in profile_skills:
         if _override_store.is_skill_disabled(agent_id, skill["name"]):
             skill["enabled"] = False
     added_skills = _override_store.get_added_skills(agent_id)
     all_skills = profile_skills + added_skills
-
-    # 定时器从 override store 加载
     timers = _override_store.get_timers(agent_id)
+
+    return {
+        "config": config,
+        "tools": all_tools,
+        "skills": all_skills,
+        "timers": timers,
+        "memories": _agent_memories_from_profile(profile),
+    }
 
     return {
         "config": config,
