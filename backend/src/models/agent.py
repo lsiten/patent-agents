@@ -45,6 +45,8 @@ class Agent(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
                          cascade="all, delete-orphan")
     skills = relationship("AgentSkill", back_populates="agent", lazy="selectin",
                           cascade="all, delete-orphan")
+    timers = relationship("AgentTimer", back_populates="agent", lazy="selectin",
+                         cascade="all, delete-orphan")
     memories = relationship("AgentMemory", back_populates="agent", lazy="selectin",
                             cascade="all, delete-orphan")
 
@@ -91,6 +93,32 @@ class AgentSkill(UUIDMixin, TimestampMixin, Base):
     )
 
     agent = relationship("Agent", back_populates="skills")
+
+
+class AgentTimer(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "agent_timers"
+
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    cron_expression: Mapped[str] = mapped_column(String(100), nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    action_type: Mapped[str] = mapped_column(String(32), default="agent_run")
+    action_config: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_run_at: Mapped[Optional[datetime]] = mapped_column()
+    next_run_at: Mapped[Optional[datetime]] = mapped_column()
+    run_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_run_status: Mapped[Optional[str]] = mapped_column(String(32))
+    last_run_error: Mapped[Optional[str]] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint("agent_id", "name", name="uc_agent_timer_name"),
+    )
+
+    agent = relationship("Agent", back_populates="timers")
 
 
 class AgentMemory(UUIDMixin, Base):

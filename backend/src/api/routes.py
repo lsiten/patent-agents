@@ -66,6 +66,11 @@ register_default_profiles(profile_registry)
 workflow_engine = PatentWorkflowEngine()
 organization_tree_store: OrgNodeResponse | None = None
 
+# ── Agent Override Store (真实持久化) ──
+from ..core.override_store import get_override_store
+
+_override_store = get_override_store()
+
 # ── 持久化存储辅助 ──
 _store_instance = None
 
@@ -1071,51 +1076,122 @@ async def list_agents() -> AgentListResponse:
 
 @router.get("/agents/{agent_id}", response_model=AgentDetailResponse)
 async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
-    """获取 Hermes Profile Agent 详情，包括工具、技能与记忆配置"""
+    """获取 Hermes Profile Agent 详情，包括工具、技能与定时器（合并持久化覆盖）"""
     profile = _require_agent_profile(agent_id)
+    config_overrides = _override_store.get_config_overrides(agent_id)
+
+    # 合并配置
+    config = _agent_config_from_profile(profile)
+    if config_overrides:
+        for key in ("temperature", "max_tokens", "model"):
+            if key in config_overrides:
+                config[key] = config_overrides[key]
+
+    # 工具列表 = Profile 工具 + 用户添加的工具，应用禁用状态
+    profile_tools = _agent_tools_from_profile(profile)
+    for tool in profile_tools:
+        if _override_store.is_tool_disabled(agent_id, tool["name"]):
+            tool["enabled"] = False
+    added_tools = _override_store.get_added_tools(agent_id)
+    all_tools = profile_tools + added_tools
+
+    # 技能列表 = Profile 技能 + 用户添加的技能，应用禁用状态
+    profile_skills = _agent_skills_from_profile(profile)
+    for skill in profile_skills:
+        if _override_store.is_skill_disabled(agent_id, skill["name"]):
+            skill["enabled"] = False
+    added_skills = _override_store.get_added_skills(agent_id)
+    all_skills = profile_skills + added_skills
+
+    # 定时器从 override store 加载
+    timers = _override_store.get_timers(agent_id)
+
     return {
-        "config": _agent_config_from_profile(profile),
-        "tools": _agent_tools_from_profile(profile),
-        "skills": _agent_skills_from_profile(profile),
-        "timers": [],
+        "config": config,
+        "tools": all_tools,
+        "skills": all_skills,
+        "timers": timers,
         "memories": _agent_memories_from_profile(profile),
     }
 
 
 @router.put("/agents/{agent_id}", response_model=AgentUpdateResponse)
 async def update_agent_config(agent_id: str, config: dict) -> AgentUpdateResponse:
-    """更新Agent配置"""
+    """更新Agent配置（持久化到 override store）"""
     _require_agent_profile(agent_id)
+
+    # 处理嵌套的 tools/skills/timers 批量更新
+    if "tools" in config:
+        # 前端发送完整 tools 数组时，同步到 override store
+        tools_data = config.pop("tools")
+        # 找出哪些 Profile 工具被禁用了
+        profile = _require_agent_profile(agent_id)
+        profile_tool_names = set(profile.tool_config.enabled_tools)
+        for tool in tools_data:
+            tool_name = tool.get("name", "")
+            if tool_name in profile_tool_names:
+                _override_store.toggle_tool(agent_id, tool_name, tool.get("enabled", True))
+            else:
+                # 用户添加的工具 — 确保在 added 列表中
+                existing_added = _override_store.get_added_tools(agent_id)
+                if not any(t.get("id") == tool.get("id") for t in existing_added):
+                    _override_store.add_tool(agent_id, tool)
+
+    if "skills" in config:
+        skills_data = config.pop("skills")
+        profile = _require_agent_profile(agent_id)
+        profile_skill_names = {s.name for s in profile.skills}
+        for skill in skills_data:
+            skill_name = skill.get("name", "")
+            if skill_name in profile_skill_names:
+                _override_store.toggle_skill(agent_id, skill_name, skill.get("enabled", True))
+            else:
+                existing_added = _override_store.get_added_skills(agent_id)
+                if not any(s.get("id") == skill.get("id") for s in existing_added):
+                    _override_store.add_skill(agent_id, skill)
+
+    if "timers" in config:
+        timers_data = config.pop("timers")
+        # 替换整个 timers 列表
+        entry = _override_store._ensure_agent(agent_id)
+        entry["timers"] = timers_data
+        _override_store.save()
+
+    # 剩余字段作为 config overrides 保存
+    if config:
+        _override_store.update_config(agent_id, config)
+
     return {
         "agent_id": agent_id,
-        "updated_fields": list(config.keys()),
-        "message": "Agent配置已更新",
+        "updated_fields": list(config.keys()) + ["tools", "skills", "timers"],
+        "message": "Agent配置已持久化更新",
     }
 
 
 @router.post("/agents/{agent_id}/tools/{tool_id}/toggle", response_model=AgentToggleResponse)
 async def toggle_agent_tool(agent_id: str, tool_id: str, enabled: bool) -> AgentToggleResponse:
-    """启用/禁用Agent工具"""
-    profile = _require_agent_profile(agent_id)
-    if tool_id not in profile.tool_config.enabled_tools:
-        raise HTTPException(status_code=404, detail="Agent工具不存在")
+    """启用/禁用Agent工具（持久化）"""
+    _require_agent_profile(agent_id)
+    _override_store.toggle_tool(agent_id, tool_id, enabled)
     return {"agent_id": agent_id, "tool_id": tool_id, "enabled": enabled}
 
 
 @router.post("/agents/{agent_id}/skills/{skill_id}/toggle", response_model=AgentToggleResponse)
 async def toggle_agent_skill(agent_id: str, skill_id: str, enabled: bool) -> AgentToggleResponse:
-    """启用/禁用Agent技能"""
-    profile = _require_agent_profile(agent_id)
-    if not any(skill.name == skill_id for skill in profile.skills):
-        raise HTTPException(status_code=404, detail="Agent技能不存在")
+    """启用/禁用Agent技能（持久化）"""
+    _require_agent_profile(agent_id)
+    _override_store.toggle_skill(agent_id, skill_id, enabled)
     return {"agent_id": agent_id, "skill_id": skill_id, "enabled": enabled}
 
 
 @router.post("/agents/{agent_id}/timers/{timer_id}/toggle", response_model=AgentToggleResponse)
 async def toggle_agent_timer(agent_id: str, timer_id: str, enabled: bool) -> AgentToggleResponse:
-    """启用/禁用Agent定时器"""
+    """启用/禁用Agent定时器（持久化）"""
     _require_agent_profile(agent_id)
-    raise HTTPException(status_code=404, detail="Agent定时器不存在")
+    success = _override_store.toggle_timer(agent_id, timer_id, enabled)
+    if not success:
+        raise HTTPException(status_code=404, detail="Agent定时器不存在")
+    return {"agent_id": agent_id, "timer_id": timer_id, "enabled": enabled}
 
 
 @router.post("/agents/{agent_id}/memory/{memory_id}/clear", response_model=AgentToggleResponse)
@@ -1125,7 +1201,113 @@ async def clear_agent_memory(agent_id: str, memory_id: str) -> AgentToggleRespon
     memory_ids = {memory["id"] for memory in _agent_memories_from_profile(profile)}
     if memory_id not in memory_ids:
         raise HTTPException(status_code=404, detail="Agent记忆不存在")
+    # TODO: 对接真实记忆系统清空操作
     return {"agent_id": agent_id, "memory_id": memory_id, "cleared": True}
+
+
+# ============ Agent Timer CRUD ============
+@router.post("/agents/{agent_id}/timers")
+async def create_agent_timer(agent_id: str, timer_data: dict) -> dict:
+    """创建新定时器（持久化）"""
+    _require_agent_profile(agent_id)
+    timer_id = timer_data.get("id") or f"timer_{uuid.uuid4().hex[:8]}"
+    timer_entry = {
+        "id": timer_id,
+        "name": timer_data.get("name", "未命名定时器"),
+        "cron_expression": timer_data.get("cron_expression", "0 * * * *"),
+        "action": timer_data.get("action", ""),
+        "enabled": timer_data.get("enabled", True),
+        "last_run": None,
+        "next_run": None,
+    }
+    _override_store.add_timer(agent_id, timer_entry)
+    return {"success": True, "timer": timer_entry}
+
+
+@router.put("/agents/{agent_id}/timers/{timer_id}")
+async def update_agent_timer(agent_id: str, timer_id: str, updates: dict) -> dict:
+    """更新定时器（持久化）"""
+    _require_agent_profile(agent_id)
+    success = _override_store.update_timer(agent_id, timer_id, updates)
+    if not success:
+        raise HTTPException(status_code=404, detail="定时器不存在")
+    return {"success": True, "timer_id": timer_id}
+
+
+@router.delete("/agents/{agent_id}/timers/{timer_id}")
+async def delete_agent_timer(agent_id: str, timer_id: str) -> dict:
+    """删除定时器（持久化）"""
+    _require_agent_profile(agent_id)
+    success = _override_store.delete_timer(agent_id, timer_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="定时器不存在")
+    return {"success": True, "timer_id": timer_id}
+
+
+# ============ Agent Tool CRUD (individual) ============
+@router.post("/agents/{agent_id}/tools")
+async def create_agent_tool(agent_id: str, tool_data: dict) -> dict:
+    """创建新工具（持久化）"""
+    _require_agent_profile(agent_id)
+    tool_id = tool_data.get("id") or f"tool_{uuid.uuid4().hex[:8]}"
+    tool_entry = {
+        "id": tool_id,
+        "name": tool_data.get("name", ""),
+        "description": tool_data.get("description", ""),
+        "enabled": tool_data.get("enabled", True),
+        "category": tool_data.get("category", "analysis"),
+        "config": tool_data.get("config", {}),
+    }
+    _override_store.add_tool(agent_id, tool_entry)
+    return {"success": True, "tool": tool_entry}
+
+
+@router.put("/agents/{agent_id}/tools/{tool_id}")
+async def update_agent_tool(agent_id: str, tool_id: str, tool_data: dict) -> dict:
+    """更新工具（持久化）"""
+    _require_agent_profile(agent_id)
+    success = _override_store.update_tool(agent_id, tool_id, tool_data)
+    if not success:
+        raise HTTPException(status_code=404, detail="工具不存在")
+    return {"success": True, "tool": tool_data}
+
+
+@router.delete("/agents/{agent_id}/tools/{tool_id}")
+async def delete_agent_tool_endpoint(agent_id: str, tool_id: str) -> dict:
+    """删除工具（持久化）"""
+    _require_agent_profile(agent_id)
+    success = _override_store.delete_tool(agent_id, tool_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="工具不存在")
+    return {"success": True, "tool_id": tool_id}
+
+
+# ============ Agent Skill CRUD (individual) ============
+@router.post("/agents/{agent_id}/skills")
+async def create_agent_skill(agent_id: str, skill_data: dict) -> dict:
+    """创建新技能（持久化）"""
+    _require_agent_profile(agent_id)
+    skill_id = skill_data.get("id") or f"skill_{uuid.uuid4().hex[:8]}"
+    skill_entry = {
+        "id": skill_id,
+        "name": skill_data.get("name", ""),
+        "description": skill_data.get("description", ""),
+        "enabled": skill_data.get("enabled", True),
+        "version": skill_data.get("version", "1.0.0"),
+        "tags": skill_data.get("tags", []),
+    }
+    _override_store.add_skill(agent_id, skill_entry)
+    return {"success": True, "skill": skill_entry}
+
+
+@router.delete("/agents/{agent_id}/skills/{skill_id}")
+async def delete_agent_skill_endpoint(agent_id: str, skill_id: str) -> dict:
+    """删除技能（持久化）"""
+    _require_agent_profile(agent_id)
+    success = _override_store.delete_skill(agent_id, skill_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="技能不存在")
+    return {"success": True, "skill_id": skill_id}
 
 
 # ============ 组织架构相关 ============

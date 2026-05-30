@@ -1,0 +1,37 @@
+{
+  "patent.ceo.v1": {
+    "config_overrides": {
+      "temperature": 0.5,
+      "max_tokens": 4096
+    },
+    "tools_disabled": [
+      "task_planner"
+    ],
+    "tools_added": [],
+    "skills_disabled": [],
+    "skills_added": [
+      {
+        "id": "skill_b7fdbc84",
+        "name": "风险预判",
+        "description": "预判审查意见方向",
+        "enabled": true,
+        "version": "1.0.0",
+        "tags": [
+          "风险",
+          "预判"
+        ]
+      }
+    ],
+    "timers": [
+      {
+        "id": "timer_d60fe4c6",
+        "name": "每小时检查",
+        "cron_expression": "0 * * * *",
+        "action": "检查任务状态",
+        "enabled": true,
+        "last_run": null,
+        "next_run": null
+      }
+    ]
+  }
+}
