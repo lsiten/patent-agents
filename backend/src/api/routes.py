@@ -72,6 +72,61 @@ from ..agents.hermes_agent_service import get_hermes_agent_service
 
 _hermes_service = get_hermes_agent_service()
 
+# ── 订阅Agent事件总线，存入task_events供SSE回放 ──
+from ..core.events import (
+    EventType,
+    subscribe_event,
+    BaseEvent,
+    AgentThinkingEvent,
+    AgentToolCallStartEvent,
+    AgentToolCallEndEvent,
+    AgentDispatchEvent,
+    AgentContentEvent,
+)
+
+
+def _on_agent_event(event: BaseEvent):
+    """将Agent事件存入task_events供/stream端点回放"""
+    task_id = getattr(event, "task_id", None)
+    if not task_id:
+        return
+
+    agent_name = getattr(event, "agent_name", "") or getattr(event, "from_agent", "Agent")
+    event_type_str = event.event_type.value
+
+    if isinstance(event, AgentThinkingEvent):
+        message = f"💭 {event.thought[:200]}"
+    elif isinstance(event, AgentToolCallStartEvent):
+        message = f"🔧 调用工具: {event.tool_name}"
+    elif isinstance(event, AgentToolCallEndEvent):
+        status_icon = "✅" if event.success else "❌"
+        message = f"{status_icon} {event.tool_name} 返回: {event.result[:150]}"
+    elif isinstance(event, AgentDispatchEvent):
+        agent_name = event.from_agent
+        message = f"🎯 调度 → {event.to_agent}: {event.task_description[:100]}"
+    elif isinstance(event, AgentContentEvent):
+        message = f"📄 输出: {event.content[:200]}"
+    else:
+        message = "事件"
+
+    task_events.setdefault(task_id, []).append(
+        WorkflowEventResponse(
+            task_id=task_id,
+            timestamp=datetime.now(),
+            agent=agent_name,
+            message=message,
+            event_type=event_type_str,
+            data=event.to_dict(),
+        )
+    )
+
+
+subscribe_event(EventType.AGENT_THINKING, _on_agent_event)
+subscribe_event(EventType.AGENT_TOOL_CALL_START, _on_agent_event)
+subscribe_event(EventType.AGENT_TOOL_CALL_END, _on_agent_event)
+subscribe_event(EventType.AGENT_DISPATCH, _on_agent_event)
+subscribe_event(EventType.AGENT_CONTENT, _on_agent_event)
+
 # ── 持久化存储辅助 ──
 _store_instance = None
 

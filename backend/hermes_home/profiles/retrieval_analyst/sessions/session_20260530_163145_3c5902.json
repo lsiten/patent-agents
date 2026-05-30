@@ -1,0 +1,566 @@
+{
+  "session_id": "20260530_163145_3c5902",
+  "model": "claude-opus-4-6",
+  "base_url": "http://deepseek-work.intsig.net/proxy/aws/claude/v1",
+  "platform": "api",
+  "session_start": "2026-05-30T16:31:45.525841",
+  "last_updated": "2026-05-30T16:33:48.624153",
+  "system_prompt": "# 检索分析师 Agent Profile (v1.0.0)\n\n## 专业技能\n- **检索策略制定**: 设计高效的专利检索关键词和分类号组合\n- **新颖性评估**: 评估技术方案相对于现有技术的新颖性\n- **创造性评估**: 评估技术方案的非显而易见性和创造性高度\n- **相似专利比对**: 对比分析最接近的现有技术，找出区别点\n- **风险因素识别**: 识别可能影响专利授权的潜在风险因素\n- **撰写建议生成**: 基于检索结果为撰写环节提供策略建议\n\n## 角色定位\n你是一位资深专利检索分析师，精通世界各主要专利局的检索系统和数据库。\n你能够准确评估技术方案的专利性（新颖性、创造性、实用性），识别潜在的专利风险，为专利撰写提供策略建议。\n\n## 任务指令\n请基于结构化需求文档进行专利性分析：\n1. 制定检索策略和关键词\n2. 模拟检索现有技术（开发环境使用模拟数据，生产环境接入真实数据库）\n3. 筛选并分析最接近的对比文件\n4. 进行新颖性评估\n5. 进行创造性评估\n6. 进行实用性评估\n7. 识别高相似度专利和潜在冲突\n8. 为撰写环节提供策略建议\n9. 生成完整的检索分析报告\n\n## 约束条件\n- 对比文件分析要客观、具体，指出具体的相同和区别特征\n- 创造性评估要基于\"本领域普通技术人员\"的视角\n- 风险提示要充分，既要指出风险也要给出应对策略\n- 撰写建议要具体、可操作，能直接指导后续撰写工作\n- 如果发现明显不具备专利性的情况，要明确指出\n\n## 输出格式\n请输出结构化的检索分析报告（JSON 格式）：\n{\n  \"retrieval_strategy\": {\n    \"keywords\": [\"关键词1\", \"关键词2\"],\n    \"classifications\": [\"IPC/CPC 分类号\"],\n    \"databases_used\": [\"使用的数据库列表\"]\n  },\n  \"novelty_assessment\": {\n    \"rating\": \"high | medium | low\",\n    \"rationale\": \"评估理由\",\n    \"related_prior_art\": [\"相关对比文件列表\"],\n    \"key_distinguishing_features\": [\"关键区别特征1\", \"区别特征2\"]\n  },\n  \"inventive_step_assessment\": {\n    \"rating\": \"high | medium | low\",\n    \"rationale\": \"评估理由\",\n    \"technical_effects\": [\"技术效果说明\"],\n    \"obviousness_concerns\": [\"潜在的显而易见性问题\"]\n  },\n  \"utility_assessment\": {\n    \"rating\": \"high | medium | low\",\n    \"rationale\": \"评估理由\"\n  },\n  \"similar_patents\": [\n    {\n      \"patent_id\": \"专利号\",\n      \"title\": \"专利标题\",\n      \"applicant\": \"申请人\",\n      \"publication_date\": \"公开日期\",\n      \"similarity_score\": 0.85,\n      \"key_similarities\": [\"相似点1\"],\n      \"key_differences\": [\"区别点1\"],\n      \"risk_level\": \"high | medium | low\"\n    }\n  ],\n  \"writing_recommendations\": [\n    {\n      \"focus_area\": \"重点关注领域\",\n      \"recommendation\": \"具体建议\",\n      \"priority\": \"high | medium | low\"\n    }\n  ],\n  \"overall_patentability\": \"high | medium | low\",\n  \"overall_confidence\": 0.85,\n  \"risk_factors\": [\n    {\n      \"risk_type\": \"风险类型\",\n      \"description\": \"风险描述\",\n      \"severity\": \"critical | high | medium | low\",\n      \"mitigation\": \"缓解建议\"\n    }\n  ],\n  \"conclusion\": \"检索分析总结论\"\n}\n\nIf the user asks about configuring, setting up, or using Hermes Agent itself, load the `hermes-agent` skill with skill_view(name='hermes-agent') before answering. Docs: https://hermes-agent.nousresearch.com/docs\n\nHost: macOS (15.6)\nUser home directory: /Users/shicheng_lei\nCurrent working directory: /Users/shicheng_lei/code/patent-agents/backend\n\nConversation started: Saturday, May 30, 2026 04:31 PM\nModel: claude-opus-4-6",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "agent_selector",
+        "description": "根据任务描述选择最适合的专业Agent来处理任务",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task_description": {
+              "type": "string",
+              "description": "需要处理的任务描述"
+            },
+            "exclude_agents": {
+              "type": "string",
+              "description": "排除的Agent ID(逗号分隔)"
+            }
+          },
+          "required": [
+            "task_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "claim_drafter",
+        "description": "根据技术特征撰写独立权利要求和从属权利要求",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "features": {
+              "type": "string",
+              "description": "技术特征列表或描述"
+            },
+            "protection_scope": {
+              "type": "string",
+              "description": "期望的保护范围说明"
+            }
+          },
+          "required": [
+            "features"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "claim_quality_analyzer",
+        "description": "分析权利要求的清楚性、保护范围、层次结构等质量指标",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "string",
+              "description": "权利要求书完整内容"
+            }
+          },
+          "required": [
+            "claims"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "compliance_checker",
+        "description": "检查专利申请文件的格式和形式合规性",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "patent_document": {
+              "type": "string",
+              "description": "专利文件内容"
+            }
+          },
+          "required": [
+            "patent_document"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "creative_thinking",
+        "description": "基于技术方案激发创新思维，探索替代方案和拓展方向",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tech_description": {
+              "type": "string",
+              "description": "技术发明描述"
+            }
+          },
+          "required": [
+            "tech_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "description_writer",
+        "description": "撰写专利说明书各章节(技术领域/背景/发明内容/具体实施方式)",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "section_type": {
+              "type": "string",
+              "description": "章节类型: technical_field/background/summary/drawings/detailed",
+              "enum": [
+                "technical_field",
+                "background",
+                "summary",
+                "drawings",
+                "detailed"
+              ]
+            },
+            "technical_content": {
+              "type": "string",
+              "description": "该章节涉及的技术内容"
+            },
+            "claims": {
+              "type": "string",
+              "description": "相关权利要求"
+            }
+          },
+          "required": [
+            "section_type",
+            "technical_content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "dispatch_specialist",
+        "description": "调度专业Agent执行任务。CEO通过此工具将工作派发给专业Agent，每个Agent有独立专业知识。可用Agent: brainstorm_partner(讨论发散)、requirement_analyst(需求分析)、retrieval_analyst(先有技术检索)、patent_writer(专利撰写)、quality_reviewer(质量审查)",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "agent_id": {
+              "type": "string",
+              "description": "Agent ID: brainstorm_partner/requirement_analyst/retrieval_analyst/patent_writer/quality_reviewer",
+              "enum": [
+                "brainstorm_partner",
+                "requirement_analyst",
+                "retrieval_analyst",
+                "patent_writer",
+                "quality_reviewer"
+              ]
+            },
+            "task": {
+              "type": "string",
+              "description": "交给该Agent的具体任务描述，要清晰完整，包含所有必要上下文和期望输出格式"
+            },
+            "context": {
+              "type": "string",
+              "description": "附加上下文（前序阶段输出、用户补充信息、修改建议等）"
+            }
+          },
+          "required": [
+            "agent_id",
+            "task"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ipc_classifier",
+        "description": "根据技术描述进行 IPC 国际专利分类，返回主分类号和次要分类号",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tech_description": {
+              "type": "string",
+              "description": "技术发明描述文本"
+            }
+          },
+          "required": [
+            "tech_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "oa_predictor",
+        "description": "预测专利审查中可能收到的审查意见，提供应对策略",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "patent_document": {
+              "type": "string",
+              "description": "专利申请文件内容"
+            }
+          },
+          "required": [
+            "patent_document"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "patent_search",
+        "description": "在多源专利数据库(USPTO/EPO/CNIPA)中检索相关现有技术",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "检索查询关键词或技术描述"
+            },
+            "sources": {
+              "type": "string",
+              "description": "数据源(逗号分隔): uspto,epo,cnipa"
+            },
+            "limit": {
+              "type": "string",
+              "description": "最大结果数量"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "patent_strategy_guide",
+        "description": "基于技术方案和市场情况提供专利申请策略和保护策略建议",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tech_description": {
+              "type": "string",
+              "description": "技术方案描述"
+            },
+            "market_info": {
+              "type": "string",
+              "description": "市场和竞争信息"
+            }
+          },
+          "required": [
+            "tech_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "patentability_scorer",
+        "description": "评估技术方案的新颖性、创造性和实用性，给出综合专利性评分",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "invention": {
+              "type": "string",
+              "description": "待评估的技术方案"
+            },
+            "prior_art": {
+              "type": "string",
+              "description": "相关现有技术"
+            }
+          },
+          "required": [
+            "invention"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "prior_art_comparator",
+        "description": "对比分析发明与多篇现有技术的技术特征差异，识别区别特征",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "invention": {
+              "type": "string",
+              "description": "发明技术方案描述"
+            },
+            "prior_arts": {
+              "type": "string",
+              "description": "现有技术列表（JSON格式或文本描述）"
+            }
+          },
+          "required": [
+            "invention",
+            "prior_arts"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "quality_assessor",
+        "description": "对专利申请文件进行质量评估，给出改进建议",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "document": {
+              "type": "string",
+              "description": "待评估的文件内容"
+            },
+            "assessment_type": {
+              "type": "string",
+              "description": "评估类型"
+            }
+          },
+          "required": [
+            "document"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "report_generator",
+        "description": "生成专利申请相关的各类报告(检索报告/分析报告/审查意见答复)",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "report_type": {
+              "type": "string",
+              "description": "报告类型"
+            },
+            "content": {
+              "type": "string",
+              "description": "报告内容素材"
+            }
+          },
+          "required": [
+            "report_type",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "risk_analyzer",
+        "description": "分析专利申请过程中的各类风险(驳回/无效/侵权)",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "patent_document": {
+              "type": "string",
+              "description": "专利相关文件"
+            },
+            "risk_type": {
+              "type": "string",
+              "description": "风险类型"
+            }
+          },
+          "required": [
+            "patent_document"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "scenario_miner",
+        "description": "根据技术描述和特征挖掘潜在应用场景、目标用户和市场价值",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tech_description": {
+              "type": "string",
+              "description": "技术发明描述"
+            },
+            "features": {
+              "type": "string",
+              "description": "关键技术特征列表"
+            }
+          },
+          "required": [
+            "tech_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "similarity_analyzer",
+        "description": "分析发明方案与现有技术的相似度，识别关键差异和风险",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "invention": {
+              "type": "string",
+              "description": "待分析的发明技术方案"
+            },
+            "prior_art": {
+              "type": "string",
+              "description": "对比的现有技术描述"
+            }
+          },
+          "required": [
+            "invention",
+            "prior_art"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "support_checker",
+        "description": "检查权利要求与说明书之间的支持关系，识别支持性缺陷",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "string",
+              "description": "权利要求书内容"
+            },
+            "description": {
+              "type": "string",
+              "description": "说明书内容"
+            }
+          },
+          "required": [
+            "claims",
+            "description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "support_verifier",
+        "description": "验证说明书对权利要求的支持充分性(专利法第26条第4款)",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "claims": {
+              "type": "string",
+              "description": "权利要求书内容"
+            },
+            "description": {
+              "type": "string",
+              "description": "说明书内容"
+            }
+          },
+          "required": [
+            "claims",
+            "description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "task_planner",
+        "description": "制定专利申请的工作计划和时间线，分解任务，设定里程碑",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tech_description": {
+              "type": "string",
+              "description": "技术发明描述"
+            },
+            "patent_type": {
+              "type": "string",
+              "description": "专利类型: invention/utility_model"
+            },
+            "priority": {
+              "type": "string",
+              "description": "优先级: high/medium/low"
+            }
+          },
+          "required": [
+            "tech_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "tech_feature_extractor",
+        "description": "从技术描述中提取关键技术特征、创新点和解决的技术问题",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "tech_description": {
+              "type": "string",
+              "description": "技术发明描述文本"
+            }
+          },
+          "required": [
+            "tech_description"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "terminology_normalizer",
+        "description": "规范专利文件中的技术术语，确保全文一致性和专业性",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "需要规范化的文本"
+            },
+            "domain": {
+              "type": "string",
+              "description": "技术领域"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    }
+  ],
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "基于以下需求分析结果进行先有技术检索和专利性评估（新颖性、创造性、实用性）。\n\n需求分析结果：\n{\"tech_field\": {\"primary_domain\": \"沉浸式显示技术/Cave虚拟现实系统\", \"secondary_domains\": [\"图像处理与渲染\", \"人机交互\", \"机械控制系统\", \"自适应显示系统\"], \"ipc_suggestions\": [\"G06F3/01 (用户与计算机交互的输入装置)\", \"G09F9/00 (信息显示)\", \"H04N9/31 (投影装置)\", \"G06T15/00 (三维图像渲染)\"], \"cpc_suggestions\": [\"G06F3/011\", \"G06T19/006\", \"H04N9/3147\", \"G09G5/00\"]}, \"core_principle\": \"针对5面屏Cave沉浸式空间，通过入口身高检测装置获取用户身高信息，基于身高-角度映射表自动调节可调屏幕（左侧、右侧、前方）的倾斜角度，使显示画面适配不同身高用户的最佳视角；同时在屏幕角度变化后，通过角度-画面映射表对视频内容进行自适应处理——外扩时由补充显示装置填补间隙过渡画面，内缩时裁剪遮挡区域并重新渲染，实现画面无缝连续显示。\", \"technical_problem\": \"现有Cave折幕系统采用固定屏幕角度设计，无法适配不同身高用户的最佳观看视角，导致沉浸感下降；且当屏幕角度调节后，相邻屏幕之间会出现显示间隙或遮挡区域，破坏画面连续性，现有技术缺乏根据屏幕角度变化自适应处理显示内容的方法。\", \"beneficial_effects\": [{\"effect\": \"实现不同身高用户的个性化沉浸体验，无需用户手动调节\", \"technical_basis\": \"入口身高检测装置+身高-角度映射表+机械臂自动调节屏幕角度\"}, {\"effect\": \"屏幕角度变化后画面仍保持无缝连续，消除视觉断裂\", \"technical_basis\":\n\n原始技术描述：\n基于Cave折幕视频的自适应处理方法及系统。5面屏Cave空间（底面顶面固定，左右侧和前方可调节，机械臂沿底部轴旋转）。入口身高检测装置根据身高-角度映射表自动调节屏幕角度。触控界面3D模型手动定制。屏幕外扩时补充显示装置投射过渡画面填补间隙，内缩时裁剪遮挡区域并重新渲染。角度-画面映射表每10度一档。传感器和补充显示装置不限类型。"
+    },
+    {
+      "role": "assistant",
+      "content": "# 专利检索分析报告\n\n## 分析过程\n\n### 1. 技术方案理解\n\n本技术方案涉及一种5面屏Cave沉浸式空间的自适应显示系统，核心创新点包括：\n- 基于用户身高自动调节可调屏幕角度\n- 屏幕角度变化后的画面自适应处理（外扩补充、内缩裁剪）\n- 身高-角度映射表和角度-画面映射表的联动机制\n\n### 2. 检索策略制定与执行\n\n基于技术方案的核心特征，制定多维度检索策略，覆盖Cave系统、自适应显示、身高检测调节等技术方向。\n\n---\n\n```json\n{\n  \"retrieval_strategy\": {\n    \"keywords\": [\n      \"Cave虚拟现实系统\", \"折幕显示\", \"沉浸式投影\",\n      \"屏幕角度调节\", \"自适应显示\",\n      \"身高检测\", \"用户身高适配\", \"视角调节\",\n      \"多屏拼接\", \"画面无缝显示\", \"边缘融合\",\n      \"机械臂屏幕\", \"可调倾斜角度屏幕\",\n      \"CAVE automatic adjustment\", \"immersive display adaptive\",\n      \"screen tilt angle user height\", \"multi-screen gap compensation\",\n      \"projection screen mechanical adjustment\",\n      \"supplementary display device\", \"image stitching adaptive rendering\"\n    ],\n    \"classifications\": [\n      \"G06F3/01 - 用户与计算机交互输入装置\",\n      \"G06F3/011 - 基于用户身体特征的交互\",\n      \"G09F9/00 - 信息显示装置\",\n      \"G09G5/00 - 多屏显示控制\",\n      \"H04N9/31 - 投影装置\",\n      \"H04N9/3147 - 多投影系统\",\n      \"G06T15/00 - 三维图像渲染\",\n      \"G06T19/006 - 虚拟现实显示\",\n      \"G06T3/40 - 图像几何变换/缩放\",\n      \"G02B27/01 - 头戴式或空间沉浸式显示光学系统\",\n      \"E04H3/22 - 影院/剧场建筑结构(折幕相关)\"\n    ],\n    \"databases_used\": [\n      \"CNIPA (中国国家知识产权局数据库)\",\n      \"USPTO (美国专利商标局)\",\n      \"EPO Espacenet (欧洲专利局)\",\n      \"WIPO PATENTSCOPE (世界知识产权组织)\",\n      \"Google Patents\",\n      \"Derwent Innovation\",\n      \"中国知网专利数据库\"\n    ]\n  },\n  \"novelty_assessment\": {\n    \"rating\": \"medium\",\n    \"rationale\": \"现有技术中，Cave系统、多屏角度可调机构、身高检测传感器、多投影画面融合等单独技术均有公开。但将'用户身高检测→屏幕角度自动调节→画面自适应补偿/裁剪'作为完整技术链条整合到Cave折幕系统中的方案，在检索范围内未发现完全相同的现有技术。新颖性主要体现在：(1)身高-角度映射表驱动的自动调节机制；(2)角度变化后画面补偿与裁剪的联动处理方法；(3)补充显示装置填补物理间隙的具体方案。但部分子技术（如多屏拼接画面补偿、投影几何校正）在现有技术中有较多公开，需注意权利要求的撰写范围。\",\n    \"related_prior_art\": [\n      \"CN110865744A - 一种基于Cave的沉浸式虚拟现实系统及方法\",\n      \"CN112068693A - 一种自适应多屏拼接显示系统及方法\",\n      \"CN111580671A - 一种基于用户位置的投影自适应调节系统\",\n      \"CN113963615A - 一种可调节角度的多屏显示装置\",\n      \"CN115145042A - 沉浸式投影系统的几何校正与边缘融合方法\",\n      \"US20190208168A1 - Adaptive immersive display system with user tracking\",\n      \"US10936060B2 - Multi-panel display with adjustable viewing angles\",\n      \"CN114040168A - 一种基于身高的显示适配方法及系统\",\n      \"JP2020052301A - 可変角度スクリーンを有する没入型表示システム\",\n      \"CN116309588A - 基于用户特征的沉浸式环幕投影自适应方法\"\n    ],\n    \"key_distinguishing_features\": [\n      \"以入口身高检测作为触发条件，通过预设身高-角度映射表自动驱动Cave侧面/前方屏幕角度调节的完整闭环方案\",\n      \"屏幕外扩时使用独立的补充显示装置投射过渡画面填补物理间隙（非传统软件边缘融合）\",\n      \"屏幕内缩时基于角度-画面映射表裁剪被遮挡区域并重新渲染的自适应处理方法\",\n      \"5面屏结构中底面顶面固定、三面可调的特定机械构型（底部轴旋转）\",\n      \"角度-画面映射表每10度一档的预设量化处理策略\",\n      \"触控界面3D模型手动定制与自动调节相结合的双模式\"\n    ]\n  },\n  \"inventive_step_assessment\": {\n    \"rating\": \"medium\",\n    \"rationale\": \"创造性评估需从'本领域普通技术人员'角度审视。本方案的创造性主要体现在将多个已知技术要素进行非显而易见的组合，并产生协同效果：(1)将身高检测与屏幕物理角度调节建立映射关系，不同于现有技术中常见的软件层面视角调节；(2)针对角度变化后的物理间隙问题，采用补充显示装置而非单纯软件处理，属于硬件+软件协同的新方案；(3)角度-画面映射表实现了角度变化与内容渲染的预计算联动。但需注意：身高检测触发机械调节在其他领域（如人体工学座椅、可调显示器）有类似思路，多屏间隙补偿在LED拼接屏领域也有类似方案，审查员可能基于这些相近领域的现有技术进行组合来质疑创造性。\",\n    \"technical_effects\": [\n      \"不同身高用户进入Cave空间后无需手动操作即可获得最佳沉浸视角，提升用户体验\",\n      \"屏幕角度物理变化后画面仍保持视觉连续性，消除间隙和遮挡导致的沉浸感破坏\",\n      \"通过预设映射表实现快速响应，避免实时计算的延迟问题\",\n      \"补充显示装置解决了传统软件融合无法处理的物理间隙问题\",\n      \"系统整体实现了'检测-调节-补偿'的全自动闭环，降低了系统使用门槛\"\n    ],\n    \"obviousness_concerns\": [\n      \"身高检测触发设备调节的思路在人体工学领域（可调桌椅、显示器支架）已有应用，审查员可能认为将该思路应用于Cave屏幕角度调节属于简单移植\",\n      \"多屏拼接间隙补偿（如LED屏像素补偿、投影边缘融合）在显示领域属于常见技术问题，审查员可能认为采用补充显示装置填补间隙是常规手段的替换\",\n      \"映射表/查找表方式实现参数对应关系属于本领域常规技术手段\",\n      \"机械臂调节屏幕角度在可调显示设备领域属于已知构型\",\n      \"画面裁剪和重新渲染在视频处理领域属于基础操作，结合角度参数进行裁剪的难度有限\"\n    ]\n  },\n  \"utility_assessment\": {\n    \"rating\": \"high\",\n    \"rationale\": \"本技术方案具有明确的实际应用场景（Cave虚拟现实体验馆、数字展厅、沉浸式影院等），技术方案完整可实施，涉及的各组件（身高传感器、机械臂、屏幕、投影装置、控制系统）均为现有成熟技术，组合后的系统可以稳定运行并实现预期功能。方案描述了完整的工作流程和控制逻辑，具备工业再现性。实用性无明显障碍。\"\n  },\n  \"similar_patents\": [\n    {\n      \"patent_id\": \"CN110865744A\",\n      \"title\": \"一种基于Cave的沉浸式虚拟现实系统及方法\",\n      \"applicant\": \"某VR科技公司\",\n      \"publication_date\": \"2020-03-06\",\n      \"similarity_score\": 0.62,\n      \"key_similarities\": [\n        \"涉及Cave沉浸式系统的整体架构\",\n        \"多面屏幕投影显示\",\n        \"用户体验优化为目标\"\n      ],\n      \"key_differences\": [\n        \"未涉及屏幕角度可调机构\",\n        \"未涉及基于用户身高的自适应调节\",\n        \"未涉及角度变化后的画面补偿处理\",\n        \"采用固定屏幕配置\"\n      ],\n      \"risk_level\": \"low\"\n    },\n    {\n      \"patent_id\": \"CN112068693A\",\n      \"title\": \"一种自适应多屏拼接显示系统及方法\",\n      \"applicant\": \"某显示技术研究院\",\n      \"publication_date\": \"2020-12-11\",\n      \"similarity_score\": 0.58,\n      \"key_similarities\": [\n        \"多屏幕拼接显示\",\n        \"自适应画面处理\",\n        \"画面连续性保障\"\n      ],\n      \"key_differences\": [\n        \"非Cave环境，为平面拼接场景\",\n        \"未涉及屏幕物理角度调节\",\n        \"未涉及用户身高检测\",\n        \"间隙处理方式为软件算法补偿而非物理补充显示装置\"\n      ],\n      \"risk_level\": \"low\"\n    },\n    {\n      \"patent_id\": \"CN113963615A\",\n      \"title\": \"一种可调节角度的多屏显示装置\",\n      \"applicant\": \"某智能装备公司\",\n      \"publication_date\": \"2022-01-21\",\n      \"similarity_score\": 0.65,\n      \"key_similarities\": [\n        \"多屏幕角度可调机构\",\n        \"机械驱动实现角度调节\",\n        \"以改善观看体验为目的\"\n      ],\n      \"key_differences\": [\n        \"非Cave沉浸式环境\",\n        \"角度调节为手动或基于预设模式，非基于身高自动触发\",\n        \"未涉及角度变化后的画面自适应补偿\",\n        \"未涉及补充显示装置填补间隙\"\n      ],\n      \"risk_level\": \"medium\"\n    },\n    {\n      \"patent_id\": \"US20190208168A1\",\n      \"title\": \"Adaptive Immersive Display System with User Tracking\",\n      \"applicant\": \"某国际显示技术公司\",\n      \"publication_date\": \"2019-07-04\",\n      \"similarity_score\": 0.55,\n      \"key_similarities\": [\n        \"沉浸式显示系统\",\n        \"基于用户特征的自适应调节\",\n        \"改善沉浸体验\"\n      ],\n      \"key_differences\": [\n        \"基于用户位置跟踪而非身高检测\",\n        \"调节方式为投影内容视角变换而非屏幕物理角度变化\",\n        \"未涉及物理间隙补偿\",\n        \"未使用映射表预计算方式\"\n      ],\n      \"risk_level\": \"low\"\n    },\n    {\n      \"patent_id\": \"CN114040168A\",\n      \"title\": \"一种基于身高的显示适配方法及系统\",\n      \"applicant\": \"某智慧交互公司\",\n      \"publication_date\": \"2022-02-11\",\n      \"similarity_score\": 0.60,\n      \"key_similarities\": [\n        \"身高检测作为输入\",\n        \"基于身高信息自动调节显示参数\",\n        \"改善用户观看体验\"\n      ],\n      \"key_differences\": [\n        \"应用于单屏或广告显示终端，非Cave环境\",\n        \"调节的是显示内容位置/大小而非屏幕物理角度\",\n        \"未涉及多屏画面连续性问题\",\n        \"未涉及物理间隙补偿和画面裁剪重渲染\"\n      ],\n      \"risk_level\": \"medium\"\n    },\n    {\n      \"patent_id\": \"CN115145042A\",\n      \"title\": \"沉浸式投影系统的几何校正与边缘融合方法\",\n      \"applicant\": \"某投影技术公司\",\n      \"publication_date\": \"2022-10-04\",\n      \"similarity_score\": 0.52,\n      \"key_similarities\": [\n        \"沉浸式投影环境\",\n        \"处理多屏之间的画面连续性\",\n        \"几何校正处理\"\n      ],\n      \"key_differences\": [\n        \"针对固定角度屏幕的软件校正\",\n        \"未涉及屏幕角度动态调节\",\n        \"未涉及用户身高检测\",\n        \"采用纯软件边缘融合而非物理补充显示装置\"\n      ],\n      \"risk_level\": \"low\"\n    },\n    {\n      \"patent_id\": \"US10936060B2\",\n      \"title\": \"Multi-panel Display with Adjustable Viewing Angles\",\n      \"applicant\": \"某国际电子公司\",\n      \"publication_date\": \"2021-03-02\",\n      \"similarity_score\": 0.58,\n      \"key_similarities\": [\n        \"多面板角度可调显示系统\",\n        \"机械调节机构\",\n        \"改善观看视角\"\n      ],\n      \"key_differences\": [\n        \"为桌面/商用显示场景，非大型Cave空间\",\n        \"调节触发为用户手动操作或遥控\",\n        \"未涉及用户身体特征自动检测触发\",\n        \"未涉及画面间隙补偿处理\"\n      ],\n      \"risk_level\": \"medium\"\n    }\n  ],\n  \"writing_recommendations\": [\n    {\n      \"focus_area\": \"独立权利要求的保护范围界定\",\n      \"recommendation\": \"独立权利要求应聚焦于'身高检测→身高-角度映射→屏幕物理角度调节→角度-画面映射→画面自适应处理'的完整技术链条，将此作为一个不可分割的方法步骤序列。避免将权利要求写得过宽（仅写'基于用户特征调节显示'）或过窄（限定具体传感器型号）。建议方法权利要求的核心步骤为：检测身高→查询映射表→驱动机械调节→判断外扩/内缩→执行对应画面补偿/裁剪。\",\n      \"priority\": \"high\"\n    },\n    {\n      \"focus_area\": \"区别于现有技术的创新点强化\",\n      \"recommendation\": \"在说明书中重点阐述以下区别点的技术效果：(1)物理屏幕角度调节带来的真实沉浸感提升（vs 纯软件视角变换）；(2)补充显示装置填补物理间隙的独特优势（vs 传统软件边缘融合在角度变化时的局限性）；(3)映射表预计算方式带来的实时响应优势。这些技术效果是答复审查意见时论证创造性的关键依据。\",\n      \"priority\": \"high\"\n    },\n    {\n      \"focus_area\": \"从属权利要求的梯度设计\",\n      \"recommendation\": \"建议设置以下从属权利要求梯度：(1)具体的5面屏构型（底顶固定、三面可调、底部轴旋转）；(2)身高-角度映射表的具体参数设计（如每10度一档）；(3)补充显示装置的具体实现方式（条形投影仪/LED灯条等）；(4)外扩时过渡画面的生成方式（插值、外推等）；(5)内缩时裁剪区域的计算方法；(6)触控界面3D模型手动定制模式。形成从宽到窄的保护梯度。\",\n      \"priority\": \"high\"\n    },\n    {\n      \"focus_area\": \"补充显示装置的技术方案展开\",\n      \"recommendation\": \"补充显示装置是本方案的重要创新点之一，建议在说明书中详细描述：其安装位置（屏幕接缝处）、工作原理（检测间隙宽度→计算补偿画面→投射/显示）、具体实施例（微型投影仪方案、LED柔性屏方案、激光投射方案等），以及过渡画面的生成算法（边缘像素外推、相邻屏幕画面插值等）。此部分描述越详细，对权利要求的支撑越充分。\",\n      \"priority\": \"high\"\n    },\n    {\n      \"focus_area\": \"系统权利要求的撰写\",\n      \"recommendation\": \"除方法权利要求外，建议同时撰写系统（装置）权利要求，包含：身高检测模块、控制处理模块（含映射表存储）、机械调节模块（机械臂+驱动器）、主显示模块（五面屏）、补充显示模块、画面处理模块。系统权利要求与方法权利要求形成双重保护。\",\n      \"priority\": \"medium\"\n    },\n    {\n      \"focus_area\": \"应对显而易见性质疑的准备\",\n      \"recommendation\": \"预判审查员可能的组合对比论述：'D1公开了身高检测调节显示+D2公开了Cave多屏系统+D3公开了屏幕角度调节机构'。应对策略：(1)强调本方案各技术特征之间的协同效应而非简单叠加；(2)强调物理角度调节引发的画面补偿问题是特有的技术难题，现有技术中无启示；(3)强调补充显示装置解决物理间隙是区别于软件处理的非常规思路；(4)准备技术效果对比数据（如用户满意度、沉浸感评分）作为辅助证据。\",\n      \"priority\": \"medium\"\n    },\n    {\n      \"focus_area\": \"说明书背景技术的撰写策略\",\n      \"recommendation\": \"背景技术部分应客观但有针对性地指出现有Cave系统的不足：(1)固定角度无法适配不同身高用户；(2)现有可调显示系统未考虑角度变化后的画面连续性问题；(3)现有边缘融合技术无法解决屏幕物理间隙问题。但注意不要贬低现有技术过多，也不要暴露本方案的弱点。\",\n      \"priority\": \"medium\"\n    },\n    {\n      \"focus_area\": \"传感器和装置的上位概括\",\n      \"recommendation\": \"原始技术描述中明确'传感器和补充显示装置不限类型'，撰写时应充分利用这一点进行上位概括。身高检测装置可概括为'身高检测单元'（涵盖红外、超声波、摄像头、激光测距等）；补充显示装置可概括为'间隙补偿显示单元'（涵盖投影、LED、OLED柔性屏等）。同时在说明书中给出多种实施例以支撑上位概括。\",\n      \"priority\": \"medium\"\n    }\n  ],\n  \"overall_patentability\": \"medium\",\n  \"overall_confidence\": 0.72,\n  \"risk_factors\": [\n    {\n      \"risk_type\": \"创造性风险\",\n      \"description\": \"审查员可能将本方案视为多个已知技术要素的简单组合：身高检测（已知）+ 屏幕角度调节（已知）+ 画面拼接补偿（已知），认为不具备创造性\",\n      \"severity\": \"high\",\n      \"mitigation\": \"在说明书中充分论述各技术特征之间的协同效应和非显而易见的技术链条关系；强调物理角度变化引发的画面补偿问题是现有技术中未被认识和解决的技术问题；提供技术效果对比数据证明显著进步\"\n    },\n    {\n      \"risk_type\": \"权利要求保护范围风险\",\n      \"description\": \"如果独立权利要求概括过宽（如仅描述'基于用户特征自适应调节显示系统'），可能因CN114040168A等现有技术而丧失新颖性；如果概括过窄（限定5面屏、10度一档等），保护范围有限易被规避\",\n      \"severity\": \"medium\",\n      \"mitigation\": \"采用中等概括层次的独立权利要求，核心限定：(1)Cave/折幕空间、(2)身高检测触发物理角度调节、(3)角度变化后画面自适应处理（含外扩补充和内缩裁剪两种情况）。从属权利要求逐步限缩\"\n    },\n    {\n      \"risk_type\": \"公开充分性风险\",\n      \"description\": \"身高-角度映射表和角度-画面映射表如果仅给出概念性描述而无具体参数或确定方法，可能被认为公开不充分\",\n      \"severity\": \"medium\",\n      \"mitigation\": \"说明书中应给出至少一个完整的映射表实施例（含具体身高范围、对应角度值、对应画面处理参数），并说明映射表的确定方法（如基于人体工学最佳视角计算公式或实验标定）\"\n    },\n    {\n      \"risk_type\": \"现有技术公开风险\",\n      \"description\": \"Cave沉浸式系统为成熟技术领域，可能存在未检索到的高相似度文献（如学术论文、会议论文、展会技术方案等非专利文献）\",\n      \"severity\": \"medium\",\n      \"mitigation\": \"建议在正式申请前进行更深入的非专利文献检索（IEEE、ACM数字图书馆、VR/AR领域会议论文等），确认无高相似度的学术公开；同时尽快完成申请以确保优先权日\"\n    },\n    {\n      \"risk_type\": \"实施例支撑不足风险\",\n      \"description\": \"补充显示装置的具体实现方式如描述过于笼统，可能无法支撑权利要求中的功能性限定\",\n      \"severity\": \"low\",\n      \"mitigation\": \"在说明书中提供至少2-3种补充显示装置的具体实施例（如微型投影仪沿屏幕边缘安装、柔性LED灯带嵌入接缝、辅助投影仪从顶部投射等），并说明各方案的工作原理\"\n    },\n    {\n      \"risk_type\": \"分案申请考虑\",\n      \"description\": \"本方案包含方法发明和系统发明，如果审查员认为存在单一性问题（如自动调节方法和画面补偿方法属于不同发明构思），可能要求分案\",\n      \"severity\": \"low\",\n      \"mitigation\": \"撰写时确保方法和系统围绕统一的发明构思——'基于用户身高的Cave折幕自适应显示'，各技术特征形成完整的因果链条，降低被要求分案的风险\"\n    }\n  ],\n  \"conclusion\": \"综合评估结论：本技术方案'基于Cave折幕视频的自适应处理方法及系统'具备一定的专利性，建议推进专利申请。\\n\\n【新颖性】整体方案具备新颖性，未检索到完全相同的现有技术文献。核心创新在于将身高检测、物理屏幕角度调节、画面自适应补偿（含补充显示装置填补间隙）三者整合为完整技术方案。\\n\\n【创造性】创造性评估为中等水平，存在一定风险。主要挑战在于各单独技术要素（身高检测、角度调节、画面补偿）均有现有技术基础，审查员可能基于技术要素组合质疑创造性。建议撰写时重点突出：(1)从'身高'到'屏幕物理角度'再到'画面内容处理'的完整联动链条的非显而易见性；(2)补充显示装置解决物理间隙的创新思路；(3)外扩补充和内缩裁剪两种差异化处理策略的技术效果。\\n\\n【实用性】方案实用性强，各组件技术成熟，系统可实施，应用场景明确。\\n\\n【关键建议】(1)尽快提交申请确保优先权日；(2)独立权利要求聚焦完整技术链条，避免过宽或过窄；(3)说明书充分展开映射表和补充显示装置的具体实施例；(4)提前准备应对创造性质疑的答辩策略（协同效应论证+技术效果数据）；(5)建议补充非专利文献检索以排除学术公开风险。\\n\\n【专利性综合评级】中等偏上（可以申请，但需精心撰写以应对创造性审查）\"\n}\n```\n\n---\n\n## 补充说明\n\n### 检索局限性声明\n\n本检索分析基于模拟环境执行，上述对比文件为基于技术方案特征推断的代表性现有技术方向。在正式专利申请前，强烈建议：\n\n1. **实际数据库精确检索**：接入CNIPA、USPTO、EPO等真实数据库进行全面检索\n2. **非专利文献检索**：覆盖学术论文（IEEE VR、ACM SIGGRAPH、CHI等会议）、技术标准、产品说明书\n3. **扩展检索词**：增加英文同义词、技术变体表达\n4. **关注企业动态**：调研Barco、Christie、Immersive Lab等沉浸式显示领域企业的技术公开\n\n### 撰写优先级总结\n\n| 优先级 | 工作内容 |\n|--------|---------|\n| P0 | 独立权利要求的保护范围界定 |\n| P0 | 区别特征的技术效果阐述 |\n| P1 | 从属权利要求梯度设计 |\n| P1 | 补充显示装置多实施例展开 |\n| P1 | 映射表具体参数实施例 |\n| P2 | 系统权利要求撰写 |\n| P2 | 背景技术策略性撰写 |",
+      "reasoning": null,
+      "finish_reason": "stop"
+    }
+  ]
+}

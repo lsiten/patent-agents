@@ -250,22 +250,24 @@ export default function WorkflowPage() {
 
     es.addEventListener('agent.thinking', (e) => {
       try {
-        const data = JSON.parse(e.data);
+        const parsed = JSON.parse(e.data);
+        const data = parsed.data || parsed;
         addLog({
-          timestamp: new Date().toISOString(),
-          agent_name: data.agent_name || 'Agent',
+          timestamp: parsed.timestamp || new Date().toISOString(),
+          agent_name: data.agent_name || parsed.agent || 'Agent',
           type: 'thinking',
-          message: data.thought || data.message || '',
+          message: data.thought || data.message || parsed.message || '',
         });
       } catch {}
     });
 
     es.addEventListener('agent.tool_call_start', (e) => {
       try {
-        const data = JSON.parse(e.data);
+        const parsed = JSON.parse(e.data);
+        const data = parsed.data || parsed;
         addLog({
-          timestamp: new Date().toISOString(),
-          agent_name: data.agent_name || 'Agent',
+          timestamp: parsed.timestamp || new Date().toISOString(),
+          agent_name: data.agent_name || parsed.agent || 'Agent',
           type: 'tool_start',
           tool_name: data.tool_name || '',
           tool_params: data.parameters || {},
@@ -275,10 +277,11 @@ export default function WorkflowPage() {
 
     es.addEventListener('agent.tool_call_end', (e) => {
       try {
-        const data = JSON.parse(e.data);
+        const parsed = JSON.parse(e.data);
+        const data = parsed.data || parsed;
         addLog({
-          timestamp: new Date().toISOString(),
-          agent_name: data.agent_name || 'Agent',
+          timestamp: parsed.timestamp || new Date().toISOString(),
+          agent_name: data.agent_name || parsed.agent || 'Agent',
           type: 'tool_end',
           tool_name: data.tool_name || '',
           tool_result: data.result || '',
@@ -289,10 +292,11 @@ export default function WorkflowPage() {
 
     es.addEventListener('agent.dispatch', (e) => {
       try {
-        const data = JSON.parse(e.data);
+        const parsed = JSON.parse(e.data);
+        const data = parsed.data || parsed;
         addLog({
-          timestamp: new Date().toISOString(),
-          agent_name: data.from_agent || 'CEO Agent',
+          timestamp: parsed.timestamp || new Date().toISOString(),
+          agent_name: data.from_agent || parsed.agent || 'CEO Agent',
           type: 'dispatch',
           dispatch_to: data.to_agent || '',
           dispatch_task: data.task_description || '',
@@ -302,10 +306,11 @@ export default function WorkflowPage() {
 
     es.addEventListener('agent.content', (e) => {
       try {
-        const data = JSON.parse(e.data);
+        const parsed = JSON.parse(e.data);
+        const data = parsed.data || parsed;
         addLog({
-          timestamp: new Date().toISOString(),
-          agent_name: data.agent_name || 'Agent',
+          timestamp: parsed.timestamp || new Date().toISOString(),
+          agent_name: data.agent_name || parsed.agent || 'Agent',
           type: 'content',
           content: data.content || '',
           phase: data.phase || '',
@@ -315,12 +320,13 @@ export default function WorkflowPage() {
 
     es.addEventListener('workflow.progress_updated', (e) => {
       try {
-        const data = JSON.parse(e.data);
+        const parsed = JSON.parse(e.data);
+        const data = parsed.data || parsed;
         addLog({
-          timestamp: new Date().toISOString(),
-          agent_name: data.agent_name || 'Workflow Engine',
+          timestamp: parsed.timestamp || new Date().toISOString(),
+          agent_name: data.agent_name || parsed.agent || 'Workflow Engine',
           type: 'progress',
-          message: data.message || `阶段 ${data.state} ${data.progress}%`,
+          message: data.message || parsed.message || `阶段 ${data.state} ${data.progress}%`,
           phase: data.state || '',
         });
       } catch {}
