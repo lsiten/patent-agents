@@ -58,7 +58,3 @@ class TechFeatureExtractorTool(HermesTool):
             temperature=0.3,
         )
         return {"features_analysis": response.content, "tool": self.name}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("tech_feature_extractor", TechFeatureExtractorTool)

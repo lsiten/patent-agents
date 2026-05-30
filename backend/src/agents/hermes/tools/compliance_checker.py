@@ -66,7 +66,3 @@ class ComplianceCheckerTool(HermesTool):
             temperature=0.2,
         )
         return {"compliance_result": response.content, "tool": self.name}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("compliance_checker", ComplianceCheckerTool)

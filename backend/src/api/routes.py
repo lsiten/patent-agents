@@ -40,8 +40,6 @@ from .schemas import (
 )
 from ..models.domain import PatentTask
 from ..models.enums import WorkflowState
-from ..agents import AgentProfile, AgentRole, AgentSkill, get_profile_registry, register_default_profiles
-from ..agents.ceo import CEOAgent
 from ..core.workflow_engine import PatentWorkflowEngine, WorkflowContext
 from ..knowledge.base import get_knowledge_base
 from ..data_sources.base import get_data_source_manager
@@ -61,8 +59,6 @@ workflow_lock = asyncio.Lock()
 conversations_store: Dict[str, dict] = {}
 conversations_lock = asyncio.Lock()
 
-profile_registry = get_profile_registry()
-register_default_profiles(profile_registry)
 workflow_engine = PatentWorkflowEngine()
 organization_tree_store: OrgNodeResponse | None = None
 
@@ -208,16 +204,6 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
     )
 
 
-def _agent_ui_role(role: AgentRole) -> str:
-    if role == AgentRole.CEO:
-        return "orchestrator"
-    if role == AgentRole.BRAINSTORM_PARTNER:
-        return "assistant"
-    if role == AgentRole.QUALITY_REVIEWER:
-        return "critic"
-    return "specialist"
-
-
 def _hermes_role_to_ui(role_str: str) -> str:
     """将 hermes config 中的 role 字符串映射为前端 UI role"""
     mapping = {
@@ -235,42 +221,6 @@ def _hermes_role_to_ui(role_str: str) -> str:
     return mapping.get(role_str, "specialist")
 
 
-def _agent_parent_id(profile: AgentProfile) -> str | None:
-    if profile.report_to_roles:
-        parent_role = profile.report_to_roles[0]
-        parents = profile_registry.get_by_role(parent_role)
-        return parents[0].profile_id if parents else None
-    return None
-
-
-def _agent_child_ids(profile: AgentProfile) -> List[str]:
-    child_ids: List[str] = []
-    for child_role in profile.allowed_child_roles:
-        child_ids.extend(child.profile_id for child in profile_registry.get_by_role(child_role))
-    return child_ids
-
-
-def _agent_config_from_profile(profile: AgentProfile) -> Dict[str, Any]:
-    now = datetime.now().isoformat()
-    created_at = profile.created_at or now
-    return {
-        "id": profile.profile_id,
-        "name": profile.name,
-        "description": profile.description,
-        "role": _agent_ui_role(profile.role),
-        "system_prompt": profile.get_system_prompt(),
-        "model": profile.model or "default",
-        "temperature": profile.temperature,
-        "max_tokens": profile.max_tokens,
-        "working_directory": f"./workspace/{profile.profile_id.replace('.', '-')}",
-        "enabled": True,
-        "created_at": created_at,
-        "updated_at": now,
-        "parent_id": _agent_parent_id(profile),
-        "child_ids": _agent_child_ids(profile),
-    }
-
-
 def _agent_tool_category(tool_name: str) -> str:
     if any(keyword in tool_name for keyword in ("search", "retrieval", "knowledge")):
         return "search"
@@ -281,95 +231,12 @@ def _agent_tool_category(tool_name: str) -> str:
     return "analysis"
 
 
-def _agent_tools_from_profile(profile: AgentProfile) -> List[Dict[str, Any]]:
-    return [
-        {
-            "id": tool_name,
-            "name": tool_name,
-            "description": profile.tool_config.tool_overrides.get(tool_name, {}).get(
-                "description",
-                f"Hermes Profile 启用工具：{tool_name}",
-            ),
-            "enabled": True,
-            "category": _agent_tool_category(tool_name),
-            "config": {},
-        }
-        for tool_name in profile.tool_config.enabled_tools
-    ]
-
-
-def _agent_skills_from_profile(profile: AgentProfile) -> List[Dict[str, Any]]:
-    return [
-        {
-            "id": skill.name,
-            "name": skill.name,
-            "description": skill.description,
-            "enabled": True,
-            "version": profile.version,
-            "tags": skill.keywords,
-        }
-        for skill in profile.skills
-    ]
-
-
-def _agent_memories_from_profile(profile: AgentProfile) -> List[Dict[str, Any]]:
-    now = datetime.now().isoformat()
-    memory_config = profile.memory_config
-    memories = []
-    if memory_config.enable_short_term_memory:
-        memories.append({
-            "id": "short_term",
-            "type": "short_term",
-            "name": "短期对话记忆",
-            "size": memory_config.max_conversation_history * 1024,
-            "item_count": memory_config.max_conversation_history,
-            "last_updated": now,
-        })
-    if memory_config.enable_long_term_memory:
-        memories.append({
-            "id": "long_term",
-            "type": "long_term",
-            "name": "长期经验记忆",
-            "size": 0,
-            "item_count": 0,
-            "last_updated": now,
-        })
-    if memory_config.enable_knowledge_base:
-        memories.append({
-            "id": "knowledge_base",
-            "type": "knowledge_base",
-            "name": "知识库记忆",
-            "size": 0,
-            "item_count": len(memory_config.knowledge_base_ids),
-            "last_updated": now,
-        })
-    return memories
-
-
-def _require_agent_profile(agent_id: str) -> AgentProfile:
-    profile = profile_registry.get(agent_id)
-    if not profile:
+def _require_agent_profile(agent_id: str):
+    """验证 agent 存在于 Hermes Agent Service"""
+    cfg = _hermes_service.get_config(agent_id)
+    if not cfg:
         raise HTTPException(status_code=404, detail="Agent不存在")
-    return profile
-
-
-def _agent_node(profile: AgentProfile) -> Dict[str, Any]:
-    return {
-        "id": profile.profile_id,
-        "name": profile.name,
-        "type": "agent",
-        "description": profile.description,
-        "expanded": True,
-        "agent_config": _agent_config_from_profile(profile),
-        "children": [],
-    }
-
-
-def _profiles_by_roles(roles: List[AgentRole]) -> List[AgentProfile]:
-    profiles: List[AgentProfile] = []
-    for role in roles:
-        profiles.extend(profile_registry.get_by_role(role))
-    return profiles
+    return cfg
 
 
 def _validate_org_tree(tree: OrgNodeResponse, depth: int = 0, seen_ids: set[str] | None = None) -> int:
@@ -394,22 +261,38 @@ def _validate_org_tree(tree: OrgNodeResponse, depth: int = 0, seen_ids: set[str]
 
 
 def _profile_organization_tree() -> Dict[str, Any]:
-    ceo_profiles = profile_registry.get_by_role(AgentRole.CEO)
-    analysis_profiles = _profiles_by_roles([
-        AgentRole.BRAINSTORM_PARTNER,
-        AgentRole.REQUIREMENT_ANALYST,
-        AgentRole.RETRIEVAL_ANALYST,
-    ])
-    writing_profiles = _profiles_by_roles([
-        AgentRole.PATENT_WRITER,
-        AgentRole.QUALITY_REVIEWER,
-    ])
+    """基于 Hermes Agent Service 配置生成组织架构树"""
+    all_configs = _hermes_service.get_all_configs()
+
+    # 按 role 分组
+    ceo_nodes = []
+    analysis_nodes = []
+    writing_nodes = []
+
+    for cfg in all_configs:
+        node = {
+            "id": cfg.profile_id,
+            "name": cfg.name,
+            "type": "agent",
+            "description": cfg.description,
+            "expanded": True,
+            "children": [],
+        }
+        ui_role = _hermes_role_to_ui(cfg.role)
+        if ui_role == "orchestrator":
+            ceo_nodes.append(node)
+        elif ui_role == "critic":
+            writing_nodes.append(node)
+        elif cfg.role in ("patent_writer",):
+            writing_nodes.append(node)
+        else:
+            analysis_nodes.append(node)
 
     return {
         "id": "root",
         "name": "专利智能体系统",
         "type": "team",
-        "description": "基于 Hermes Profile 注册表生成的多智能体组织架构",
+        "description": "基于 Hermes Agent Profiles 的多智能体组织架构",
         "expanded": True,
         "children": [
             {
@@ -418,7 +301,7 @@ def _profile_organization_tree() -> Dict[str, Any]:
                 "type": "group",
                 "description": "负责流程调度、质量门控与跨 Agent 协同",
                 "expanded": True,
-                "children": [_agent_node(profile) for profile in ceo_profiles],
+                "children": ceo_nodes,
             },
             {
                 "id": "analysis-group",
@@ -426,7 +309,7 @@ def _profile_organization_tree() -> Dict[str, Any]:
                 "type": "group",
                 "description": "负责前期对话澄清、需求分析与专利检索",
                 "expanded": True,
-                "children": [_agent_node(profile) for profile in analysis_profiles],
+                "children": analysis_nodes,
             },
             {
                 "id": "writing-group",
@@ -434,7 +317,7 @@ def _profile_organization_tree() -> Dict[str, Any]:
                 "type": "group",
                 "description": "负责专利申请文件生成与质量审查",
                 "expanded": True,
-                "children": [_agent_node(profile) for profile in writing_profiles],
+                "children": writing_nodes,
             },
         ],
     }
@@ -740,34 +623,33 @@ async def create_task(request: CreateTaskRequest, background_tasks: BackgroundTa
 
 
 async def _execute_workflow(task_id: str):
-    """在后台执行工作流"""
+    """在后台执行工作流（通过 Hermes Agent Service）"""
     try:
-        ceo_agent = CEOAgent()
         async with workflow_lock:
             task = tasks_store[task_id]
 
-        result_task = await asyncio.wait_for(ceo_agent.execute(task), timeout=30.0)
+        # 使用 Hermes Agent Service 执行对话
+        result = await _hermes_service.chat(
+            agent_id="patent.ceo.v1",
+            message=task.tech_description,
+        )
 
-        # 收集所有事件
-        events = ceo_agent.get_events()
-        event_responses = [
-            WorkflowEventResponse(
-                task_id=e.task_id,
-                timestamp=e.timestamp,
-                agent=e.agent,
-                message=e.message,
-                event_type=e.event_type,
-                data=e.data,
-            )
-            for e in events
-        ]
-
+        # 记录完成事件
         async with workflow_lock:
-            task_events[task_id] = event_responses
-            tasks_store[task_id] = result_task
+            task_events.setdefault(task_id, []).append(
+                WorkflowEventResponse(
+                    task_id=task_id,
+                    timestamp=datetime.now(),
+                    agent="ceo",
+                    message="工作流已完成",
+                    event_type="workflow.completed",
+                    data={"response": result.get("content", "")},
+                )
+            )
+            tasks_store[task_id].current_state = WorkflowState.COMPLETED
         await _persist_task(task_id)
         await _persist_events(task_id)
-        logger.info(f"任务 {task_id} 执行完成，状态: {result_task.current_state}")
+        logger.info(f"任务 {task_id} 执行完成")
 
     except Exception as e:
         logger.exception(f"任务 {task_id} 执行失败: {e}")
@@ -1240,74 +1122,34 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
             "memories": memories,
         }
 
-    # Fallback: 旧的 profile_registry（兼容）
-    profile = _require_agent_profile(agent_id)
-    config_overrides = _override_store.get_config_overrides(agent_id)
-    config = _agent_config_from_profile(profile)
-    if config_overrides:
-        for key in ("temperature", "max_tokens", "model"):
-            if key in config_overrides:
-                config[key] = config_overrides[key]
-    profile_tools = _agent_tools_from_profile(profile)
-    for tool in profile_tools:
-        if _override_store.is_tool_disabled(agent_id, tool["name"]):
-            tool["enabled"] = False
-    added_tools = _override_store.get_added_tools(agent_id)
-    all_tools = profile_tools + added_tools
-    profile_skills = _agent_skills_from_profile(profile)
-    for skill in profile_skills:
-        if _override_store.is_skill_disabled(agent_id, skill["name"]):
-            skill["enabled"] = False
-    added_skills = _override_store.get_added_skills(agent_id)
-    all_skills = profile_skills + added_skills
-    timers = _override_store.get_timers(agent_id)
-
-    return {
-        "config": config,
-        "tools": all_tools,
-        "skills": all_skills,
-        "timers": timers,
-        "memories": _agent_memories_from_profile(profile),
-    }
-
-    return {
-        "config": config,
-        "tools": all_tools,
-        "skills": all_skills,
-        "timers": timers,
-        "memories": _agent_memories_from_profile(profile),
-    }
+    # Agent 不存在
+    raise HTTPException(status_code=404, detail="Agent不存在")
 
 
 @router.put("/agents/{agent_id}", response_model=AgentUpdateResponse)
 async def update_agent_config(agent_id: str, config: dict) -> AgentUpdateResponse:
     """更新Agent配置（持久化到 override store）"""
-    _require_agent_profile(agent_id)
+    cfg = _require_agent_profile(agent_id)
 
     # 处理嵌套的 tools/skills/timers 批量更新
     if "tools" in config:
-        # 前端发送完整 tools 数组时，同步到 override store
         tools_data = config.pop("tools")
-        # 找出哪些 Profile 工具被禁用了
-        profile = _require_agent_profile(agent_id)
-        profile_tool_names = set(profile.tool_config.enabled_tools)
+        profile_tool_names = set(cfg.enabled_tools)
         for tool in tools_data:
             tool_name = tool.get("name", "")
             if tool_name in profile_tool_names:
                 _override_store.toggle_tool(agent_id, tool_name, tool.get("enabled", True))
             else:
-                # 用户添加的工具 — 确保在 added 列表中
                 existing_added = _override_store.get_added_tools(agent_id)
                 if not any(t.get("id") == tool.get("id") for t in existing_added):
                     _override_store.add_tool(agent_id, tool)
 
     if "skills" in config:
         skills_data = config.pop("skills")
-        profile = _require_agent_profile(agent_id)
-        profile_skill_names = {s.name for s in profile.skills}
+        cfg_skill_names = {s.get("name", "") for s in cfg.skills}
         for skill in skills_data:
             skill_name = skill.get("name", "")
-            if skill_name in profile_skill_names:
+            if skill_name in cfg_skill_names:
                 _override_store.toggle_skill(agent_id, skill_name, skill.get("enabled", True))
             else:
                 existing_added = _override_store.get_added_skills(agent_id)
@@ -1316,7 +1158,6 @@ async def update_agent_config(agent_id: str, config: dict) -> AgentUpdateRespons
 
     if "timers" in config:
         timers_data = config.pop("timers")
-        # 替换整个 timers 列表
         entry = _override_store._ensure_agent(agent_id)
         entry["timers"] = timers_data
         _override_store.save()
@@ -1361,9 +1202,9 @@ async def toggle_agent_timer(agent_id: str, timer_id: str, enabled: bool) -> Age
 @router.post("/agents/{agent_id}/memory/{memory_id}/clear", response_model=AgentToggleResponse)
 async def clear_agent_memory(agent_id: str, memory_id: str) -> AgentToggleResponse:
     """清空Agent记忆"""
-    profile = _require_agent_profile(agent_id)
-    memory_ids = {memory["id"] for memory in _agent_memories_from_profile(profile)}
-    if memory_id not in memory_ids:
+    _require_agent_profile(agent_id)
+    valid_memory_ids = {"short_term", "long_term", "knowledge_base"}
+    if memory_id not in valid_memory_ids:
         raise HTTPException(status_code=404, detail="Agent记忆不存在")
     # TODO: 对接真实记忆系统清空操作
     return {"agent_id": agent_id, "memory_id": memory_id, "cleared": True}
@@ -2178,11 +2019,6 @@ class {ClassName}Tool(HermesTool):
         logger.info("Executing tool", tool=self.name)
         # 实现工具逻辑...
         return {"result": "...", "tool": self.name}
-
-
-def register(factory) -> None:
-    """注册此工具到 Agent 工厂"""
-    factory.register_tool_class("{tool_name}", {ClassName}Tool)
 '''
 
 
@@ -2196,7 +2032,7 @@ def _get_skill_template() -> str:
 }
 
 // 技能工作原理：
-// 1. 技能定义被添加到 AgentProfile.skills 列表
+// 1. 技能定义被添加到 Agent Profile 的 skills 目录
 // 2. Agent 创建时，技能信息被注入到 system_prompt
 // 3. LLM 根据技能描述在回复中运用相应能力
 // 4. Agent 可以在回复中用 <skill_use> 标记声明使用了哪些技能
@@ -2224,6 +2060,8 @@ _KNOWN_TOOL_IMPL_FILES: dict[str, str] = {
     "creative_thinking": "backend/src/agents/hermes/tools/creative_thinking.py",
     "patent_strategy_guide": "backend/src/agents/hermes/tools/patent_strategy_guide.py",
     "agent_selector": "backend/src/agents/hermes/tools/agent_selector.py",
+    "dispatch_specialist": "backend/src/agents/hermes/tools/dispatch_specialist.py",
+    "prior_art_comparator": "backend/src/agents/hermes/tools/prior_art_comparator.py",
 }
 
 
@@ -2240,9 +2078,7 @@ async def get_agent_related_files(
             detail="必须且只能提供 tool_id 或 skill_id 参数之一",
         )
 
-    profile = profile_registry.get(agent_id)
-    if profile is None:
-        raise HTTPException(status_code=404, detail=f"Agent 未找到: {agent_id}")
+    cfg = _require_agent_profile(agent_id)
 
     _project_root = _os.path.dirname(
         _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
@@ -2262,14 +2098,10 @@ async def get_agent_related_files(
             return None
 
     if tool_id is not None:
-        if tool_id not in profile.tool_config.enabled_tools:
-            # 也检查 override store 中用户添加的工具
+        if tool_id not in cfg.enabled_tools:
             added_tools = _override_store.get_added_tools(agent_id)
             if not any(t.get("id") == tool_id or t.get("name") == tool_id for t in added_tools):
                 raise HTTPException(status_code=404, detail=f"工具未找到: {tool_id}")
-
-        tools = _agent_tools_from_profile(profile)
-        tool = next((t for t in tools if t["id"] == tool_id), None)
 
         rel_path = _KNOWN_TOOL_IMPL_FILES.get(tool_id)
         source_code = _read_file(rel_path) if rel_path else None
@@ -2279,7 +2111,7 @@ async def get_agent_related_files(
 
         return {
             "type": "tool",
-            "name": tool["name"] if tool else tool_id,
+            "name": tool_id,
             "source_code": source_code,
             "source_markdown": None,
             "structure": structure_info,
@@ -2287,72 +2119,44 @@ async def get_agent_related_files(
         }
 
     else:
-        skills = _agent_skills_from_profile(profile)
-        skill_meta = next((s for s in skills if s["id"] == skill_id), None)
+        # 从 hermes config 获取技能信息
+        skill_meta = next((s for s in cfg.skills if s.get("name") == skill_id), None)
         if skill_meta is None:
-            # 也检查 override store 中用户添加的技能
             added_skills = _override_store.get_added_skills(agent_id)
             skill_meta = next((s for s in added_skills if s.get("id") == skill_id), None)
             if skill_meta is None:
                 raise HTTPException(status_code=404, detail=f"技能未找到: {skill_id}")
 
-        # 找到原始的 AgentSkill 对象以获取完整信息（熟练度、关键词等）
-        profile_skill: AgentSkill | None = next(
-            (s for s in profile.skills if s.name == skill_id), None
-        )
-
         # 结构元数据
-        structure_info = _extract_skill_structure(profile_skill, skill_meta)
+        structure_info = _extract_skill_structure(None, skill_meta)
 
         markdown_lines = [
-            f"# {skill_meta['name']}",
-            "",
-            f"**熟练度**: {profile_skill.proficiency if profile_skill else 0.8}",
+            f"# {skill_meta.get('name', skill_id)}",
             "",
             "## 描述",
             "",
-            skill_meta["description"],
+            skill_meta.get("description", ""),
             "",
             "## 工作原理",
             "",
             "技能通过以下方式影响 Agent 行为：",
-            "1. 技能定义被添加到 `AgentProfile.skills` 列表",
-            "2. Agent 创建时，所有技能信息注入到 `system_prompt`",
+            "1. 技能定义添加到 Agent Profile skills 目录",
+            "2. Agent 创建时，所有技能信息注入到 system_prompt",
             "3. LLM 根据技能描述和关键词在回复中运用相应能力",
-            "4. Agent 可用 `<skill_use>` 标记声明使用了哪些技能",
             "",
         ]
-        tags = skill_meta.get("tags", [])
-        if tags:
-            markdown_lines.append("## 关键词")
-            markdown_lines.append("")
-            for tag in tags:
-                markdown_lines.append(f"- {tag}")
-            markdown_lines.append("")
-
-        markdown_lines.append("## 创建新技能所需字段")
-        markdown_lines.append("")
-        markdown_lines.append("```json")
-        markdown_lines.append('{')
-        markdown_lines.append(f'  "name": "{skill_meta["name"]}",')
-        markdown_lines.append(f'  "description": "{skill_meta["description"]}",')
-        markdown_lines.append(f'  "proficiency": {profile_skill.proficiency if profile_skill else 0.8},')
-        kw_str = str(profile_skill.keywords if profile_skill else [])
-        markdown_lines.append(f'  "keywords": {kw_str}')
-        markdown_lines.append('}')
-        markdown_lines.append("```")
 
         source_markdown = "\n".join(markdown_lines)
 
         return {
             "type": "skill",
-            "name": skill_meta["name"],
+            "name": skill_meta.get("name", skill_id),
             "source_code": None,
             "source_markdown": source_markdown,
             "structure": structure_info,
             "files": [
                 {
-                    "path": f"skills/{skill_meta['name']}.md",
+                    "path": f"skills/{skill_meta.get('name', skill_id)}.md",
                     "content": source_markdown,
                 },
             ],
@@ -2424,10 +2228,6 @@ class {{ClassName}}Tool(HermesTool):
         logger.info("Executing tool", tool=self.name)
         # 实现逻辑...
         return {{"result": "...", "tool": self.name}}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("{{tool_name}}", {{ClassName}}Tool)
 ```
 
 请生成完整的工具代码，只输出 Python 代码，不要输出其他内容。确保：
@@ -2505,10 +2305,6 @@ class {class_name}Tool(HermesTool):
             temperature=0.3,
         )
         return {{"result": response.content, "tool": self.name}}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("{name}", {class_name}Tool)
 '''
         return {
             "success": True,

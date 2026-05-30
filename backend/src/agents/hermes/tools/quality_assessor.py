@@ -191,8 +191,3 @@ class QualityAssessorTool(HermesTool):
                     recommendations.append(rec_map[dim])
 
         return recommendations
-
-
-def register(factory) -> None:
-    """注册此工具到 Agent 工厂"""
-    factory.register_tool_class("quality_assessor", QualityAssessorTool)

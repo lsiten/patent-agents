@@ -71,7 +71,3 @@ class CreativeThinkingTool(HermesTool):
             temperature=0.7,
         )
         return {"creative_ideas": response.content, "tool": self.name}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("creative_thinking", CreativeThinkingTool)

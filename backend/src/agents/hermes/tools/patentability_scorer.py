@@ -74,7 +74,3 @@ class PatentabilityScorerTool(HermesTool):
             temperature=0.2,
         )
         return {"patentability_score": response.content, "tool": self.name}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("patentability_scorer", PatentabilityScorerTool)

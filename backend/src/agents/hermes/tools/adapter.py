@@ -185,6 +185,20 @@ def _handle_risk_analyzer(args: Dict[str, Any], **kw) -> str:
     return _json_result(result)
 
 
+def _handle_dispatch_specialist(args: Dict[str, Any], **kw) -> str:
+    from src.agents.hermes.tools.dispatch_specialist import DispatchSpecialistTool
+    tool = DispatchSpecialistTool()
+    result = _run_async(tool.execute(**args))
+    return _json_result(result)
+
+
+def _handle_prior_art_comparator(args: Dict[str, Any], **kw) -> str:
+    from src.agents.hermes.tools.prior_art_comparator import PriorArtComparatorTool
+    tool = PriorArtComparatorTool()
+    result = _run_async(tool.execute(**args))
+    return _json_result(result)
+
+
 # ============ Tool Schemas ============
 
 PATENT_TOOL_DEFINITIONS = [
@@ -541,6 +555,51 @@ PATENT_TOOL_DEFINITIONS = [
         },
         "handler": _handle_risk_analyzer,
         "emoji": "⚡",
+    },
+    {
+        "name": "prior_art_comparator",
+        "schema": {
+            "name": "prior_art_comparator",
+            "description": "对比分析发明与多篇现有技术的技术特征差异，识别区别特征",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "invention": {"type": "string", "description": "发明技术方案描述"},
+                    "prior_arts": {"type": "string", "description": "现有技术列表（JSON格式或文本描述）"},
+                },
+                "required": ["invention", "prior_arts"],
+            },
+        },
+        "handler": _handle_prior_art_comparator,
+        "emoji": "📋",
+    },
+    {
+        "name": "dispatch_specialist",
+        "schema": {
+            "name": "dispatch_specialist",
+            "description": "调度专业Agent执行任务。CEO通过此工具将工作派发给专业Agent，每个Agent有独立专业知识。可用Agent: brainstorm_partner(讨论发散)、requirement_analyst(需求分析)、retrieval_analyst(先有技术检索)、patent_writer(专利撰写)、quality_reviewer(质量审查)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Agent ID: brainstorm_partner/requirement_analyst/retrieval_analyst/patent_writer/quality_reviewer",
+                        "enum": ["brainstorm_partner", "requirement_analyst", "retrieval_analyst", "patent_writer", "quality_reviewer"],
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": "交给该Agent的具体任务描述，要清晰完整，包含所有必要上下文和期望输出格式",
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "附加上下文（前序阶段输出、用户补充信息、修改建议等）",
+                    },
+                },
+                "required": ["agent_id", "task"],
+            },
+        },
+        "handler": _handle_dispatch_specialist,
+        "emoji": "🎯",
     },
 ]
 

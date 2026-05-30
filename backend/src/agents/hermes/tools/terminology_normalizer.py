@@ -67,7 +67,3 @@ class TerminologyNormalizerTool(HermesTool):
             temperature=0.2,
         )
         return {"normalization_result": response.content, "tool": self.name}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("terminology_normalizer", TerminologyNormalizerTool)

@@ -8,11 +8,15 @@ max_tokens: 4096
 enabled_toolsets:
 - patent
 enabled_tools:
+- dispatch_specialist
 - task_planner
 - agent_selector
 - quality_assessor
 - risk_analyzer
 - report_generator
+- ipc_classifier
+- tech_feature_extractor
+- patent_search
 memory:
   short_term: true
   long_term: true

@@ -22,10 +22,8 @@ class TaskService:
     def __init__(
         self,
         uow_factory,
-        ceo_agent_factory=None,
     ) -> None:
         self._uow_factory = uow_factory
-        self._ceo_agent_factory = ceo_agent_factory
 
         # 内存存储 — 后续迁移到 DB
         self._tasks: Dict[str, PatentTask] = {}

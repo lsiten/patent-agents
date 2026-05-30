@@ -42,7 +42,3 @@ class PriorArtComparatorTool(HermesTool):
             temperature=0.3,
         )
         return {"result": response.content, "tool": self.name}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("prior_art_comparator", PriorArtComparatorTool)

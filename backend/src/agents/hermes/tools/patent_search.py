@@ -75,7 +75,3 @@ class PatentSearchTool(HermesTool):
             temperature=0.2,
         )
         return {"search_results": response.content, "tool": self.name}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("patent_search", PatentSearchTool)

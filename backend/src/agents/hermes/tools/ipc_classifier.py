@@ -52,8 +52,3 @@ class IPCClassifierTool(HermesTool):
             temperature=0.2,
         )
         return {"ipc_classification": response.content, "tool": self.name}
-
-
-def register(factory) -> None:
-    """注册此工具到 Agent 工厂"""
-    factory.register_tool_class("ipc_classifier", IPCClassifierTool)

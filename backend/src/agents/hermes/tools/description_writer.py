@@ -72,7 +72,3 @@ class DescriptionWriterTool(HermesTool):
             temperature=0.4,
         )
         return {"description_section": response.content, "section_type": section_type, "tool": self.name}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("description_writer", DescriptionWriterTool)

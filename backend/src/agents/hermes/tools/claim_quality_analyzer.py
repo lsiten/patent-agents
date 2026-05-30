@@ -71,7 +71,3 @@ class ClaimQualityAnalyzerTool(HermesTool):
             temperature=0.2,
         )
         return {"quality_analysis": response.content, "tool": self.name}
-
-
-def register(factory) -> None:
-    factory.register_tool_class("claim_quality_analyzer", ClaimQualityAnalyzerTool)
