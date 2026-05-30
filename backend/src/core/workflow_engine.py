@@ -251,6 +251,7 @@ class PatentWorkflowEngine:
         self,
         context: WorkflowContext,
         phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None]] = None,
+        event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
     ) -> WorkflowContext:
         """
         执行完整工作流 — 顺序调用各专业 Agent
@@ -274,31 +275,43 @@ class PatentWorkflowEngine:
                 context.current_phase = phase_state
                 await self._publish_progress_event(context, phase_state, "running")
 
+                # Agent 显示名映射
+                agent_display_names = {
+                    "requirement_analyst": "需求分析 Agent",
+                    "retrieval_analyst": "检索分析 Agent",
+                    "patent_writer": "专利撰写 Agent",
+                    "quality_reviewer": "质量审查 Agent",
+                }
+                agent_display_name = agent_display_names.get(agent_id, agent_id)
+
                 # 构建任务 prompt
                 task_desc = self._build_default_task_for_agent(agent_id, context)
                 self._logger.info(f"Executing phase: {agent_id}")
 
+                # 发射 CEO 调度事件
+                await publish_event(AgentDispatchEvent(
+                    task_id=context.task_id,
+                    user_id=context.user_id,
+                    from_agent="CEO Agent",
+                    to_agent=agent_display_name,
+                    task_description=task_desc[:300],
+                ))
+                if event_callback:
+                    event_callback("CEO Agent", "agent.dispatch",
+                        f"🎯 调度 → {agent_display_name}: {task_desc[:100]}",
+                        {"from_agent": "CEO Agent", "to_agent": agent_display_name, "task_description": task_desc[:300]})
+
                 # patent_writer 使用分段生成
                 if agent_id == "patent_writer":
                     context_data = await self._generate_patent_in_sections(service, profile_id, task_desc, context)
+                    agent_text = json.dumps(context_data, ensure_ascii=False)[:500] if isinstance(context_data, dict) else str(context_data)[:500]
                 else:
-                    # 其他 Agent 正常调用（带续写）
-                    raw = await service.run_conversation(profile_id, task_desc)
-                    if isinstance(raw, dict):
-                        agent_text = raw.get("final_response", "") or raw.get("content", "") or json.dumps(raw, ensure_ascii=False)
-                    else:
-                        agent_text = str(raw) if raw else ""
-
-                    # 检测截断并续写
-                    if self._is_output_truncated(agent_text):
-                        self._logger.info(f"{agent_id} output truncated, requesting continuation")
-                        cont_raw = await service.run_conversation(profile_id, "你的输出被截断了，请从截断处继续输出剩余内容，确保JSON完整闭合。")
-                        if isinstance(cont_raw, dict):
-                            cont_text = cont_raw.get("final_response", "") or cont_raw.get("content", "") or ""
-                        else:
-                            cont_text = str(cont_raw) if cont_raw else ""
-                        if cont_text:
-                            agent_text += "\n" + cont_text
+                    # 流式调用 Agent（发射 thinking/tool_call 事件）
+                    agent_text = await self._run_agent_stream(
+                        service, profile_id, task_desc,
+                        context, agent_name=agent_display_name,
+                        event_callback=event_callback,
+                    )
 
                     # 解析 JSON
                     parsed = self._try_parse_json(agent_text)
@@ -306,6 +319,19 @@ class PatentWorkflowEngine:
                         context_data = parsed
                     else:
                         context_data = {"agent": agent_id, "output": agent_text, "summary": agent_text[:500]}
+
+                # 发射 Agent 输出完成事件
+                await publish_event(AgentContentEvent(
+                    task_id=context.task_id,
+                    user_id=context.user_id,
+                    agent_name=agent_display_name,
+                    content=agent_text[:500] if agent_text else "",
+                    phase=phase_state.value,
+                ))
+                if event_callback:
+                    event_callback(agent_display_name, "agent.content",
+                        f"📄 输出: {agent_text[:200] if agent_text else ''}",
+                        {"agent_name": agent_display_name, "content": agent_text[:500] if agent_text else "", "phase": phase_state.value})
 
                 # 存储结果
                 setattr(context, context_field, context_data)
