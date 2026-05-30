@@ -847,6 +847,229 @@ async def cancel_workflow(task_id: str):
     return {"task_id": task_id, "status": "cancelled"}
 
 
+@router.post("/workflows/{task_id}/restart")
+async def restart_workflow(task_id: str, background_tasks: BackgroundTasks):
+    """重新开始整个工作流 — 重置所有阶段输出，从头执行"""
+    async with workflow_lock:
+        context = workflow_engine.get_workflow(task_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+
+    # 重置所有阶段输出
+    context.requirement_analysis = {}
+    context.retrieval_report = {}
+    context.patent_draft = {}
+    context.review_report = {}
+    context.brainstorming_output = {}
+    context.phase_history = []
+    context.current_phase = WorkflowState.INITIALIZED
+    context.iteration_count = 0
+    context.latest_revision_suggestions = []
+    context.latest_review_score = 0.0
+
+    # 清空事件历史并写入重启事件
+    async with workflow_lock:
+        task_events[task_id] = []
+        _append_workflow_event(
+            task_id=task_id,
+            agent="workflow_engine",
+            message="工作流已重新开始",
+            event_type="workflow.restarted",
+            data={"state": "initialized"},
+        )
+
+    # 后台重新执行完整工作流
+    async def run_restart():
+        def _event_cb(agent_name: str, event_type: str, message: str, data: Dict[str, Any]):
+            task_events.setdefault(task_id, []).append(
+                WorkflowEventResponse(
+                    task_id=task_id,
+                    timestamp=datetime.now(),
+                    agent=agent_name,
+                    message=message,
+                    event_type=event_type,
+                    data=data,
+                )
+            )
+
+        async def _phase_cb(phase, result):
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent=phase.value,
+                    message=f"阶段 {phase.value} 已完成",
+                    event_type="workflow.phase.completed",
+                    data={
+                        "phase": phase.value,
+                        "success": result.success,
+                        "duration_seconds": result.duration_seconds,
+                        "issues": result.issues,
+                    },
+                )
+            await _persist_events(task_id)
+
+        try:
+            await workflow_engine.execute_full_workflow(
+                context,
+                phase_callback=_phase_cb,
+                event_callback=_event_cb,
+            )
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent="workflow_engine",
+                    message="专利申请流程已完成",
+                    event_type="workflow.completed",
+                    data={"state": context.current_phase.value},
+                )
+                # 同步 tasks_store（如果存在）
+                if task_id in tasks_store:
+                    tasks_store[task_id].current_state = WorkflowState.COMPLETED
+            await _persist_events(task_id)
+            await _persist_workflow(task_id)
+        except Exception as e:
+            logger.error(f"工作流重启执行失败: {e}")
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent="workflow_engine",
+                    message=str(e),
+                    event_type="workflow.failed",
+                )
+                if task_id in tasks_store:
+                    tasks_store[task_id].current_state = WorkflowState.FAILED
+            await _persist_events(task_id)
+            await _persist_workflow(task_id)
+
+    background_tasks.add_task(run_restart)
+    await _persist_workflow(task_id)
+    return {"task_id": task_id, "status": "restarted"}
+
+
+@router.post("/workflows/{task_id}/retry-phase")
+async def retry_workflow_phase(task_id: str, request: dict, background_tasks: BackgroundTasks):
+    """重试指定阶段 — 重新执行单个阶段并更新其输出"""
+    phase_name = request.get("phase", "")
+    if not phase_name:
+        raise HTTPException(status_code=400, detail="必须指定 phase 参数")
+
+    # 映射阶段名到 WorkflowState
+    phase_map = {
+        "requirement_analysis": WorkflowState.REQUIREMENT_ANALYSIS,
+        "retrieval_analysis": WorkflowState.RETRIEVAL_ANALYSIS,
+        "patent_writing": WorkflowState.PATENT_WRITING,
+        "quality_review": WorkflowState.QUALITY_REVIEW,
+        # 前端可能使用的简短名
+        "requirement": WorkflowState.REQUIREMENT_ANALYSIS,
+        "retrieval": WorkflowState.RETRIEVAL_ANALYSIS,
+        "writing": WorkflowState.PATENT_WRITING,
+        "review": WorkflowState.QUALITY_REVIEW,
+    }
+    phase_state = phase_map.get(phase_name)
+    if not phase_state:
+        raise HTTPException(
+            status_code=400,
+            detail=f"无效的阶段名: {phase_name}，可选: {list(phase_map.keys())}",
+        )
+
+    async with workflow_lock:
+        context = workflow_engine.get_workflow(task_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+
+    # 阶段字段映射
+    phase_field_map = {
+        WorkflowState.REQUIREMENT_ANALYSIS: "requirement_analysis",
+        WorkflowState.RETRIEVAL_ANALYSIS: "retrieval_report",
+        WorkflowState.PATENT_WRITING: "patent_draft",
+        WorkflowState.QUALITY_REVIEW: "review_report",
+    }
+
+    async def run_retry_phase():
+        context_field = phase_field_map[phase_state]
+
+        def _event_cb(agent_name: str, event_type: str, message: str, data: Dict[str, Any]):
+            task_events.setdefault(task_id, []).append(
+                WorkflowEventResponse(
+                    task_id=task_id,
+                    timestamp=datetime.now(),
+                    agent=agent_name,
+                    message=message,
+                    event_type=event_type,
+                    data=data,
+                )
+            )
+
+        try:
+            _event_cb("CEO Agent", "agent.dispatch",
+                f"🔄 重试阶段: {phase_name}",
+                {"from_agent": "CEO Agent", "to_agent": phase_name, "task_description": f"重试 {phase_name}"})
+
+            # 执行单阶段
+            result = await workflow_engine.execute_phase(context, phase_state)
+
+            if result.success:
+                # 规范化输出并存储
+                output = workflow_engine._normalize_phase_output(context_field, result.output)
+                setattr(context, context_field, output)
+
+                # 更新阶段历史（替换同阶段的旧记录）
+                context.phase_history = [
+                    p for p in context.phase_history if p.phase != result.phase
+                ]
+                context.add_phase_result(result)
+
+                _event_cb(phase_name, "agent.content",
+                    f"📄 重试完成",
+                    {"agent_name": phase_name, "content": json.dumps(output, ensure_ascii=False)[:500], "phase": phase_state.value})
+
+                async with workflow_lock:
+                    _append_workflow_event(
+                        task_id=task_id,
+                        agent=phase_name,
+                        message=f"阶段 {phase_name} 重试成功",
+                        event_type="workflow.phase.completed",
+                        data={
+                            "phase": result.phase.value,
+                            "success": True,
+                            "duration_seconds": result.duration_seconds,
+                            "retry": True,
+                        },
+                    )
+            else:
+                async with workflow_lock:
+                    _append_workflow_event(
+                        task_id=task_id,
+                        agent=phase_name,
+                        message=f"阶段 {phase_name} 重试失败: {'; '.join(result.issues)}",
+                        event_type="workflow.phase.failed",
+                        data={
+                            "phase": result.phase.value,
+                            "success": False,
+                            "issues": result.issues,
+                            "retry": True,
+                        },
+                    )
+
+            await _persist_events(task_id)
+            await _persist_workflow(task_id)
+
+        except Exception as e:
+            logger.error(f"阶段 {phase_name} 重试失败: {e}")
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent=phase_name,
+                    message=str(e),
+                    event_type="workflow.phase.failed",
+                    data={"phase": phase_name, "error": str(e), "retry": True},
+                )
+            await _persist_events(task_id)
+
+    background_tasks.add_task(run_retry_phase)
+    return {"task_id": task_id, "phase": phase_name, "status": "retrying"}
+
+
 @router.get("/workflows/{task_id}/stream")
 async def stream_workflow_events(task_id: str):
     """SSE 实时事件流 — 工作流各阶段 Agent 的思考/调度/输出事件"""

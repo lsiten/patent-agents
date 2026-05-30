@@ -248,15 +248,22 @@ class PatentWorkflowEngine:
         """从技术描述中提取专利标题"""
         if not description:
             return "未命名专利"
-        # 取第一句或前30字符作为标题
+        # 取第一句或前40字符作为标题
         text = description.strip()
-        # 按句号、逗号、换行截断
-        for sep in ["，", "。", ",", ".", "\n"]:
-            if sep in text[:60]:
-                text = text[:text.index(sep, 0, 60)]
+        # 按句号、换行截断（逗号不截断，保留完整短语）
+        for sep in ["。", ".", "\n", "；", ";"]:
+            idx = text.find(sep, 0, 80)
+            if idx > 0:
+                text = text[:idx]
                 break
-        else:
-            text = text[:30]
+        # 如果仍然太长，在逗号处截断
+        if len(text) > 40:
+            comma_idx = text.find("，", 0, 50) or text.find(",", 0, 50)
+            if comma_idx and comma_idx > 0:
+                text = text[:comma_idx]
+        # 最终限制
+        if len(text) > 50:
+            text = text[:50]
         return text.strip() or "未命名专利"
 
     def get_workflow(self, task_id: str) -> Optional[WorkflowContext]:
@@ -308,43 +315,74 @@ class PatentWorkflowEngine:
                 task_desc = self._build_phase_prompt(context, phase_state)
                 self._logger.info(f"Executing phase: {agent_id}")
 
-                # 发射 CEO 调度事件
-                if event_callback:
-                    event_callback("CEO Agent", "agent.dispatch",
-                        f"🎯 调度 → {agent_display_name}: {task_desc[:100]}",
-                        {"from_agent": "CEO Agent", "to_agent": agent_display_name, "task_description": task_desc[:300]})
-                else:
-                    await publish_event(AgentDispatchEvent(
-                        task_id=context.task_id,
-                        user_id=context.user_id,
-                        from_agent="CEO Agent",
-                        to_agent=agent_display_name,
-                        task_description=task_desc[:300],
-                    ))
+                # ═══ 失败自动重试（最多重试 max_retries 次）═══
+                max_retries = 2
+                last_error = None
+                phase_success = False
 
-                # patent_writer 使用分段生成
-                if agent_id == "patent_writer":
-                    # 发射分段生成进度事件
-                    if event_callback:
-                        event_callback(agent_display_name, "agent.thinking",
-                            "💭 开始分段生成专利文件（权利要求 → 说明书 → 摘要）",
-                            {"agent_name": agent_display_name, "thought": "分段生成专利文件", "step": 1})
-                    context_data = await self._generate_patent_in_sections(service, profile_id, task_desc, context)
-                    agent_text = json.dumps(context_data, ensure_ascii=False)[:500] if isinstance(context_data, dict) else str(context_data)[:500]
-                else:
-                    # 流式调用 Agent（发射 thinking/tool_call 事件）
-                    agent_text = await self._run_agent_stream(
-                        service, profile_id, task_desc,
-                        context, agent_name=agent_display_name,
-                        event_callback=event_callback,
-                    )
+                for attempt in range(1 + max_retries):
+                    try:
+                        if attempt > 0:
+                            self._logger.info(
+                                f"Retrying phase {agent_id} (attempt {attempt + 1}/{1 + max_retries})"
+                            )
+                            if event_callback:
+                                event_callback("CEO Agent", "agent.thinking",
+                                    f"⚠️ {agent_display_name} 执行失败，正在重试（第{attempt + 1}次）...",
+                                    {"agent_name": "CEO Agent", "thought": f"重试 {agent_display_name}", "step": attempt})
+                            # 短暂延迟后重试
+                            await asyncio.sleep(2 * attempt)
 
-                    # 解析 JSON
-                    parsed = self._try_parse_json(agent_text)
-                    if "raw_output" not in parsed:
-                        context_data = parsed
-                    else:
-                        context_data = {"agent": agent_id, "output": agent_text, "summary": agent_text[:500]}
+                        # 发射 CEO 调度事件
+                        if event_callback:
+                            event_callback("CEO Agent", "agent.dispatch",
+                                f"🎯 调度 → {agent_display_name}: {task_desc[:100]}",
+                                {"from_agent": "CEO Agent", "to_agent": agent_display_name, "task_description": task_desc[:300]})
+                        else:
+                            await publish_event(AgentDispatchEvent(
+                                task_id=context.task_id,
+                                user_id=context.user_id,
+                                from_agent="CEO Agent",
+                                to_agent=agent_display_name,
+                                task_description=task_desc[:300],
+                            ))
+
+                        # patent_writer 使用分段生成
+                        if agent_id == "patent_writer":
+                            # 发射分段生成进度事件
+                            if event_callback:
+                                event_callback(agent_display_name, "agent.thinking",
+                                    "💭 开始分段生成专利文件（权利要求 → 说明书 → 摘要）",
+                                    {"agent_name": agent_display_name, "thought": "分段生成专利文件", "step": 1})
+                            context_data = await self._generate_patent_in_sections(service, profile_id, task_desc, context)
+                            agent_text = json.dumps(context_data, ensure_ascii=False)[:500] if isinstance(context_data, dict) else str(context_data)[:500]
+                        else:
+                            # 流式调用 Agent（发射 thinking/tool_call 事件）
+                            agent_text = await self._run_agent_stream(
+                                service, profile_id, task_desc,
+                                context, agent_name=agent_display_name,
+                                event_callback=event_callback,
+                            )
+
+                            # 解析 JSON
+                            parsed = self._try_parse_json(agent_text)
+                            if "raw_output" not in parsed:
+                                context_data = parsed
+                            else:
+                                context_data = {"agent": agent_id, "output": agent_text, "summary": agent_text[:500]}
+
+                        phase_success = True
+                        last_error = None
+                        break  # 成功，退出重试循环
+
+                    except (LLMError, Exception) as e:
+                        last_error = e
+                        self._logger.warning(
+                            f"Phase {agent_id} attempt {attempt + 1} failed: {e}"
+                        )
+                        if attempt >= max_retries:
+                            # 所有重试都失败
+                            raise
 
                 # 发射 Agent 输出完成事件
                 if event_callback:

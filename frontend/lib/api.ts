@@ -268,6 +268,15 @@ export const workflowApi = {
   resume: (taskId: string) =>
     request<{ task_id: string; status: string }>(`/workflows/${encodeURIComponent(taskId)}/resume`, { method: 'POST' }),
 
+  restart: (taskId: string) =>
+    request<{ task_id: string; status: string }>(`/workflows/${encodeURIComponent(taskId)}/restart`, { method: 'POST' }),
+
+  retryPhase: (taskId: string, phase: string) =>
+    request<{ task_id: string; phase: string; status: string }>(`/workflows/${encodeURIComponent(taskId)}/retry-phase`, {
+      method: 'POST',
+      body: JSON.stringify({ phase }),
+    }),
+
   exportDocx: (taskId: string) =>
     `${API_BASE_URL}/workflows/${encodeURIComponent(taskId)}/export/docx`,
 };

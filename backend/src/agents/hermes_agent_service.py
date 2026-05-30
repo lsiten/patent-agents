@@ -346,10 +346,43 @@ class HermesAgentService:
         events: List[Dict[str, Any]] = []
         events_lock = threading.Lock()
         content_chunks: List[str] = []
+        _thinking_buffer: List[str] = []  # 聚合短 thinking 片段
+        _last_thinking_time: List[float] = [0.0]  # 用 list 允许闭包修改
 
         def on_thinking(data):
+            """过滤和聚合 thinking 事件 — 避免 JSON 片段作为思考展示"""
+            import time
+            text = str(data).strip() if data else ""
+            if not text or len(text) < 5:
+                return  # 过滤太短的片段
+
+            # 过滤明显的 JSON 片段（不是真正的思考过程）
+            json_indicators = (text.startswith("{") or text.startswith("[") or
+                             text.startswith('"') or ": " in text[:20] or
+                             text.startswith("```"))
+            if json_indicators and len(text) < 100:
+                return  # 短 JSON 片段不是思考
+
+            # 节流：500ms 内的 thinking 合并
+            now = time.time()
+            if now - _last_thinking_time[0] < 0.5:
+                _thinking_buffer.append(text)
+                return
+
+            # 发射聚合的思考（如果有缓冲）
+            if _thinking_buffer:
+                combined = " ".join(_thinking_buffer)
+                _thinking_buffer.clear()
+                # 如果合并后还是 JSON 片段，跳过
+                if combined.startswith("{") or combined.startswith("["):
+                    pass
+                else:
+                    with events_lock:
+                        events.append({"type": "thinking", "data": {"iteration": 1, "agent": profile_id, "message": combined[:300]}})
+
+            _last_thinking_time[0] = now
             with events_lock:
-                events.append({"type": "thinking", "data": {"iteration": 1, "agent": profile_id, "message": str(data)}})
+                events.append({"type": "thinking", "data": {"iteration": 1, "agent": profile_id, "message": text[:300]}})
 
         def on_tool_start(call_id, name, args):
             with events_lock:
@@ -422,6 +455,13 @@ class HermesAgentService:
 
             if not batch and not result_holder["done"]:
                 await asyncio.sleep(0.05)
+
+        # Flush 残留的 thinking buffer
+        if _thinking_buffer:
+            combined = " ".join(_thinking_buffer)
+            _thinking_buffer.clear()
+            if not (combined.startswith("{") or combined.startswith("[")):
+                yield {"type": "thinking", "data": {"iteration": 1, "agent": profile_id, "message": combined[:300]}}
 
         # 最终结果
         if result_holder["error"]:

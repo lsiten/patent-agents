@@ -252,11 +252,15 @@ export default function WorkflowPage() {
       try {
         const parsed = JSON.parse(e.data);
         const data = parsed.data || parsed;
+        const thought = data.thought || data.message || parsed.message || '';
+        // 过滤无意义的 thinking（JSON 片段、太短）
+        if (!thought || thought.length < 5) return;
+        if (/^[{\["]/.test(thought.trim()) && thought.length < 100) return;
         addLog({
           timestamp: parsed.timestamp || new Date().toISOString(),
           agent_name: data.agent_name || parsed.agent || 'Agent',
           type: 'thinking',
-          message: data.thought || data.message || parsed.message || '',
+          message: thought,
         });
       } catch {}
     });
@@ -522,6 +526,22 @@ export default function WorkflowPage() {
                 {isPaused ? '恢复' : '暂停'}
               </Button>
             )}
+            {isTerminal && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await workflowApi.restart(taskId);
+                    setAgentLogs([]);
+                    loadWorkflow(true);
+                  } catch {}
+                }}
+              >
+                <RefreshCw className="w-4 h-4 mr-1" />
+                重新开始
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -646,6 +666,31 @@ export default function WorkflowPage() {
                     <p className="mt-md text-body-sm text-steel">
                       {agent.description}
                     </p>
+                    {agent.id !== 'ceo' && (agent.status === 'completed' || agent.status === 'error') && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="mt-md w-full"
+                        onClick={async () => {
+                          const phaseMap: Record<string, string> = {
+                            requirement: 'requirement_analysis',
+                            retrieval: 'retrieval_analysis',
+                            writing: 'patent_writing',
+                            review: 'quality_review',
+                          };
+                          const phase = phaseMap[agent.id];
+                          if (phase) {
+                            try {
+                              await workflowApi.retryPhase(taskId, phase);
+                              loadWorkflow(false);
+                            } catch {}
+                          }
+                        }}
+                      >
+                        <RefreshCw className="w-3.5 h-3.5 mr-1" />
+                        重试该阶段
+                      </Button>
+                    )}
                   </CardContent>
                 </Card>
               ))}
