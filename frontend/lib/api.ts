@@ -114,6 +114,7 @@ export interface WorkflowPhaseResult {
 export interface WorkflowResponse {
   task_id: string;
   user_id: string;
+  title?: string;
   current_state: string;
   created_at: string;
   updated_at?: string;

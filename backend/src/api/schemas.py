@@ -91,6 +91,7 @@ class WorkflowResponse(BaseModel):
     """Hermes/Profile 工作流响应"""
     task_id: str
     user_id: str
+    title: str = "未命名专利"
     current_state: str
     created_at: datetime
     updated_at: Optional[datetime] = None

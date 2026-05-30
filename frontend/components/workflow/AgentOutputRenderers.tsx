@@ -328,6 +328,18 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
                   </button>
                   {isExpanded && (
                     <div className="border-t border-hairline p-md bg-surface space-y-sm">
+                      {/* 检索元信息 */}
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption text-muted">
+                        {str(ref.applicant) && (
+                          <span>申请人：<span className="text-ink">{str(ref.applicant)}</span></span>
+                        )}
+                        {str(ref.publication_date) && (
+                          <span>公开日：<span className="text-ink">{str(ref.publication_date)}</span></span>
+                        )}
+                        {str(ref.source) && (
+                          <span>来源：<span className="text-ink">{dbDisplayName[str(ref.source)] || str(ref.source)}</span></span>
+                        )}
+                      </div>
                       {str(ref.abstract) && (
                         <div>
                           <p className="text-caption font-medium text-muted mb-xs">摘要</p>

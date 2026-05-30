@@ -106,6 +106,11 @@ function workflowStateToPatentState(state: string): WorkflowState {
 }
 
 function getWorkflowTitle(workflow: WorkflowResponse): string {
+  // 优先使用后端返回的title
+  if (workflow.title && workflow.title !== '未命名专利') {
+    return workflow.title;
+  }
+
   const requirement = workflow.outputs.requirement_analysis;
   const brainstorming = workflow.outputs.brainstorming;
   const field = stringValue(requirement['tech_field'] || brainstorming['tech_field']);

@@ -262,6 +262,8 @@ async def restore_stores_from_db() -> None:
                         user_id=value.get("user_id", "unknown"),
                         description="",  # 从持久化数据恢复
                     )
+                    # 恢复标题
+                    ctx.title = value.get("title", "未命名专利")
                     # 恢复状态
                     from src.core.workflow_engine import WorkflowState
                     ctx.current_phase = WorkflowState(value.get("current_state", "initialized"))
@@ -300,6 +302,7 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
     return WorkflowResponse(
         task_id=context.task_id,
         user_id=context.user_id,
+        title=context.title or "未命名专利",
         current_state=context.current_phase.value,
         created_at=context.created_at,
         updated_at=context.updated_at,
