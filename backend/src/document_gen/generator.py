@@ -226,7 +226,7 @@ def add_new_section(
 def build_abstract_section(doc: Document, draft: PatentDraft, profile: PatentFeatureProfile) -> None:
     """Generate 说明书摘要 section."""
     add_document_heading(doc, "说明书摘要", profile)
-    add_body_paragraph(doc, draft.abstract, profile)
+    add_body_paragraph(doc, _strip_markdown(draft.abstract), profile)
 
 
 def build_abstract_drawings_section(doc: Document, draft: PatentDraft, profile: PatentFeatureProfile, figure_paths: Optional[List[Dict]] = None) -> None:
@@ -254,7 +254,7 @@ def build_claims_section(doc: Document, draft: PatentDraft, profile: PatentFeatu
         return
 
     for claim in draft.claims:
-        text = _format_claim(claim, profile)
+        text = _strip_markdown(_format_claim(claim, profile))
         add_body_paragraph(doc, text, profile)
 
 
@@ -276,7 +276,7 @@ def build_description_section(doc: Document, draft: PatentDraft, profile: Patent
 
     # 技术领域
     add_section_heading(doc, "技术领域", profile)
-    add_body_paragraph(doc, draft.technical_field, profile)
+    add_body_paragraph(doc, _strip_markdown(draft.technical_field), profile)
 
     # 背景技术
     add_section_heading(doc, "背景技术", profile)

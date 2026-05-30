@@ -1127,29 +1127,59 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
             return data
 
         if context_field == "requirement_analysis":
-            # key_features → key_innovative_features
-            if "key_features" in data and "key_innovative_features" not in data:
-                features = data.get("key_features", [])
-                if isinstance(features, list):
-                    normalized = []
-                    for f in features:
-                        if isinstance(f, dict):
-                            normalized.append({
-                                "name": f.get("name", ""),
-                                "description": f.get("description", ""),
-                                "technical_significance": f.get("technical_significance", "")
-                                    or ("创新特征" if f.get("is_innovative") else ""),
-                            })
-                        elif isinstance(f, str):
-                            normalized.append({"name": f, "description": "", "technical_significance": ""})
-                    data["key_innovative_features"] = normalized
+            # tech_field: 如果是嵌套对象，提取 primary_domain 作为字符串
+            tf = data.get("tech_field")
+            if isinstance(tf, dict):
+                data["tech_field"] = tf.get("primary_domain", "")
 
-            # patent_type + recommendation_rationale → patent_type_recommendation
+            # key_innovative_features: 规范化字段名（feature_name → name）
+            features = data.get("key_innovative_features") or data.get("key_features", [])
+            if isinstance(features, list) and features:
+                normalized = []
+                for f in features:
+                    if isinstance(f, dict):
+                        normalized.append({
+                            "name": f.get("feature_name", "") or f.get("name", ""),
+                            "description": f.get("description", ""),
+                            "technical_significance": f.get("technical_significance", "")
+                                or ("核心创新" if f.get("is_core") else
+                                    "创新特征" if f.get("is_innovative") else ""),
+                        })
+                    elif isinstance(f, str):
+                        normalized.append({"name": f, "description": "", "technical_significance": ""})
+                data["key_innovative_features"] = normalized
+
+            # application_scenarios: 如果是对象列表，提取 scenario 字段为字符串列表
+            scenarios = data.get("application_scenarios", [])
+            if isinstance(scenarios, list) and scenarios and isinstance(scenarios[0], dict):
+                data["application_scenarios"] = [
+                    s.get("scenario", "") or s.get("name", "") or str(s)
+                    for s in scenarios if isinstance(s, dict)
+                ]
+
+            # beneficial_effects: 如果是对象列表，提取 effect 字段为字符串列表
+            effects = data.get("beneficial_effects", [])
+            if isinstance(effects, list) and effects and isinstance(effects[0], dict):
+                data["beneficial_effects"] = [
+                    e.get("effect", "") or e.get("description", "") or str(e)
+                    for e in effects if isinstance(e, dict)
+                ]
+
+            # information_gaps: 如果是对象列表，提取 gap 字段为字符串列表
+            gaps = data.get("information_gaps", [])
+            if isinstance(gaps, list) and gaps and isinstance(gaps[0], dict):
+                data["information_gaps"] = [
+                    g.get("gap", "") or g.get("description", "") or str(g)
+                    for g in gaps if isinstance(g, dict)
+                ]
+
+            # patent_type_recommendation: 保持为对象 {suggested_type, rationale}
             if "patent_type" in data and "patent_type_recommendation" not in data:
                 data["patent_type_recommendation"] = {
                     "suggested_type": data.get("patent_type", ""),
                     "rationale": data.get("recommendation_rationale", ""),
                 }
+            # 如果 patent_type_recommendation 已经存在但格式正确，保留原样
 
         elif context_field == "retrieval_report":
             # retrieval_strategy.keywords → retrieval_keywords (顶层)
@@ -1488,7 +1518,108 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
         if content_chunks and not final_text:
             final_text = "".join(content_chunks)
 
+        # ═══ 补充日志：从 Agent 输出文本中提取过程性内容 ═══
+        # 当流式回调事件很少时（Agent 没真正触发工具回调），
+        # 从最终文本中解析步骤和工具调用描述，补充发射为日志事件
+        if event_callback and final_text:
+            self._emit_process_logs_from_text(final_text, agent_name, event_callback)
+
         return final_text
+
+    def _emit_process_logs_from_text(
+        self,
+        text: str,
+        agent_name: str,
+        event_callback: Callable[[str, str, str, Dict[str, Any]], None],
+    ) -> None:
+        """从 Agent 输出文本中提取过程性内容，补充发射为日志事件
+
+        当 Agent 没有真正触发工具回调（而是用文字描述了工具调用过程）时，
+        从最终输出中解析步骤、工具调用、分析结论等，让前端日志有内容展示。
+        """
+        import re
+
+        lines = text.split("\n")
+        step_count = 0
+        current_tool = ""
+        collecting_result = False
+        result_lines: list = []
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                # 空行结束结果收集
+                if collecting_result and result_lines:
+                    result_text = "; ".join(result_lines)
+                    event_callback(agent_name, "agent.tool_call_end",
+                        f"✅ {current_tool} 返回: {result_text[:200]}",
+                        {"agent_name": agent_name, "tool_name": current_tool,
+                         "result": result_text[:500], "success": True})
+                    result_lines = []
+                    collecting_result = False
+                continue
+
+            # 收集返回结果的缩进行
+            if collecting_result:
+                if stripped.startswith("-") or stripped.startswith("•") or line.startswith("  "):
+                    clean = stripped.lstrip("-•").strip()
+                    if clean:
+                        result_lines.append(clean)
+                    continue
+                else:
+                    # 非缩进行，结束收集
+                    if result_lines:
+                        result_text = "; ".join(result_lines)
+                        event_callback(agent_name, "agent.tool_call_end",
+                            f"✅ {current_tool} 返回: {result_text[:200]}",
+                            {"agent_name": agent_name, "tool_name": current_tool,
+                             "result": result_text[:500], "success": True})
+                        result_lines = []
+                    collecting_result = False
+
+            # 检测步骤标题（## 步骤N：xxx）
+            step_match = re.match(r'^#{1,3}\s*(步骤|Step|阶段)\s*\d*[：:]?\s*(.+)', stripped)
+            if step_match:
+                step_count += 1
+                step_desc = step_match.group(2).strip()
+                event_callback(agent_name, "agent.thinking",
+                    f"💭 {step_desc}",
+                    {"agent_name": agent_name, "thought": step_desc, "step": step_count})
+                continue
+
+            # 检测工具调用（**工具调用：xxx**）— 精确匹配，避免重复
+            tool_match = re.match(r'^\*{2}工具调用[：:]\s*`?(\w+)`?\*{2}', stripped)
+            if tool_match:
+                current_tool = tool_match.group(1)
+                event_callback(agent_name, "agent.tool_call_start",
+                    f"🔧 调用工具: {current_tool}",
+                    {"agent_name": agent_name, "tool_name": current_tool, "parameters": {}})
+                continue
+
+            # 检测返回结果行
+            result_match = re.match(r'^[-*]\s*返回结果[：:]?\s*(.*)$', stripped)
+            if result_match:
+                initial = result_match.group(1).strip()
+                if initial:
+                    result_lines.append(initial)
+                collecting_result = True
+                continue
+
+            # 检测分析结论性标题
+            conclusion_match = re.match(r'^#{1,3}\s*(总体评价|结论|分析结果|最终输出|综合评估)[：:]?\s*(.*)', stripped)
+            if conclusion_match:
+                desc = conclusion_match.group(1) + (": " + conclusion_match.group(2) if conclusion_match.group(2) else "")
+                event_callback(agent_name, "agent.thinking",
+                    f"💭 {desc}",
+                    {"agent_name": agent_name, "thought": desc, "step": step_count + 1})
+
+        # Flush 残留的结果
+        if collecting_result and result_lines:
+            result_text = "; ".join(result_lines)
+            event_callback(agent_name, "agent.tool_call_end",
+                f"✅ {current_tool} 返回: {result_text[:200]}",
+                {"agent_name": agent_name, "tool_name": current_tool,
+                 "result": result_text[:500], "success": True})
 
     async def _publish_progress_event(
         self,

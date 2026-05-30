@@ -44,7 +44,7 @@ function DispatchEntry({ entry }: { entry: AgentLogEntry }) {
 function ThinkingEntry({ entry }: { entry: AgentLogEntry }) {
   return (
     <div className="pl-6 border-l-2 border-slate-600/40">
-      <span className="text-slate-400 italic text-xs">
+      <span className="text-slate-300 italic text-xs">
         💭 {entry.message}
       </span>
     </div>
@@ -58,7 +58,7 @@ function ToolStartEntry({ entry }: { entry: AgentLogEntry }) {
         🔧 调用工具: <span className="font-semibold">{entry.tool_name}</span>
       </span>
       {entry.tool_params && Object.keys(entry.tool_params).length > 0 && (
-        <p className="text-slate-500 text-xs mt-0.5 font-mono truncate max-w-[500px]">
+        <p className="text-on-dark-muted text-xs mt-0.5 font-mono truncate max-w-[500px]">
           参数: {JSON.stringify(entry.tool_params)}
         </p>
       )}

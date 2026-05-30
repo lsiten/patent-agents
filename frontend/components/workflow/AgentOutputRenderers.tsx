@@ -482,9 +482,10 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
 interface PatentDraftViewProps {
   data: Record<string, unknown>;
   taskId: string;
+  title?: string;
 }
 
-export function PatentDraftView({ data, taskId }: PatentDraftViewProps) {
+export function PatentDraftView({ data, taskId, title }: PatentDraftViewProps) {
   if (!data || Object.keys(data).length === 0) return null;
 
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
@@ -520,7 +521,7 @@ export function PatentDraftView({ data, taskId }: PatentDraftViewProps) {
               const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
               const link = document.createElement('a');
               link.href = `${apiBase}/workflows/${encodeURIComponent(taskId)}/export/docx`;
-              link.download = `patent_${taskId}.docx`;
+              link.download = `${title || '专利申请文件'}.docx`;
               document.body.appendChild(link);
               link.click();
               document.body.removeChild(link);

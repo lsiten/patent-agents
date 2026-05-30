@@ -59,10 +59,10 @@ class ParagraphFormat:
     # Body paragraphs
     body_first_line_indent_cm: float = 0.99
     body_line_spacing_emu: int = 292100  # ~23pt fixed line spacing
-    body_alignment: str = "JUSTIFY"  # JUSTIFY | LEFT | CENTER
+    body_alignment: str = "LEFT"  # JUSTIFY | LEFT | CENTER
 
     # Section headings
-    section_heading_alignment: str = "JUSTIFY"
+    section_heading_alignment: str = "LEFT"
     section_heading_indent_cm: float = 0.0  # no indent for headings
 
     # Document headings

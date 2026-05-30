@@ -448,11 +448,11 @@ export default function WorkflowPage() {
             <MultiRoundView
               rounds={draftRounds}
               label="撰写"
-              renderRound={(data) => <PatentDraftView data={data} taskId={taskId} />}
+              renderRound={(data) => <PatentDraftView data={data} taskId={taskId} title={workflow?.title} />}
             />
           );
         }
-        return <PatentDraftView data={output!} taskId={taskId} />;
+        return <PatentDraftView data={output!} taskId={taskId} title={workflow?.title} />;
       }
       case 'review': {
         const reviewRounds = getPhaseOutputs('review');
@@ -565,7 +565,7 @@ export default function WorkflowPage() {
                 onClick={() => {
                   const link = document.createElement('a');
                   link.href = workflowApi.exportDocx(taskId);
-                  link.download = `patent_${taskId}.docx`;
+                  link.download = `${workflow?.title || '专利申请文件'}.docx`;
                   document.body.appendChild(link);
                   link.click();
                   document.body.removeChild(link);

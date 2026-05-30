@@ -678,9 +678,9 @@ export default function ResultPage() {
                 <CardContent>
                   <div className="grid md:grid-cols-3 gap-md">
                     {[
-                      { name: '专利申请书', format: 'DOCX', isDocx: true, content: hasDraft ? 'docx' : '', filename: `patent_${taskId}.docx` },
-                      { name: '权利要求书', format: 'TXT', isDocx: false, content: draft.claims, filename: `${taskId}-claims.txt` },
-                      { name: '完整数据包', format: 'JSON', isDocx: false, content: workflow ? JSON.stringify(workflow.outputs, null, 2) : '', filename: `${taskId}-outputs.json` },
+                      { name: '专利申请书', format: 'DOCX', isDocx: true, content: hasDraft ? 'docx' : '', filename: `${workflow?.title || '专利申请文件'}.docx` },
+                      { name: '权利要求书', format: 'TXT', isDocx: false, content: draft.claims, filename: `${workflow?.title || '专利'}-权利要求书.txt` },
+                      { name: '完整数据包', format: 'JSON', isDocx: false, content: workflow ? JSON.stringify(workflow.outputs, null, 2) : '', filename: `${workflow?.title || '专利'}-数据包.json` },
                     ].map((file) => (
                       <div key={file.name} className="flex items-center justify-between p-md rounded-lg border border-hairline hover:border-stone transition-colors">
                         <div className="flex items-center gap-3">
@@ -699,7 +699,7 @@ export default function ResultPage() {
                             if (file.isDocx) {
                               const link = document.createElement('a');
                               link.href = workflowApi.exportDocx(taskId);
-                              link.download = `patent_${taskId}.docx`;
+                              link.download = `${workflow?.title || '专利申请文件'}.docx`;
                               document.body.appendChild(link);
                               link.click();
                               document.body.removeChild(link);
@@ -722,7 +722,7 @@ export default function ResultPage() {
                   <Button onClick={() => {
                     const link = document.createElement('a');
                     link.href = workflowApi.exportDocx(taskId);
-                    link.download = `patent_${taskId}.docx`;
+                    link.download = `${workflow?.title || '专利申请文件'}.docx`;
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
