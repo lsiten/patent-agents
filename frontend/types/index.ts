@@ -380,6 +380,41 @@ export interface ApiResponse<T = unknown> {
 }
 
 // ============ Agent 文件浏览类型 ============
+// ============ 系统配置类型 ============
+export interface ProviderConfigResponse {
+  base_url: string;
+  model_id: string;
+  api_key_masked: string;
+  configured: boolean;
+}
+
+export interface ModelConfigSectionResponse {
+  active_provider: string;
+  providers: Record<string, ProviderConfigResponse>;
+}
+
+export interface SystemConfigResponse {
+  text_llm: ModelConfigSectionResponse;
+  image_gen: ModelConfigSectionResponse;
+  image_gen_fallback_to_llm: boolean;
+}
+
+export interface ProviderConfigUpdate {
+  base_url?: string;
+  api_key?: string;
+  model_id?: string;
+}
+
+export interface ModelConfigSectionUpdate {
+  active_provider?: string;
+  providers?: Record<string, ProviderConfigUpdate>;
+}
+
+export interface SystemConfigUpdateRequest {
+  text_llm?: ModelConfigSectionUpdate;
+  image_gen?: ModelConfigSectionUpdate;
+}
+
 export interface DirEntry {
   name: string;
   path: string;

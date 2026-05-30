@@ -1,41 +1,62 @@
 ## agents/ — Multi-Agent System
 
-### Layers
+### Architecture (hermes-agent based)
 ```
-agent_service.py        ← Orchestration layer (662 lines)
-  profiles/             ← Agent personality definitions (826 lines)
-    default_profiles.py
-  hermes/               ← Custom agent framework (719+ lines)
+agent_config.py         ← 配置加载模块，从 hermes_home/profiles/ 读取 YAML
+  ↓
+create_ai_agent()       ← 创建 AIAgent 实例 (hermes-agent 包)
+  ↓
+hermes/tools/           ← 21 个专利工具实现 + adapter 桥接
 ```
 
-### Agent Roles (6 profiles in `profiles/default_profiles.py`)
-| Agent | Role |
-|-------|------|
-| CEO | Workflow orchestrator, delegates tasks |
-| Requirement Analyst | Extracts patent requirements from invention descriptions |
-| Retrieval Analyst | Searches prior art, patent databases |
-| Patent Writer | Drafts patent specifications, claims |
-| Quality Reviewer | Reviews drafts for completeness, compliance |
-| Brainstorm Partner | Creative exploration of embodiments |
+### Agent Roles (6 profiles in `hermes_home/profiles/`)
+| Agent | Profile ID | Role |
+|-------|------------|------|
+| CEO | patent.ceo.v1 | Workflow orchestrator, delegates tasks |
+| Requirement Analyst | patent.requirement_analyst.v1 | Extracts patent requirements from invention descriptions |
+| Retrieval Analyst | patent.retrieval_analyst.v1 | Searches prior art, patent databases |
+| Patent Writer | patent.writer.v1 | Drafts patent specifications, claims |
+| Quality Reviewer | patent.quality_reviewer.v1 | Reviews drafts for completeness, compliance |
+| Brainstorm Partner | patent.brainstorm_partner.v1 | Creative exploration of embodiments |
 
-### Architecture
+### Configuration Structure
 ```
-ProfileBasedAgentFactory
-  → reads AgentProfile (role, skills, tools, prompts, memory config)
-  → instantiates HermesAgent with profile
-AgentService
-  → manages agent lifecycle, coordination, conversation history
-  → supports SSE streaming for real-time thinking output
-WorkflowEngine (in core/)
-  → orchestrates multi-agent patent drafting pipelines
+hermes_home/
+├── profiles/
+│   ├── ceo/
+│   │   ├── config.yaml    ← Agent 配置 (model, tools, temperature...)
+│   │   └── SOUL.md        ← System prompt
+│   ├── patent_writer/
+│   ├── requirement_analyst/
+│   ├── retrieval_analyst/
+│   ├── quality_reviewer/
+│   └── brainstorm_partner/
+├── sessions/              ← 会话持久化
+└── SOUL.md                ← 全局 system prompt
 ```
 
 ### Key Exports (`__init__.py`)
-Hermes core classes, memory system (MemoryStore, ShortTermMemory, KnowledgeBase), profile system (AgentProfile, ProfileRegistry, ProfileBasedAgentFactory), and all 6 profile creator functions.
+- `AgentConfig` / `AgentConfigRegistry` — 配置加载
+- `get_agent_config()` / `get_agent_config_registry()` — 配置访问
+- `create_ai_agent()` — 创建 AIAgent 实例
 
 ### Usage Pattern
 ```python
-factory = get_agent_factory()
-ceo = factory.create_agent("ceo")
-result = await ceo.run(task)  # returns structured output
+from src.agents import create_ai_agent
+
+# 创建 Agent
+agent = create_ai_agent(
+    profile_id="patent.ceo.v1",
+    session_id="ses_xxx",
+    callbacks={
+        "tool_start": lambda call_id, name, args: ...,
+        "tool_complete": lambda call_id, name, args, result: ...,
+        "thinking": lambda text: ...,
+        "stream_delta": lambda delta: ...,
+    }
+)
+
+# 运行对话
+result = await agent.run_conversation("分析这个技术方案...")
+# result = {"final_response": str, "messages": list, "completed": bool, ...}
 ```

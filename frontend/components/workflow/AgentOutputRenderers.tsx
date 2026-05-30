@@ -220,18 +220,39 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
 
   const [expandedRef, setExpandedRef] = useState<number | null>(null);
 
-  const novelty = isRecord(data.novelty_assessment) ? data.novelty_assessment : {};
-  const inventiveStep = isRecord(data.inventive_step_assessment) ? data.inventive_step_assessment : {};
-  const utility = isRecord(data.utility_assessment) ? data.utility_assessment : {};
-  const overallPatentability = str(data.overall_patentability);
-  const conclusion = str(data.conclusion);
-  const riskFactors = arr(data.risk_factors).filter(isRecord);
-  const recommendations = arr(data.writing_recommendations).map((r) => str(r)).filter(Boolean);
+  // 尝试从 data.output 中解析 JSON 结构化数据
+  // 后端返回的数据结构是 { agent, output, summary }，其中 output 可能是包含 JSON 的字符串
+  let parsedData: Record<string, unknown> = data;
+  if (typeof data.output === 'string') {
+    // 尝试从 output 字符串中提取 JSON
+    const jsonMatch = data.output.match(/\{[\s\S]*"retrieval_strategy"[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        parsedData = JSON.parse(jsonMatch[0]);
+      } catch {
+        // 解析失败，使用原始 data
+      }
+    }
+  } else if (isRecord(data.output)) {
+    // output 已经是对象
+    parsedData = data.output as Record<string, unknown>;
+  }
 
-  // 新增字段
-  const retrievalKeywords = arr(data.retrieval_keywords).map((k) => str(k)).filter(Boolean);
-  const retrievalDatabases = arr(data.retrieval_databases).map((d) => str(d)).filter(Boolean);
-  const priorArtReferences = arr(data.prior_art_references).filter(isRecord);
+  // 从 retrieval_strategy 中提取关键词和数据源
+  const retrievalStrategy = isRecord(parsedData.retrieval_strategy) ? parsedData.retrieval_strategy : {};
+  const retrievalKeywords = arr(retrievalStrategy.keywords || parsedData.retrieval_keywords).map((k) => str(k)).filter(Boolean);
+  const retrievalDatabases = arr(retrievalStrategy.databases_used || parsedData.retrieval_databases).map((d) => str(d)).filter(Boolean);
+
+  const novelty = isRecord(parsedData.novelty_assessment) ? parsedData.novelty_assessment : {};
+  const inventiveStep = isRecord(parsedData.inventive_step_assessment) ? parsedData.inventive_step_assessment : {};
+  const utility = isRecord(parsedData.utility_assessment) ? parsedData.utility_assessment : {};
+  const overallPatentability = str(parsedData.overall_patentability);
+  const conclusion = str(parsedData.conclusion);
+  const riskFactors = arr(parsedData.risk_factors).filter(isRecord);
+  const recommendations = arr(parsedData.writing_recommendations).map((r) => str(r)).filter(Boolean);
+
+  // similar_patents 字段
+  const priorArtReferences = arr(parsedData.similar_patents || parsedData.prior_art_references).filter(isRecord);
 
   const ratingScore = (rating: unknown) => {
     switch (str(rating)) {
@@ -490,9 +511,38 @@ export function PatentDraftView({ data, taskId, title }: PatentDraftViewProps) {
 
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
 
-  const claims = isRecord(data.claims) ? data.claims : {};
-  const description = isRecord(data.description) ? data.description : {};
-  const abstract = str(data.abstract);
+  // 尝试从 data.output 中解析 JSON 结构化数据
+  // 后端返回的数据结构是 { agent, output, summary }，其中 output 可能是包含 JSON 的字符串
+  let parsedData: Record<string, unknown> = data;
+  if (typeof data.output === 'string') {
+    // 尝试从 output 字符串中提取 JSON（可能在 ```json ... ``` 代码块中）
+    const jsonBlockMatch = data.output.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonBlockMatch) {
+      try {
+        parsedData = JSON.parse(jsonBlockMatch[1]);
+      } catch {
+        // 解析失败，尝试直接匹配 JSON 对象
+      }
+    }
+    if (parsedData === data) {
+      // 尝试直接匹配 JSON 对象
+      const jsonMatch = data.output.match(/\{[\s\S]*"claims"[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          parsedData = JSON.parse(jsonMatch[0]);
+        } catch {
+          // 解析失败，使用原始 data
+        }
+      }
+    }
+  } else if (isRecord(data.output)) {
+    // output 已经是对象
+    parsedData = data.output as Record<string, unknown>;
+  }
+
+  const claims = isRecord(parsedData.claims) ? parsedData.claims : {};
+  const description = isRecord(parsedData.description) ? parsedData.description : {};
+  const abstract = str(parsedData.abstract);
 
   const independentClaim = str(claims.independent_claim);
   const dependentClaims = arr(claims.dependent_claims).map((c) => str(c)).filter(Boolean);

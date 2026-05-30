@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BrainCircuit, FileText, Zap, Menu, X, MessageSquare, FolderKanban, Settings, GitBranch } from 'lucide-react';
+import { BrainCircuit, FileText, Zap, Menu, X, MessageSquare, FolderKanban, Settings, GitBranch, Cog } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { clsx } from 'clsx';
@@ -12,6 +12,7 @@ const navLinks = [
   { href: '/patents', label: '专利管理', icon: FolderKanban },
   { href: '/agents', label: 'Agent管理', icon: Settings },
   { href: '/organization', label: '组织架构', icon: GitBranch },
+  { href: '/system-config', label: '系统配置', icon: Cog },
 ];
 
 export function Navbar() {

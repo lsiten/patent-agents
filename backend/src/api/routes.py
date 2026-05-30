@@ -1,4 +1,6 @@
-from typing import Any, Dict, List
+import json
+import os
+from typing import Any, Dict, List, Optional
 import asyncio
 import uuid
 from datetime import datetime
@@ -19,6 +21,10 @@ from .schemas import (
     SearchPatentRequest,
     SearchResponse,
     SystemStatusResponse,
+    SystemConfigResponse,
+    SystemConfigUpdateRequest,
+    ModelConfigSectionResponse,
+    ProviderConfigResponse,
     KnowledgeBaseSearchResponse,
     WorkflowStartRequest,
     AgentDetailResponse,
@@ -47,6 +53,63 @@ from ..infrastructure.persistence import get_store
 from .schemas import WorkflowEventResponse, OrgNodeResponse
 
 
+def _repair_truncated_json(json_str: str) -> dict | None:
+    """尝试修复被截断的 JSON（补充缺失的闭合括号和引号）"""
+    if not json_str:
+        return None
+
+    # 统计未闭合的括号
+    open_braces = json_str.count("{") - json_str.count("}")
+    open_brackets = json_str.count("[") - json_str.count("]")
+
+    if open_braces <= 0 and open_brackets <= 0:
+        return None  # 不需要修复
+
+    # 截断到最后一个完整的结构
+    # 找最后一个逗号或冒号后完整的值结束位置
+    last_good_pos = len(json_str)
+    
+    # 找到最后一个完整的字符串或数值
+    in_string = False
+    escape_next = False
+    for i, ch in enumerate(json_str):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\':
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+        if not in_string and ch in ',]}':
+            last_good_pos = i + 1
+
+    # 在最后一个好位置截断（如果在字符串中，去掉不完整的字符串）
+    if in_string:
+        # 找到最后一个开始引号
+        last_quote = json_str.rfind('"', 0, last_good_pos)
+        if last_quote > 0:
+            # 回退到这个引号之前的逗号或冒号
+            for i in range(last_quote - 1, -1, -1):
+                if json_str[i] in ',:':
+                    last_good_pos = i
+                    break
+
+    repaired = json_str[:last_good_pos].rstrip().rstrip(',')
+
+    # 补充缺失的闭合括号
+    open_braces = repaired.count("{") - repaired.count("}")
+    open_brackets = repaired.count("[") - repaired.count("]")
+    
+    repaired += "]" * open_brackets
+    repaired += "}" * open_braces
+
+    try:
+        return json.loads(repaired)
+    except json.JSONDecodeError:
+        return None
+
+
 router = APIRouter(tags=["patent-agents"])
 
 
@@ -67,10 +130,14 @@ from ..core.override_store import get_override_store
 
 _override_store = get_override_store()
 
-# ── Hermes Agent Service (真实 hermes-agent 集成) ──
-from ..agents.hermes_agent_service import get_hermes_agent_service
+# ── Agent 配置加载 (直接使用 hermes-agent AIAgent) ──
+from ..agents.agent_config import (
+    get_agent_config_registry,
+    get_agent_config,
+    create_ai_agent,
+)
 
-_hermes_service = get_hermes_agent_service()
+_agent_registry = get_agent_config_registry()
 
 # ── 订阅Agent事件总线，存入task_events供SSE回放 ──
 from ..core.events import (
@@ -299,6 +366,11 @@ async def restore_stores_from_db() -> None:
 
 
 def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
+    # 读取时归一化 — 确保旧数据也能适配前端格式
+    req_norm = workflow_engine._normalize_phase_output("requirement_analysis", context.requirement_analysis or {})
+    ret_norm = workflow_engine._normalize_phase_output("retrieval_report", context.retrieval_report or {})
+    pat_norm = workflow_engine._normalize_phase_output("patent_draft", context.patent_draft or {})
+    rev_norm = workflow_engine._normalize_phase_output("review_report", context.review_report or {})
     return WorkflowResponse(
         task_id=context.task_id,
         user_id=context.user_id,
@@ -320,10 +392,10 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
         ],
         outputs={
             "brainstorming": context.brainstorming_output,
-            "requirement_analysis": context.requirement_analysis,
-            "retrieval_report": context.retrieval_report,
-            "patent_draft": context.patent_draft,
-            "review_report": context.review_report,
+            "requirement_analysis": req_norm,
+            "retrieval_report": ret_norm,
+            "patent_draft": pat_norm,
+            "review_report": rev_norm,
         },
     )
 
@@ -470,11 +542,90 @@ def _agent_tool_category(tool_name: str) -> str:
 
 
 def _require_agent_profile(agent_id: str):
-    """验证 agent 存在于 Hermes Agent Service"""
-    cfg = _hermes_service.get_config(agent_id)
+    """验证 agent 存在于 Agent 配置注册表"""
+    cfg = get_agent_config(agent_id)
     if not cfg:
         raise HTTPException(status_code=404, detail="Agent不存在")
     return cfg
+
+
+def _sync_config_to_hermes(cfg, updates: dict) -> None:
+    """
+    将配置更新同步到 hermes config.yaml 文件
+    
+    支持的更新字段:
+    - model: 模型名称
+    - temperature: 温度参数
+    - max_tokens: 最大token数
+    - name: Agent名称
+    - description: Agent描述
+    - role: Agent角色
+    - working_directory: 工作目录（hermes 不直接支持，存入 config.yaml 备用）
+    - system_prompt: 系统提示（写入 SOUL.md）
+    - enabled: 是否启用
+    - max_iterations: 最大迭代次数
+    """
+    import yaml as _sync_yaml
+    from pathlib import Path as _SyncPath
+    
+    config_path = cfg.dir_path / "config.yaml"
+    soul_path = cfg.dir_path / "SOUL.md"
+    
+    # 读取现有配置
+    if config_path.exists():
+        with open(config_path, "r", encoding="utf-8") as f:
+            current_config = _sync_yaml.safe_load(f) or {}
+    else:
+        current_config = {}
+    
+    # 映射前端字段名到 hermes config 字段名
+    # 前端字段 -> hermes config.yaml 字段
+    field_mapping = {
+        "model": "model",
+        "temperature": "temperature",
+        "max_tokens": "max_tokens",
+        "name": "name",
+        "description": "description",
+        "role": "role",
+        "working_directory": "working_directory",
+        "enabled": "enabled",
+        "max_iterations": "max_iterations",
+    }
+    
+    # 角色映射：前端 UI role -> hermes role
+    role_mapping = {
+        "orchestrator": "orchestrator",
+        "specialist": "specialist", 
+        "assistant": "assistant",
+        "critic": "critic",
+    }
+    
+    config_changed = False
+    for frontend_key, hermes_key in field_mapping.items():
+        if frontend_key in updates:
+            new_value = updates[frontend_key]
+            
+            # 特殊处理 role 字段
+            if frontend_key == "role" and new_value in role_mapping:
+                new_value = role_mapping[new_value]
+            
+            if current_config.get(hermes_key) != new_value:
+                current_config[hermes_key] = new_value
+                config_changed = True
+    
+    # 写回 config.yaml
+    if config_changed:
+        with open(config_path, "w", encoding="utf-8") as f:
+            _sync_yaml.dump(current_config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        logger.info(f"Synced config to hermes: {config_path}")
+    
+    # 更新 SOUL.md（系统提示）
+    if "system_prompt" in updates:
+        new_soul = updates["system_prompt"]
+        if new_soul and isinstance(new_soul, str):
+            with open(soul_path, "w", encoding="utf-8") as f:
+                f.write(new_soul)
+            logger.info(f"Updated SOUL.md: {soul_path}")
 
 
 def _validate_org_tree(tree: OrgNodeResponse, depth: int = 0, seen_ids: set[str] | None = None) -> int:
@@ -499,8 +650,8 @@ def _validate_org_tree(tree: OrgNodeResponse, depth: int = 0, seen_ids: set[str]
 
 
 def _profile_organization_tree() -> Dict[str, Any]:
-    """基于 Hermes Agent Service 配置生成组织架构树"""
-    all_configs = _hermes_service.get_all_configs()
+    """基于 Agent 配置注册表生成组织架构树"""
+    all_configs = _agent_registry.get_all()
 
     # 按 role 分组
     ceo_nodes = []
@@ -1387,6 +1538,144 @@ async def search_knowledge_base(query: str, top_k: int = 5):
     )
 
 
+@router.get("/system/config", response_model=SystemConfigResponse)
+async def get_system_config():
+    """获取系统大模型配置（含掩码后的 API key）"""
+    from ..core.config import settings, TEXT_LLM_PROVIDERS, IMAGE_GEN_PROVIDERS
+
+    def mask_key(key: Optional[str]) -> str:
+        if not key:
+            return ""
+        if len(key) <= 12:
+            return key[:4] + "****"
+        return key[:8] + "****"
+
+    # 文字 LLM 供应商
+    llm_providers: Dict[str, ProviderConfigResponse] = {}
+    for p in TEXT_LLM_PROVIDERS:
+        cfg = settings.llm.get_provider_config(p)
+        api_key = cfg.get("api_key")
+        llm_providers[p] = ProviderConfigResponse(
+            base_url=cfg.get("base_url") or "",
+            model_id=cfg.get("model_id") or "",
+            api_key_masked=mask_key(api_key),
+            configured=bool(api_key),
+        )
+
+    # 生图供应商
+    img_providers: Dict[str, ProviderConfigResponse] = {}
+    for p in IMAGE_GEN_PROVIDERS:
+        cfg = settings.image_gen.get_provider_config(p)
+        api_key = cfg.get("api_key")
+        img_providers[p] = ProviderConfigResponse(
+            base_url=cfg.get("base_url") or "",
+            model_id=cfg.get("model_id") or "",
+            api_key_masked=mask_key(api_key),
+            configured=bool(api_key),
+        )
+
+    image_gen_fallback = not settings.image_gen.is_configured()
+
+    return SystemConfigResponse(
+        text_llm=ModelConfigSectionResponse(
+            active_provider=settings.llm.active_provider,
+            providers=llm_providers,
+        ),
+        image_gen=ModelConfigSectionResponse(
+            active_provider=settings.image_gen.active_provider,
+            providers=img_providers,
+        ),
+        image_gen_fallback_to_llm=image_gen_fallback,
+    )
+
+
+@router.put("/system/config", response_model=SystemConfigResponse)
+async def update_system_config(body: SystemConfigUpdateRequest):
+    """更新系统大模型配置（写入 .env 文件）"""
+    from dotenv import set_key
+
+    # 计算 .env 文件路径
+    _env_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        ".env",
+    )
+    if not os.path.isfile(_env_path):
+        raise HTTPException(status_code=400, detail=".env 文件不存在，请先创建")
+
+    def mask_key(key: Optional[str]) -> str:
+        if not key:
+            return ""
+        if len(key) <= 12:
+            return key[:4] + "****"
+        return key[:8] + "****"
+
+    # ── 环境变量映射表 ──
+    LLM_ENV_MAP: Dict[str, Dict[str, str]] = {
+        "openai": {"api_key": "OPENAI_API_KEY", "base_url": "OPENAI_BASE_URL", "model_id": "LLM_OPENAI_MODEL"},
+        "anthropic": {"api_key": "ANTHROPIC_API_KEY", "base_url": "ANTHROPIC_BASE_URL", "model_id": "LLM_ANTHROPIC_MODEL"},
+        "deepseek": {"api_key": "LLM_DEEPSEEK_API_KEY", "base_url": "LLM_DEEPSEEK_BASE_URL", "model_id": "LLM_DEEPSEEK_MODEL"},
+        "openrouter": {"api_key": "LLM_OPENROUTER_API_KEY", "base_url": "LLM_OPENROUTER_BASE_URL", "model_id": "LLM_OPENROUTER_MODEL"},
+    }
+    IMG_ENV_MAP: Dict[str, Dict[str, str]] = {
+        "azure_aoai": {"api_key": "IMAGE_GEN_AZURE_AOAI_API_KEY", "base_url": "IMAGE_GEN_AZURE_AOAI_BASE_URL", "model_id": "IMAGE_GEN_AZURE_AOAI_MODEL_ID"},
+        "openai": {"api_key": "IMAGE_GEN_OPENAI_API_KEY", "base_url": "IMAGE_GEN_OPENAI_BASE_URL", "model_id": "IMAGE_GEN_OPENAI_MODEL_ID"},
+        "stability": {"api_key": "IMAGE_GEN_STABILITY_API_KEY", "base_url": "IMAGE_GEN_STABILITY_BASE_URL", "model_id": "IMAGE_GEN_STABILITY_MODEL_ID"},
+    }
+
+    # 写入函数
+    def apply_updates(section: str, env_map: Dict[str, Dict[str, str]], updates: Optional[ModelConfigSectionUpdate]) -> None:
+        if not updates:
+            return
+        if updates.active_provider is not None:
+            set_key(_env_path, f"{section}_ACTIVE_PROVIDER", updates.active_provider)
+        if updates.providers:
+            for provider, cfg in updates.providers.items():
+                mapping = env_map.get(provider)
+                if not mapping:
+                    continue
+                if cfg.base_url is not None and mapping.get("base_url"):
+                    set_key(_env_path, mapping["base_url"], cfg.base_url)
+                if cfg.api_key is not None and mapping.get("api_key"):
+                    set_key(_env_path, mapping["api_key"], cfg.api_key)
+                if cfg.model_id is not None and mapping.get("model_id"):
+                    set_key(_env_path, mapping["model_id"], cfg.model_id)
+
+    apply_updates("LLM", LLM_ENV_MAP, body.text_llm)
+    apply_updates("IMAGE_GEN", IMG_ENV_MAP, body.image_gen)
+
+    # 写入后从 os.environ 读取最新值（set_key 会同步更新 os.environ）
+    def env_val(key: str, fallback: str = "") -> str:
+        return os.environ.get(key, fallback)
+
+    def read_section(
+        active_provider_key: str,
+        env_map: Dict[str, Dict[str, str]],
+    ) -> ModelConfigSectionResponse:
+        active = env_val(active_provider_key)
+        providers: Dict[str, ProviderConfigResponse] = {}
+        for provider, mapping in env_map.items():
+            ak = env_val(mapping.get("api_key", ""))
+            providers[provider] = ProviderConfigResponse(
+                base_url=env_val(mapping.get("base_url", "")),
+                model_id=env_val(mapping.get("model_id", "")),
+                api_key_masked=mask_key(ak),
+                configured=bool(ak),
+            )
+        return ModelConfigSectionResponse(active_provider=active, providers=providers)
+
+    llm_section = read_section("LLM_ACTIVE_PROVIDER", LLM_ENV_MAP)
+    img_section = read_section("IMAGE_GEN_ACTIVE_PROVIDER", IMG_ENV_MAP)
+
+    # 判断是否有任何生图供应商配置了 key
+    img_configured = any(p.configured for p in img_section.providers.values())
+
+    return SystemConfigResponse(
+        text_llm=llm_section,
+        image_gen=img_section,
+        image_gen_fallback_to_llm=not img_configured,
+    )
+
+
 @router.get("/system/status", response_model=SystemStatusResponse)
 async def get_system_status():
     """获取系统状态"""
@@ -1420,8 +1709,6 @@ async def health_check():
 
 
 # ============ 聊天消息相关 ============
-# 存储会话状态
-chat_sessions = {}
 
 def generate_brainstorm_response(content: str, phase: str = "initial"):
     """生成头脑风暴阶段的智能回复"""
@@ -1535,8 +1822,8 @@ async def list_agents() -> AgentListResponse:
     now = datetime.now().isoformat()
     agents = []
 
-    # 从 HermesAgentService 获取真实配置
-    for cfg in _hermes_service.get_all_configs():
+    # 从 Agent 配置注册表获取真实配置
+    for cfg in _agent_registry.get_all():
         agents.append({
             "id": cfg.profile_id,
             "name": cfg.name,
@@ -1562,11 +1849,11 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
     """获取 Agent 详情（基于真实 hermes-agent 配置 + registry 工具）"""
     now = datetime.now().isoformat()
 
-    # 优先从 HermesAgentService 获取
-    cfg = _hermes_service.get_config(agent_id)
+    # 从 Agent 配置注册表获取
+    cfg = get_agent_config(agent_id)
     if cfg:
         # 确保专利工具已注册
-        _hermes_service._ensure_patent_tools()
+        _agent_registry.ensure_patent_tools()
 
         # 从 hermes registry 获取真实工具信息
         from tools.registry import registry as hermes_registry
@@ -1606,11 +1893,11 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
                 "name": skill_name,
                 "description": skill_info.get("description", ""),
                 "enabled": not is_disabled,
-                "version": "1.0.0",
-                "tags": [],
+                "version": skill_info.get("version", "1.0.0"),
+                "tags": skill_info.get("tags", []),
                 "source_code": None,
-                "source_markdown": None,
-                "related_files": [f"hermes_agents/{cfg.dir_path.name}/skills/{skill_info.get('file', '')}"],
+                "source_markdown": skill_info.get("content"),  # SKILL.md 全文
+                "related_files": [f"backend/hermes_home/profiles/{cfg.dir_path.name}/skills/{skill_info.get('file', '')}"],
             })
 
         # 用户添加的额外技能
@@ -1691,8 +1978,19 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
 
 @router.put("/agents/{agent_id}", response_model=AgentUpdateResponse)
 async def update_agent_config(agent_id: str, config: dict) -> AgentUpdateResponse:
-    """更新Agent配置（持久化到 override store）"""
+    """更新Agent配置（持久化到 override store + hermes config.yaml）"""
     cfg = _require_agent_profile(agent_id)
+    
+    # 保存原始 config 用于同步到 hermes
+    # 这些字段会被写入 hermes 的 config.yaml 或 SOUL.md
+    hermes_sync_fields = {}
+    hermes_sync_keys = [
+        "model", "temperature", "max_tokens", "name", "description",
+        "system_prompt", "role", "working_directory", "enabled", "max_iterations"
+    ]
+    for key in hermes_sync_keys:
+        if key in config:
+            hermes_sync_fields[key] = config[key]
 
     # 处理嵌套的 tools/skills/timers 批量更新
     if "tools" in config:
@@ -1728,6 +2026,13 @@ async def update_agent_config(agent_id: str, config: dict) -> AgentUpdateRespons
     # 剩余字段作为 config overrides 保存
     if config:
         _override_store.update_config(agent_id, config)
+    
+    # 同步核心配置到 hermes config.yaml 和 SOUL.md
+    if hermes_sync_fields:
+        try:
+            _sync_config_to_hermes(cfg, hermes_sync_fields)
+        except Exception as e:
+            logger.warning(f"Failed to sync config to hermes: {e}")
 
     return {
         "agent_id": agent_id,
@@ -1764,12 +2069,60 @@ async def toggle_agent_timer(agent_id: str, timer_id: str, enabled: bool) -> Age
 
 @router.post("/agents/{agent_id}/memory/{memory_id}/clear", response_model=AgentToggleResponse)
 async def clear_agent_memory(agent_id: str, memory_id: str) -> AgentToggleResponse:
-    """清空Agent记忆"""
-    _require_agent_profile(agent_id)
+    """清空Agent记忆 - 删除 hermes session 文件"""
+    from pathlib import Path as _ClearPath
+    import shutil as _clear_shutil
+    
+    cfg = _require_agent_profile(agent_id)
     valid_memory_ids = {"short_term", "long_term", "knowledge_base"}
     if memory_id not in valid_memory_ids:
         raise HTTPException(status_code=404, detail="Agent记忆不存在")
-    # TODO: 对接真实记忆系统清空操作
+    
+    hermes_home = _ClearPath(__file__).parent.parent.parent / "hermes_home"
+    profile_dir = hermes_home / "profiles" / cfg.dir_path.name
+    
+    cleared_count = 0
+    
+    if memory_id == "short_term":
+        # 清空 profile sessions 目录下的所有 session 文件
+        sessions_dir = profile_dir / "sessions"
+        if sessions_dir.is_dir():
+            for f in sessions_dir.glob("*.json"):
+                try:
+                    f.unlink()
+                    cleared_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to delete session file {f}: {e}")
+    
+    elif memory_id == "long_term":
+        # 清空 memories 目录
+        memories_dir = profile_dir / "memories"
+        if memories_dir.is_dir():
+            for f in memories_dir.glob("*"):
+                try:
+                    if f.is_file():
+                        f.unlink()
+                    elif f.is_dir():
+                        _clear_shutil.rmtree(f)
+                    cleared_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to delete memory file {f}: {e}")
+    
+    elif memory_id == "knowledge_base":
+        # 清空知识库相关文件（如果有）
+        kb_dir = profile_dir / "knowledge"
+        if kb_dir.is_dir():
+            for f in kb_dir.glob("*"):
+                try:
+                    if f.is_file():
+                        f.unlink()
+                    elif f.is_dir():
+                        _clear_shutil.rmtree(f)
+                    cleared_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to delete knowledge file {f}: {e}")
+    
+    logger.info(f"Cleared {cleared_count} items from {memory_id} for agent {agent_id}")
     return {"agent_id": agent_id, "memory_id": memory_id, "cleared": True}
 
 
@@ -1882,6 +2235,8 @@ async def delete_agent_skill_endpoint(agent_id: str, skill_id: str) -> dict:
 @router.post("/agents/{agent_id}/chat")
 async def hermes_agent_chat(agent_id: str, body: dict) -> dict:
     """使用真实 hermes-agent AIAgent 进行对话"""
+    import asyncio
+
     content = body.get("content", "").strip()
     session_id = body.get("session_id")
     user_id = body.get("user_id", "default_user")
@@ -1889,14 +2244,16 @@ async def hermes_agent_chat(agent_id: str, body: dict) -> dict:
     if not content:
         raise HTTPException(status_code=400, detail="对话内容不能为空")
 
-    # 使用 HermesAgentService 运行对话
+    # 直接使用 AIAgent 运行对话
     try:
-        result = await _hermes_service.run_conversation(
+        agent = create_ai_agent(
             profile_id=agent_id,
-            user_input=content,
             session_id=session_id,
             user_id=user_id,
         )
+        # AIAgent.run_conversation 是同步的，需要在线程中运行
+        result = await asyncio.to_thread(agent.run_conversation, content)
+
         # hermes-agent 返回字典，提取 final_response
         if isinstance(result, dict):
             response_text = result.get("final_response", "") or ""
@@ -1910,8 +2267,8 @@ async def hermes_agent_chat(agent_id: str, body: dict) -> dict:
             "session_id": session_id,
             "metadata": {
                 "model": result.get("model") if isinstance(result, dict) else None,
-                "input_tokens": result.get("input_tokens") if isinstance(result, dict) else None,
-                "output_tokens": result.get("output_tokens") if isinstance(result, dict) else None,
+                "api_calls": result.get("api_calls") if isinstance(result, dict) else None,
+                "completed": result.get("completed") if isinstance(result, dict) else None,
             },
         }
     except ValueError as e:
@@ -1925,6 +2282,8 @@ async def hermes_agent_chat(agent_id: str, body: dict) -> dict:
 async def hermes_agent_chat_stream(agent_id: str, body: dict):
     """使用真实 hermes-agent AIAgent 进行流式对话（SSE）"""
     import json as _json
+    import asyncio
+    import threading
 
     content = body.get("content", "").strip()
     session_id = body.get("session_id")
@@ -1934,16 +2293,134 @@ async def hermes_agent_chat_stream(agent_id: str, body: dict):
         raise HTTPException(status_code=400, detail="对话内容不能为空")
 
     async def event_generator():
+        """使用 AIAgent 原生回调机制生成 SSE 事件"""
+        events: list = []
+        events_lock = threading.Lock()
+        content_chunks: list = []
+        tool_results: list = []
+        result_holder = {"result": None, "error": None, "done": False}
+
+        def on_thinking(data):
+            """思考过程回调"""
+            text = str(data).strip() if data else ""
+            if not text or len(text) < 5:
+                return
+            # 过滤 JSON 片段
+            if text.startswith("{") or text.startswith("[") or text.startswith('"'):
+                return
+            with events_lock:
+                events.append({
+                    "type": "thinking",
+                    "data": {"agent": agent_id, "message": text[:300]}
+                })
+
+        def on_tool_start(call_id, name, args):
+            """工具开始回调"""
+            logger.info(f"🔧 [TOOL_START] call_id={call_id}, tool={name}")
+            with events_lock:
+                params = {}
+                if isinstance(args, str):
+                    try:
+                        params = _json.loads(args)
+                    except Exception:
+                        params = {"raw": args[:200]}
+                elif isinstance(args, dict):
+                    params = args
+                events.append({
+                    "type": "tool_call_start",
+                    "data": {"name": name, "parameters": params}
+                })
+
+        def on_tool_complete(call_id, name, args, result):
+            """工具完成回调"""
+            logger.info(f"✅ [TOOL_COMPLETE] call_id={call_id}, tool={name}")
+            with events_lock:
+                result_str = str(result)[:500] if result else ""
+                events.append({
+                    "type": "tool_call_end",
+                    "data": {"name": name, "result": result_str, "success": True}
+                })
+                tool_results.append({
+                    "tool": name,
+                    "call_id": call_id,
+                    "result": result,
+                    "result_preview": result_str,
+                })
+
+        def on_stream_delta(delta):
+            """流式文本回调"""
+            with events_lock:
+                content_chunks.append(delta)
+                events.append({
+                    "type": "content_delta",
+                    "data": {"delta": delta}
+                })
+
+        def on_status(kind, msg):
+            """状态回调"""
+            with events_lock:
+                events.append({
+                    "type": "status",
+                    "data": {"kind": kind, "message": msg}
+                })
+
+        callbacks = {
+            "thinking": on_thinking,
+            "tool_start": on_tool_start,
+            "tool_complete": on_tool_complete,
+            "stream_delta": on_stream_delta,
+            "status": on_status,
+        }
+
+        def run_agent():
+            try:
+                agent = create_ai_agent(
+                    profile_id=agent_id,
+                    session_id=session_id,
+                    user_id=user_id,
+                    callbacks=callbacks,
+                )
+                result_holder["result"] = agent.run_conversation(content)
+            except Exception as e:
+                result_holder["error"] = str(e)
+            finally:
+                result_holder["done"] = True
+
+        # 在后台线程运行 Agent
+        thread = threading.Thread(target=run_agent, daemon=True)
+        thread.start()
+
+        # 流式产出事件
         try:
-            async for event in _hermes_service.run_conversation_stream(
-                profile_id=agent_id,
-                user_input=content,
-                session_id=session_id,
-                user_id=user_id,
-            ):
-                event_type = event.get("type", "status")
-                event_data = event.get("data", {})
-                yield f"event: {event_type}\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
+            while not result_holder["done"] or events:
+                with events_lock:
+                    batch = list(events)
+                    events.clear()
+
+                for event in batch:
+                    event_type = event.get("type", "status")
+                    event_data = event.get("data", {})
+                    yield f"event: {event_type}\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+                if not batch and not result_holder["done"]:
+                    await asyncio.sleep(0.05)
+
+            # 最终结果
+            if result_holder["error"]:
+                yield f"event: error\ndata: {_json.dumps({'error': result_holder['error']}, ensure_ascii=False)}\n\n"
+            else:
+                result = result_holder["result"]
+                if isinstance(result, dict):
+                    final_text = result.get("final_response", "") or ""
+                else:
+                    final_text = str(result) if result else ""
+
+                # 如果有流式内容，使用流式拼接
+                if content_chunks:
+                    final_text = "".join(content_chunks)
+
+                yield f"event: done\ndata: {_json.dumps({'content': final_text, 'tool_results': tool_results}, ensure_ascii=False)}\n\n"
+
         except ValueError as e:
             yield f"event: error\ndata: {_json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
         except Exception as e:
@@ -1959,7 +2436,7 @@ async def hermes_agent_chat_stream(agent_id: str, body: dict):
 @router.get("/agents/{agent_id}/hermes-info")
 async def get_hermes_agent_info(agent_id: str) -> dict:
     """获取 Hermes Agent 的运行时信息（基于真实 hermes-agent）"""
-    config = _hermes_service.get_config(agent_id)
+    config = get_agent_config(agent_id)
     if not config:
         raise HTTPException(status_code=404, detail=f"Hermes Agent 未找到: {agent_id}")
 
@@ -1973,7 +2450,6 @@ async def get_hermes_agent_info(agent_id: str) -> dict:
         "max_tokens": config.max_tokens,
         "enabled_toolsets": config.enabled_toolsets,
         "enabled_tools": config.enabled_tools,
-        "skills": config.skills,
         "hermes_agent_version": "0.15.1",
         "capabilities": {
             "tool_calling": True,
@@ -2009,7 +2485,7 @@ async def update_organization_tree(tree: OrgNodeResponse) -> OrganizationUpdateR
 
 def _get_brainstorm_agent():
     """获取 CEO Agent 实例（使用真实 hermes-agent AIAgent）"""
-    return _hermes_service.create_agent_instance(
+    return create_ai_agent(
         profile_id="patent.ceo.v1",
         session_id=f"conversation_{uuid.uuid4().hex[:8]}",
     )
@@ -2202,8 +2678,9 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
 
     async def event_generator():
         import json as _json
+        import asyncio
+        import threading
 
-        agent = _get_brainstorm_agent()
         history_text = "\n".join([
             f"{m['role'].upper()}: {m['content']}"
             for m in conv["messages"][-10:]
@@ -2221,64 +2698,135 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
 - 收集够信息后加标记 [CREATE_PATENT_RECOMMENDATION]
 """
         tool_calls_data = []
-        skill_uses_data = []
+        events: list = []
+        events_lock = threading.Lock()
         final_content = ""
+        result_holder = {"result": None, "error": None, "done": False}
+
+        def on_thinking(data):
+            text = str(data).strip() if data else ""
+            if not text or len(text) < 5:
+                return
+            if text.startswith("{") or text.startswith("["):
+                return
+            with events_lock:
+                events.append({
+                    "type": "thinking",
+                    "data": {"agent": "patent.ceo.v1", "message": text[:300]}
+                })
+
+        def on_tool_start(call_id, name, args):
+            with events_lock:
+                params = {}
+                if isinstance(args, str):
+                    try:
+                        params = _json.loads(args)
+                    except Exception:
+                        params = {"raw": args[:200]}
+                elif isinstance(args, dict):
+                    params = args
+                events.append({
+                    "type": "tool_call_start",
+                    "data": {"name": name, "parameters": params}
+                })
+
+        def on_tool_complete(call_id, name, args, result):
+            with events_lock:
+                result_str = str(result)[:500] if result else ""
+                tool_calls_data.append({
+                    "name": name,
+                    "result": result_str,
+                    "success": True,
+                })
+                events.append({
+                    "type": "tool_call_end",
+                    "data": {"name": name, "result": result_str, "success": True}
+                })
+
+        def on_status(kind, msg):
+            with events_lock:
+                events.append({
+                    "type": "status",
+                    "data": {"kind": kind, "message": msg}
+                })
+
+        callbacks = {
+            "thinking": on_thinking,
+            "tool_start": on_tool_start,
+            "tool_complete": on_tool_complete,
+            "status": on_status,
+        }
+
+        def run_agent():
+            try:
+                agent = create_ai_agent(
+                    profile_id="patent.ceo.v1",
+                    session_id=f"conv_{conv_id}",
+                    callbacks=callbacks,
+                )
+                result_holder["result"] = agent.run_conversation(prompt)
+            except Exception as e:
+                result_holder["error"] = str(e)
+            finally:
+                result_holder["done"] = True
+
+        thread = threading.Thread(target=run_agent, daemon=True)
+        thread.start()
 
         try:
-            # 使用真实 hermes-agent 流式对话
-            async for event in _hermes_service.run_conversation_stream(
-                profile_id="patent.ceo.v1",
-                user_input=prompt,
-                session_id=f"conv_{conv_id}",
-            ):
-                event_type = event["type"]
-                event_data = event["data"]
+            while not result_holder["done"] or events:
+                with events_lock:
+                    batch = list(events)
+                    events.clear()
 
-                if event_type == "thinking":
-                    yield f"event: thinking\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
+                for event in batch:
+                    event_type = event.get("type", "status")
+                    event_data = event.get("data", {})
+                    yield f"event: {event_type}\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
 
-                elif event_type == "tool_call_start":
-                    yield f"event: tool_call_start\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
+                if not batch and not result_holder["done"]:
+                    await asyncio.sleep(0.05)
 
-                elif event_type == "tool_call_end":
-                    tool_calls_data.append(event_data)
-                    yield f"event: tool_call_end\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
+            # 处理最终结果
+            if result_holder["error"]:
+                yield f"event: error\ndata: {_json.dumps({'error': result_holder['error']}, ensure_ascii=False)}\n\n"
+            else:
+                result = result_holder["result"]
+                if isinstance(result, dict):
+                    final_content = result.get("final_response", "") or ""
+                else:
+                    final_content = str(result) if result else ""
 
-                elif event_type == "content":
-                    final_content = event_data.get("content", "")
-                    has_recommendation = "[CREATE_PATENT_RECOMMENDATION]" in final_content
-                    clean_content = final_content.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
-                    yield f"event: content\ndata: {_json.dumps({'content': clean_content, 'has_recommendation': has_recommendation}, ensure_ascii=False)}\n\n"
+                has_recommendation = "[CREATE_PATENT_RECOMMENDATION]" in final_content
+                clean_content = final_content.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
 
-                elif event_type == "done":
-                    # 构建 assistant 消息并持久化
-                    clean_content = final_content.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
-                    has_recommendation = "[CREATE_PATENT_RECOMMENDATION]" in final_content
+                # 发送 content 事件
+                yield f"event: content\ndata: {_json.dumps({'content': clean_content, 'has_recommendation': has_recommendation}, ensure_ascii=False)}\n\n"
 
-                    assistant_msg = {
-                        "id": str(uuid.uuid4()),
-                        "role": "assistant",
-                        "content": clean_content,
-                        "timestamp": datetime.now().isoformat(),
-                        "type": "text",
-                        "metadata": {"recommend_create_patent": has_recommendation} if has_recommendation else None,
-                        "tool_calls": tool_calls_data if tool_calls_data else None,
-                        "skill_uses": skill_uses_data if skill_uses_data else None,
-                    }
+                # 构建 assistant 消息并持久化
+                assistant_msg = {
+                    "id": str(uuid.uuid4()),
+                    "role": "assistant",
+                    "content": clean_content,
+                    "timestamp": datetime.now().isoformat(),
+                    "type": "text",
+                    "metadata": {"recommend_create_patent": has_recommendation} if has_recommendation else None,
+                    "tool_calls": tool_calls_data if tool_calls_data else None,
+                }
 
-                    async with conversations_lock:
-                        c = conversations_store.get(conv_id)
-                        if c:
-                            c["messages"].append(assistant_msg)
-                            c["updated_at"] = datetime.now().isoformat()
-                            user_msgs = [m for m in c["messages"] if m["role"] == "user"]
-                            if c["title"] == "新的对话" and len(user_msgs) == 1:
-                                title = content[:50]
-                                c["title"] = title + ("..." if len(content) > 50 else "")
+                async with conversations_lock:
+                    c = conversations_store.get(conv_id)
+                    if c:
+                        c["messages"].append(assistant_msg)
+                        c["updated_at"] = datetime.now().isoformat()
+                        user_msgs = [m for m in c["messages"] if m["role"] == "user"]
+                        if c["title"] == "新的对话" and len(user_msgs) == 1:
+                            title = content[:50]
+                            c["title"] = title + ("..." if len(content) > 50 else "")
 
-                    await _persist_conversation(conv_id)
+                await _persist_conversation(conv_id)
 
-                    yield f"event: done\ndata: {_json.dumps({'message': assistant_msg, 'has_recommendation': has_recommendation, 'conversation_id': conv_id}, ensure_ascii=False)}\n\n"
+                yield f"event: done\ndata: {_json.dumps({'message': assistant_msg, 'has_recommendation': has_recommendation, 'conversation_id': conv_id}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             yield f"event: error\ndata: {_json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
@@ -2551,15 +3099,19 @@ def _extract_tool_structure(source_code: str | None, tool_name: str) -> dict:
 
 
 def _extract_skill_structure(profile_skill, skill_meta: dict) -> dict:
-    """从技能数据中提取结构元数据"""
+    """从技能数据中提取结构元数据（适配 hermes-agent SKILL.md 格式）"""
+    # skill_meta 来自 AgentConfig.skills，包含从 SKILL.md frontmatter 解析的字段
+    tags = skill_meta.get("tags", [])
+    
     return {
         "name": skill_meta.get("name", ""),
         "description": skill_meta.get("description", ""),
-        "proficiency": profile_skill.proficiency if profile_skill else 0.8,
-        "keywords": profile_skill.keywords if profile_skill else [],
         "version": skill_meta.get("version", "1.0.0"),
+        "tags": tags,
+        "enabled": skill_meta.get("enabled", True),
+        "file": skill_meta.get("file", ""),
         "injection_method": "system_prompt",
-        "injection_description": "技能信息被注入到 Agent 的 system_prompt 中，引导 LLM 在回复时运用该技能",
+        "injection_description": "技能内容（SKILL.md）被注入到 Agent 的 system_prompt 中，引导 LLM 在回复时运用该技能",
         "template": _get_skill_template(),
     }
 
@@ -2605,19 +3157,31 @@ class {ClassName}Tool(HermesTool):
 
 
 def _get_skill_template() -> str:
-    """返回创建新技能的结构说明"""
-    return '''{
-  "name": "技能名称",
-  "description": "技能详细描述 — 说明该技能能做什么",
-  "proficiency": 0.85,  // 熟练度 0.0-1.0
-  "keywords": ["关键词1", "关键词2"]  // 用于匹配任务的关键词
-}
+    """返回创建新技能的 SKILL.md 模板（hermes-agent 原生格式）"""
+    return '''---
+name: skill-name
+description: 技能详细描述 — 说明该技能能做什么
+version: 1.0.0
+metadata:
+  tags: [关键词1, 关键词2]
+  agent: agent-id
+---
 
-// 技能工作原理：
-// 1. 技能定义被添加到 Agent Profile 的 skills 目录
-// 2. Agent 创建时，技能信息被注入到 system_prompt
-// 3. LLM 根据技能描述在回复中运用相应能力
-// 4. Agent 可以在回复中用 <skill_use> 标记声明使用了哪些技能
+# 技能名称
+
+技能的详细说明。
+
+## 工作流程
+
+描述技能的执行步骤和逻辑。
+
+## 工具使用
+
+- `tool_name` - 工具描述
+
+## 注意事项
+
+使用该技能时的注意点。
 '''
 
 _KNOWN_TOOL_IMPL_FILES: dict[str, str] = {
@@ -2644,6 +3208,7 @@ _KNOWN_TOOL_IMPL_FILES: dict[str, str] = {
     "agent_selector": "backend/src/agents/hermes/tools/agent_selector.py",
     "dispatch_specialist": "backend/src/agents/hermes/tools/dispatch_specialist.py",
     "prior_art_comparator": "backend/src/agents/hermes/tools/prior_art_comparator.py",
+    "patent_docx_generator": "backend/src/agents/hermes/tools/patent_docx_generator.py",
 }
 
 
@@ -2694,6 +3259,22 @@ async def get_agent_related_files(
 
         # 提取工具结构元数据
         structure_info = _extract_tool_structure(source_code, tool_id)
+        
+        tool_filename = _os.path.basename(rel_path)
+        
+        # 只返回工具主文件
+        dir_tree = [{
+            "name": tool_filename,
+            "path": rel_path,
+            "type": "file",
+            "is_main": True,
+        }]
+        
+        all_files = [{
+            "path": rel_path,
+            "content": source_code,
+            "size": len(source_code.encode('utf-8')),
+        }]
 
         return {
             "type": "tool",
@@ -2701,7 +3282,8 @@ async def get_agent_related_files(
             "source_code": source_code,
             "source_markdown": None,
             "structure": structure_info,
-            "files": [{"path": rel_path, "content": source_code}],
+            "directory_tree": dir_tree,
+            "files": all_files,
         }
 
     else:
@@ -2716,28 +3298,125 @@ async def get_agent_related_files(
         # 结构元数据
         structure_info = _extract_skill_structure(None, skill_meta)
 
-        # 读取实际的 .md 文件内容
+        # 技能目录路径
         skill_file = skill_meta.get("file", "")
         if not skill_file:
             raise HTTPException(status_code=404, detail=f"技能文件未配置: {skill_id}")
-        skill_path = cfg.dir_path / "skills" / skill_file
-        if not skill_path.exists():
-            raise HTTPException(status_code=404, detail=f"技能文件不存在: {skill_path}")
-        source_markdown = skill_path.read_text(encoding="utf-8")
+        
+        # skill_file 格式: "skill-name/SKILL.md"，提取目录名
+        skill_dir_name = skill_file.split("/")[0] if "/" in skill_file else skill_id
+        skill_dir = cfg.dir_path / "skills" / skill_dir_name
+        
+        if not skill_dir.exists():
+            raise HTTPException(status_code=404, detail=f"技能目录不存在: {skill_dir}")
+        
+        # 构建目录树和文件列表
+        # 注意: hermes_home 在 backend/ 目录下
+        rel_base = f"backend/hermes_home/profiles/{cfg.dir_path.name}/skills/{skill_dir_name}"
+        
+        # 递归扫描技能目录，构建文件树
+        def _scan_skill_dir(dir_path, rel_prefix):
+            """扫描目录，返回目录树结构和文件列表"""
+            entries = []
+            files_list = []
+            
+            for item in sorted(dir_path.iterdir()):
+                rel_path = f"{rel_prefix}/{item.name}"
+                if item.is_dir():
+                    sub_entries, sub_files = _scan_skill_dir(item, rel_path)
+                    entries.append({
+                        "name": item.name,
+                        "path": rel_path,
+                        "type": "directory",
+                        "children": sub_entries,
+                    })
+                    files_list.extend(sub_files)
+                else:
+                    # 读取文件内容
+                    try:
+                        content = item.read_text(encoding="utf-8")
+                    except Exception:
+                        content = None  # 二进制文件或读取失败
+                    
+                    file_entry = {
+                        "name": item.name,
+                        "path": rel_path,
+                        "type": "file",
+                        "size": item.stat().st_size,
+                    }
+                    entries.append(file_entry)
+                    files_list.append({
+                        "path": rel_path,
+                        "content": content,
+                        "size": item.stat().st_size,
+                    })
+            
+            return entries, files_list
+        
+        dir_tree, all_files = _scan_skill_dir(skill_dir, rel_base)
+        
+        # 找到 SKILL.md 作为主文件
+        skill_md_path = skill_dir / "SKILL.md"
+        source_markdown = None
+        if skill_md_path.exists():
+            source_markdown = skill_md_path.read_text(encoding="utf-8")
 
         return {
             "type": "skill",
             "name": skill_meta.get("name", skill_id),
             "source_code": None,
-            "source_markdown": source_markdown,
+            "source_markdown": source_markdown,  # SKILL.md 内容
             "structure": structure_info,
-            "files": [
-                {
-                    "path": f"skills/{skill_meta.get('name', skill_id)}.md",
-                    "content": source_markdown,
-                },
-            ],
+            "directory_tree": dir_tree,  # 目录树结构
+            "files": all_files,  # 所有文件及内容
         }
+
+
+@router.get("/agents/{agent_id}/source-file")
+async def get_agent_source_file(
+    agent_id: str,
+    path: str = Query(..., description="文件相对路径"),
+):
+    """按需获取工具或技能的特定源文件内容"""
+    cfg = _require_agent_profile(agent_id)
+    
+    _project_root = _os.path.dirname(
+        _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    )
+    
+    # 安全检查：路径必须在允许的目录内
+    allowed_prefixes = [
+        f"backend/hermes_home/profiles/{cfg.dir_path.name}/skills/",
+        "backend/src/agents/hermes/tools/",
+    ]
+    
+    if not any(path.startswith(prefix) for prefix in allowed_prefixes):
+        raise HTTPException(status_code=403, detail="不允许访问该路径")
+    
+    abs_path = _os.path.normpath(_os.path.join(_project_root, path))
+    
+    # 防止路径遍历攻击
+    if not abs_path.startswith(_project_root):
+        raise HTTPException(status_code=403, detail="路径不合法")
+    
+    if not _os.path.isfile(abs_path):
+        raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
+    
+    try:
+        with open(abs_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        return {
+            "path": path,
+            "content": content,
+            "size": _os.path.getsize(abs_path),
+            "encoding": "utf-8",
+        }
+    except UnicodeDecodeError:
+        # 二进制文件
+        raise HTTPException(status_code=400, detail="无法读取二进制文件")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")
 
 
 # ============ Agent 工具/技能生成与热插拔 ============
@@ -3194,8 +3873,39 @@ async def export_patent_docx(task_id: str):
     if not patent_data:
         raise HTTPException(status_code=400, detail="该任务尚无专利文档可导出")
 
-    from src.document_gen.generator import generate_patent_docx
-    filepath = await asyncio.to_thread(generate_patent_docx, patent_data, task_id)
+    from ..agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
+
+    # Convert PatentDraft dict to tool format
+    claims_raw_data = patent_data.get("claims", [])
+    ind_claim = ""
+    dep_claims = []
+    for c in claims_raw_data:
+        if isinstance(c, dict):
+            if c.get("claim_type") == "independent":
+                ind_claim = c.get("content", "")
+            else:
+                dep_claims.append(c.get("content", ""))
+
+    def _tool_content(v):
+        return v.get("content", "") if isinstance(v, dict) else str(v)
+
+    tool = PatentDocxGeneratorTool()
+    result = await tool.execute(
+        title=patent_data.get("title", "专利申请文件"),
+        claims={"independent_claim": ind_claim, "dependent_claims": dep_claims},
+        description={
+            "technical_field": patent_data.get("technical_field", ""),
+            "background_art": _tool_content(patent_data.get("background_art", "")),
+            "summary_of_invention": _tool_content(patent_data.get("summary_of_invention", "")),
+            "detailed_description": _tool_content(patent_data.get("detailed_description", "")),
+            "description_of_drawings": _tool_content(patent_data.get("description_of_drawings", "")),
+        },
+        abstract=patent_data.get("abstract", ""),
+        task_id=task_id,
+    )
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=f"生成DOCX失败: {result.get('error')}")
+    filepath = result["file_path"]
 
     return FileResponse(
         path=filepath,
@@ -3216,134 +3926,61 @@ async def export_workflow_patent_docx(task_id: str):
     if not patent_draft:
         raise HTTPException(status_code=400, detail="工作流尚未生成专利文档，请等待撰写阶段完成")
 
-    # 将工作流输出格式转换为 generate_patent_docx 需要的格式
     draft_data = patent_draft if isinstance(patent_draft, dict) else patent_draft
 
+    # 处理 {agent, output, summary} 格式：尝试从 output 字段解析 JSON
+    if "output" in draft_data and "agent" in draft_data and isinstance(draft_data.get("output"), str):
+        import re
+        output_text = draft_data["output"]
+        parsed_data = None
+        
+        # 方法1：尝试从 markdown code block 中提取 JSON
+        json_block_match = re.search(r'```json\s*([\s\S]*?)(?:\s*```|$)', output_text)
+        if json_block_match:
+            json_str = json_block_match.group(1).strip()
+            try:
+                parsed_data = json.loads(json_str)
+            except json.JSONDecodeError:
+                # 尝试修复截断的 JSON
+                parsed_data = _repair_truncated_json(json_str)
+        
+        # 方法2：尝试找文本中第一个 { 到最后一个 } 的范围
+        if not parsed_data or "claims" not in parsed_data:
+            first_brace = output_text.find("{")
+            last_brace = output_text.rfind("}")
+            if first_brace >= 0 and last_brace > first_brace:
+                json_str = output_text[first_brace:last_brace + 1]
+                try:
+                    parsed_data = json.loads(json_str)
+                except json.JSONDecodeError:
+                    parsed_data = _repair_truncated_json(json_str)
+        
+        if parsed_data and "claims" in parsed_data:
+            draft_data = parsed_data
+
     # 工作流输出格式: {claims: {independent_claim, dependent_claims}, description: {...}, abstract}
-    # generate_patent_docx 需要的格式: PatentDraft model 或兼容 dict
-    # 做适配转换
     claims_raw = draft_data.get("claims", {})
     desc_raw = draft_data.get("description", {})
 
-    adapted_data = {
-        "title": context.requirement_analysis.get("patent_title", "专利申请文件"),
-        "technical_field": desc_raw.get("technical_field", ""),
-        "background_art": {"section_name": "背景技术", "content": desc_raw.get("background_art", ""), "word_count": len(desc_raw.get("background_art", ""))},
-        "summary_of_invention": {"section_name": "发明内容", "content": desc_raw.get("summary_of_invention", ""), "word_count": len(desc_raw.get("summary_of_invention", ""))},
-        "description_of_drawings": {"section_name": "附图说明", "content": desc_raw.get("description_of_drawings", ""), "word_count": len(desc_raw.get("description_of_drawings", ""))} if desc_raw.get("description_of_drawings") else None,
-        "detailed_description": {"section_name": "具体实施方式", "content": desc_raw.get("detailed_description", ""), "word_count": len(desc_raw.get("detailed_description", ""))},
-        "claims": [],
-        "abstract": draft_data.get("abstract", ""),
-        "figures": draft_data.get("figures", []),
-    }
+    # 使用 PatentDocxGeneratorTool 生成（工作流格式与工具格式天然兼容）
+    from ..agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
 
-    # 转换权利要求
-    import re
-    def _strip_claim_prefix(text: str) -> str:
-        """去除LLM生成的权利要求编号前缀，如 '1. ', '2. 根据权利要求1所述的方法，'"""
-        # 去掉开头的数字编号 (如 "1. ", "2. ", "10. ")
-        text = re.sub(r'^\d+\.\s*', '', text.strip())
-        return text
-
-    if isinstance(claims_raw, dict):
-        ind_claim = claims_raw.get("independent_claim", "")
-        if ind_claim:
-            adapted_data["claims"].append({"claim_number": 1, "claim_type": "independent", "content": _strip_claim_prefix(ind_claim), "dependencies": []})
-        for i, dep in enumerate(claims_raw.get("dependent_claims", []), 2):
-            # 从属权利要求：提取实际依赖的权利要求号
-            dep_text = _strip_claim_prefix(dep)
-            dep_nums = re.findall(r'根据权利要求(\d+)', dep_text)
-            dependencies = [int(n) for n in dep_nums] if dep_nums else [1]
-            adapted_data["claims"].append({"claim_number": i, "claim_type": "dependent", "content": dep_text, "dependencies": dependencies})
-
-    from src.document_gen.generator import generate_patent_docx
-    # 清除旧的导出文件以确保重新生成
-    from pathlib import Path as _Path
-    _export_dir = _Path("./exports") / task_id
-    if _export_dir.exists():
-        import shutil
-        shutil.rmtree(_export_dir)
-    try:
-        filepath = await asyncio.to_thread(generate_patent_docx, adapted_data, task_id)
-    except Exception as e:
-        # 如果 PatentDraft 验证失败，直接用简单 docx 生成
-        import traceback
-        with open("/tmp/docx_export_error.log", "w") as f:
-            f.write(f"{type(e).__name__}: {e}\n")
-            traceback.print_exc(file=f)
-        from pathlib import Path
-        from docx import Document
-        from src.document_gen.generator import (
-            _strip_markdown, _get_profile, add_document_heading, add_section_heading,
-            add_body_paragraph, _add_multiline_content, add_new_section, _set_page_size,
-            _get_margins_for_section, _set_section_margins,
-        )
-
-        profile = _get_profile()
-        doc = Document()
-
-        # 配置首页（摘要）
-        first_section = doc.sections[0]
-        _set_page_size(first_section, profile)
-        margins = _get_margins_for_section("摘要", profile)
-        _set_section_margins(first_section, margins)
-
-        # 说明书摘要
-        add_document_heading(doc, "说明书摘要", profile)
-        add_body_paragraph(doc, _strip_markdown(draft_data.get("abstract", "")), profile)
-
-        # 摘要附图
-        add_new_section(doc, "摘要附图", profile)
-        add_document_heading(doc, "摘要附图", profile)
-        add_body_paragraph(doc, "（无附图）", profile, first_line_indent=False)
-
-        # 权利要求书
-        add_new_section(doc, "权利要求书", profile)
-        add_document_heading(doc, "权利要求书", profile)
-        if isinstance(claims_raw, dict):
-            ind_claim = _strip_markdown(claims_raw.get("independent_claim", ""))
-            if ind_claim:
-                add_body_paragraph(doc, f"1、{_strip_claim_prefix(ind_claim)}", profile)
-            for i, dep in enumerate(claims_raw.get("dependent_claims", []), 2):
-                dep_text = _strip_markdown(_strip_claim_prefix(dep))
-                add_body_paragraph(doc, f"{i}、{dep_text}", profile)
-
-        # 说明书
-        add_new_section(doc, "说明书", profile)
-        add_document_heading(doc, "说明书", profile)
-
-        # 专利名称（16pt）
-        title_para = doc.add_paragraph()
-        from docx.shared import Pt as _Pt
-        from src.document_gen.generator import _set_run_font
-        title_run = title_para.add_run(adapted_data["title"])
-        _set_run_font(title_run, "楷体", 16.0)
-
-        add_section_heading(doc, "技术领域", profile)
-        _add_multiline_content(doc, desc_raw.get("technical_field", ""), profile)
-
-        add_section_heading(doc, "背景技术", profile)
-        _add_multiline_content(doc, desc_raw.get("background_art", ""), profile)
-
-        add_section_heading(doc, "发明内容", profile)
-        _add_multiline_content(doc, desc_raw.get("summary_of_invention", ""), profile)
-
-        if desc_raw.get("description_of_drawings"):
-            add_section_heading(doc, "附图说明", profile)
-            _add_multiline_content(doc, desc_raw.get("description_of_drawings", ""), profile)
-
-        add_section_heading(doc, "具体实施方式", profile)
-        _add_multiline_content(doc, desc_raw.get("detailed_description", ""), profile)
-
-        # 说明书附图
-        add_new_section(doc, "说明书附图", profile)
-        add_document_heading(doc, "说明书附图", profile)
-        add_body_paragraph(doc, "（无附图）", profile, first_line_indent=False)
-
-        export_dir = Path("./exports") / task_id
-        export_dir.mkdir(parents=True, exist_ok=True)
-        filepath = str(export_dir / f"{task_id}_专利申请书.docx")
-        doc.save(filepath)
+    title = context.requirement_analysis.get("patent_title", "专利申请文件")
+    tool = PatentDocxGeneratorTool()
+    result = await tool.execute(
+        title=title,
+        claims=claims_raw if isinstance(claims_raw, dict) else {},
+        description=desc_raw if isinstance(desc_raw, dict) else {},
+        abstract=draft_data.get("abstract", ""),
+        tech_description=draft_data.get(
+            "tech_description",
+            context.requirement_analysis.get("tech_description", ""),
+        ),
+        task_id=task_id,
+    )
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=f"生成DOCX失败: {result.get('error')}")
+    filepath = result["file_path"]
 
     return FileResponse(
         path=filepath,

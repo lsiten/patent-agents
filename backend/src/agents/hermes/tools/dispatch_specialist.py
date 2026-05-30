@@ -124,6 +124,8 @@ class DispatchSpecialistTool(HermesTool):
         )
 
     async def execute(self, **kwargs) -> Dict[str, Any]:
+        import asyncio
+
         agent_id = kwargs.get("agent_id", "")
         task = kwargs.get("task", "")
         context = kwargs.get("context", "")
@@ -152,13 +154,11 @@ class DispatchSpecialistTool(HermesTool):
         )
 
         try:
-            from src.agents.hermes_agent_service import get_hermes_agent_service
+            from src.agents.agent_config import create_ai_agent
 
-            service = get_hermes_agent_service()
-            result = await service.run_conversation(
-                profile_id=profile_id,
-                user_input=full_prompt,
-            )
+            agent = create_ai_agent(profile_id=profile_id)
+            # AIAgent.run_conversation 是同步的，需要在线程中运行
+            result = await asyncio.to_thread(agent.run_conversation, full_prompt)
 
             # 归一化结果为字符串
             if isinstance(result, dict):

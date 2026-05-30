@@ -2,9 +2,11 @@
 IPC Classifier Tool - IPC 分类工具
 帮助需求分析 Agent 对技术方案进行 IPC 国际专利分类
 """
+import json
+from datetime import datetime
 from typing import Any, Dict
 
-from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
+from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
 from src.core.llm_client import get_llm_service, LLMMessage
 
@@ -22,6 +24,31 @@ IPC_PROMPT = """你是一位专利分类专家。请根据以下技术描述，�
   "reasoning": "分类理由说明",
   "confidence": 0.85
 }}"""
+
+
+def _extract_json_from_response(text: str) -> Dict[str, Any]:
+    """从 LLM 响应中提取 JSON"""
+    import re
+    # 尝试直接解析
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # 尝试提取代码块中的 JSON
+    match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    # 尝试提取 { } 之间的内容
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+    return {}
 
 
 class IPCClassifierTool(HermesTool):
@@ -44,11 +71,42 @@ class IPCClassifierTool(HermesTool):
 
     async def execute(self, tech_description: str, **kwargs) -> Dict[str, Any]:
         """执行 IPC 分类"""
+        start_time = datetime.now()
         logger.info("Classifying technology into IPC categories")
-        llm = get_llm_service()
-        prompt = IPC_PROMPT.format(tech_description=tech_description)
-        response = await llm.chat_completion(
-            messages=[LLMMessage(role="user", content=prompt)],
-            temperature=0.2,
-        )
-        return {"ipc_classification": response.content, "tool": self.name}
+        
+        try:
+            llm = get_llm_service()
+            prompt = IPC_PROMPT.format(tech_description=tech_description)
+            response = await llm.chat_completion(
+                messages=[LLMMessage(role="user", content=prompt)],
+                temperature=0.2,
+            )
+            
+            # 解析 LLM 响应
+            parsed = _extract_json_from_response(response.content)
+            
+            # 构造标准化输出数据
+            data = {
+                "primary_code": parsed.get("primary_ipc", ""),
+                "secondary_codes": parsed.get("secondary_ipc", []),
+                "classification_rationale": parsed.get("reasoning", ""),
+                "confidence": parsed.get("confidence", 0.0),
+            }
+            
+            return make_tool_output(
+                tool_name=self.name,
+                data=data,
+                success=True,
+                raw_response=response.content,
+                start_time=start_time,
+            )
+            
+        except Exception as e:
+            logger.error(f"IPC classification failed: {e}")
+            return make_tool_output(
+                tool_name=self.name,
+                data={},
+                success=False,
+                error=str(e),
+                start_time=start_time,
+            )

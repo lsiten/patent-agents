@@ -2,9 +2,12 @@
 OA Predictor Tool - 审查意见预测工具
 预测专利审查过程中可能收到的审查意见
 """
+import json
+import re
+from datetime import datetime
 from typing import Any, Dict
 
-from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
+from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
 from src.core.llm_client import get_llm_service, LLMMessage
 
@@ -39,6 +42,27 @@ OA_PROMPT = """你是一位经验丰富的专利审查员。请预测以下专�
 }}"""
 
 
+def _extract_json_from_response(text: str) -> Dict[str, Any]:
+    """从 LLM 响应中提取 JSON"""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+    return {}
+
+
 class OAPredictorTool(HermesTool):
     """审查意见预测工具"""
     name = "oa_predictor"
@@ -59,11 +83,41 @@ class OAPredictorTool(HermesTool):
 
     async def execute(self, patent_document: str, **kwargs) -> Dict[str, Any]:
         """执行审查意见预测"""
+        start_time = datetime.now()
         logger.info("Predicting office action objections")
-        llm = get_llm_service()
-        prompt = OA_PROMPT.format(patent_document=patent_document)
-        response = await llm.chat_completion(
-            messages=[LLMMessage(role="user", content=prompt)],
-            temperature=0.3,
-        )
-        return {"oa_prediction": response.content, "tool": self.name}
+        
+        try:
+            llm = get_llm_service()
+            prompt = OA_PROMPT.format(patent_document=patent_document)
+            response = await llm.chat_completion(
+                messages=[LLMMessage(role="user", content=prompt)],
+                temperature=0.3,
+            )
+            
+            parsed = _extract_json_from_response(response.content)
+            
+            # 标准化输出数据
+            data = {
+                "predicted_objections": parsed.get("predicted_objections", []),
+                "overall_risk": parsed.get("overall_risk", "unknown"),
+                "risk_level": parsed.get("overall_risk", "unknown"),  # 别名字段
+                "proactive_suggestions": parsed.get("proactive_suggestions", []),
+            }
+            
+            return make_tool_output(
+                tool_name=self.name,
+                data=data,
+                success=True,
+                raw_response=response.content,
+                start_time=start_time,
+            )
+            
+        except Exception as e:
+            logger.error(f"OA prediction failed: {e}")
+            return make_tool_output(
+                tool_name=self.name,
+                data={},
+                success=False,
+                error=str(e),
+                start_time=start_time,
+            )

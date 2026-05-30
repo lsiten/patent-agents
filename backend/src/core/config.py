@@ -23,6 +23,11 @@ class Environment(str, Enum):
     PRODUCTION = "production"
 
 
+# ── 所有已知供应商列表（用于校验等） ──
+TEXT_LLM_PROVIDERS = {"openai", "anthropic", "deepseek", "openrouter"}
+IMAGE_GEN_PROVIDERS = {"azure_aoai", "openai", "stability"}
+
+
 class LogLevel(str, Enum):
     """日志级别枚举"""
     DEBUG = "DEBUG"
@@ -64,45 +69,172 @@ class RedisSettings(BaseSettings):
 
 
 class LLMSettings(BaseSettings):
-    """LLM API 配置"""
-    # OpenAI
+    """文字 LLM API 配置 — 支持多供应商，base_url / api_key / model_id 三元组"""
+
+    # 当前激活的供应商
+    active_provider: str = Field(
+        default="openai", alias="LLM_ACTIVE_PROVIDER"
+    )
+
+    # ── OpenAI / 兼容代理 ──
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     openai_base_url: str = Field(
         default="https://api.openai.com/v1",
         alias="OPENAI_BASE_URL"
     )
-    llm_model: str = Field(default="gpt-4-turbo-preview", alias="LLM_MODEL")
-    llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    llm_max_tokens: int = Field(default=4096)
-    llm_timeout: int = Field(default=120, description="LLM请求超时(秒)")
+    openai_model: str = Field(default="gpt-4-turbo-preview", alias="LLM_OPENAI_MODEL")
 
-    # Anthropic Claude
+    # ── Anthropic Claude ──
     anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
     anthropic_base_url: str = Field(
         default="https://api.anthropic.com/v1",
         alias="ANTHROPIC_BASE_URL"
     )
-    claude_model: str = Field(default="claude-3-opus-20240229")
+    anthropic_model: str = Field(
+        default="claude-3-opus-20240229", alias="LLM_ANTHROPIC_MODEL"
+    )
 
-    # Fallback 配置
+    # ── DeepSeek ──
+    deepseek_api_key: Optional[str] = Field(default=None, alias="LLM_DEEPSEEK_API_KEY")
+    deepseek_base_url: str = Field(
+        default="https://api.deepseek.com/v1",
+        alias="LLM_DEEPSEEK_BASE_URL",
+    )
+    deepseek_model: str = Field(default="deepseek-chat", alias="LLM_DEEPSEEK_MODEL")
+
+    # ── OpenRouter ──
+    openrouter_api_key: Optional[str] = Field(default=None, alias="LLM_OPENROUTER_API_KEY")
+    openrouter_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        alias="LLM_OPENROUTER_BASE_URL",
+    )
+    openrouter_model: str = Field(default="openrouter/auto", alias="LLM_OPENROUTER_MODEL")
+
+    # ── API 模式（覆盖自动检测） ──
+    # 可选值: anthropic_messages, chat_completions, bedrock_converse, codex_responses
+    # 留空则根据 base_url 自动检测
+    api_mode: Optional[str] = Field(
+        default=None, alias="LLM_API_MODE",
+        description="强制指定 API 模式，覆盖自动检测",
+    )
+
+    # 全局通用配置
+    llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    llm_max_tokens: int = Field(default=4096)
+    llm_timeout: int = Field(default=120, description="LLM请求超时(秒)")
     enable_fallback: bool = Field(default=True, description="启用LLM降级策略")
     fallback_order: List[str] = Field(
         default_factory=lambda: ["openai", "anthropic"]
     )
-
-    # Retry 配置
     max_retries: int = Field(default=3, description="最大重试次数")
     retry_delay: float = Field(default=1.0, description="重试延迟(秒)")
 
     model_config = {"env_prefix": "LLM_"}
 
+    def get_provider_config(self, provider: Optional[str] = None) -> dict:
+        """获取指定供应商（或当前激活供应商）的连接配置"""
+        p = provider or self.active_provider
+        if p not in TEXT_LLM_PROVIDERS:
+            p = "openai"
+        return {
+            "base_url": getattr(self, f"{p}_base_url", None),
+            "api_key": getattr(self, f"{p}_api_key", None),
+            "model_id": getattr(self, f"{p}_model", None),
+        }
+
     @field_validator("fallback_order")
     @classmethod
     def validate_fallback_order(cls, v: List[str]) -> List[str]:
-        valid_providers = {"openai", "anthropic"}
-        if not all(p in valid_providers for p in v):
-            raise ValueError(f"Fallback providers must be one of {valid_providers}")
+        if not all(p in TEXT_LLM_PROVIDERS for p in v):
+            raise ValueError(f"Fallback providers must be one of {TEXT_LLM_PROVIDERS}")
         return v
+
+
+class ImageGenSettings(BaseSettings):
+    """生图 API 配置 — 支持多供应商，base_url / api_key / model_id 三元组"""
+
+    # 当前激活的供应商
+    active_provider: str = Field(
+        default="azure_aoai", alias="IMAGE_GEN_ACTIVE_PROVIDER",
+    )
+
+    # ── Azure OpenAI (default, intsig proxy for gpt-image-2) ──
+    azure_aoai_base_url: str = Field(
+        default="http://deepseek-work.intsig.net/proxy/azure/gpt/v1",
+        alias="IMAGE_GEN_AZURE_AOAI_BASE_URL",
+    )
+    azure_aoai_api_key: Optional[str] = Field(
+        default=None, alias="IMAGE_GEN_AZURE_AOAI_API_KEY",
+    )
+    azure_aoai_model_id: str = Field(
+        default="gpt-image-2", alias="IMAGE_GEN_AZURE_AOAI_MODEL_ID",
+    )
+
+    # ── OpenAI (DALL-E) ──
+    openai_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        alias="IMAGE_GEN_OPENAI_BASE_URL",
+    )
+    openai_api_key: Optional[str] = Field(
+        default=None, alias="IMAGE_GEN_OPENAI_API_KEY",
+    )
+    openai_model_id: str = Field(
+        default="dall-e-3", alias="IMAGE_GEN_OPENAI_MODEL_ID",
+    )
+
+    # ── Stability AI (Stable Diffusion) ──
+    stability_base_url: str = Field(
+        default="https://api.stability.ai/v1",
+        alias="IMAGE_GEN_STABILITY_BASE_URL",
+    )
+    stability_api_key: Optional[str] = Field(
+        default=None, alias="IMAGE_GEN_STABILITY_API_KEY",
+    )
+    stability_model_id: str = Field(
+        default="stable-diffusion-3", alias="IMAGE_GEN_STABILITY_MODEL_ID",
+    )
+
+    model_config = {"env_prefix": "IMAGE_GEN_"}
+
+    def get_provider_config(
+        self, provider: Optional[str] = None,
+    ) -> dict:
+        """获取指定供应商（或当前激活供应商）的连接配置"""
+        p = provider or self.active_provider
+        if p not in IMAGE_GEN_PROVIDERS:
+            p = "azure_aoai"
+        return {
+            "base_url": getattr(self, f"{p}_base_url", None),
+            "api_key": getattr(self, f"{p}_api_key", None),
+            "model_id": getattr(self, f"{p}_model_id", None),
+        }
+
+    def is_configured(self) -> bool:
+        """是否有至少一个供应商配置了 API key"""
+        for p in IMAGE_GEN_PROVIDERS:
+            if getattr(self, f"{p}_api_key", None):
+                return True
+        return False
+
+    def resolve_config(
+        self, llm_settings: "LLMSettings",
+    ) -> dict:
+        """
+        解析最终的生图配置。
+        生图已配置 → 返回生图配置
+        生图未配置 → 回退到文字 LLM 配置（base_url + api_key + 默认图片模型 ID）
+        """
+        if self.is_configured():
+            return self.get_provider_config()
+        # Fallback: 用文字 LLM 当前激活的供应商
+        llm_provider = llm_settings.get_provider_config()
+        llm_base_url = llm_provider.get("base_url") or ""
+        # OpenAI-compatible base url → 拼接 /images/generations 路径
+        return {
+            "base_url": llm_base_url,
+            "api_key": llm_provider.get("api_key"),
+            "model_id": "gpt-image-2",  # 回退时的默认图片模型
+        }
 
 
 class SecuritySettings(BaseSettings):
@@ -279,6 +411,7 @@ class AppSettings(BaseSettings):
     db: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
+    image_gen: ImageGenSettings = Field(default_factory=ImageGenSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     patent_db: PatentDBSettings = Field(default_factory=PatentDBSettings)
     workflow: WorkflowSettings = Field(default_factory=WorkflowSettings)

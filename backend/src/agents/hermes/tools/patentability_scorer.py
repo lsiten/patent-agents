@@ -2,9 +2,12 @@
 Patentability Scorer Tool - 专利性评分工具
 评估技术方案的新颖性、创造性和实用性
 """
+import json
+import re
+from datetime import datetime
 from typing import Any, Dict
 
-from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
+from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
 from src.core.llm_client import get_llm_service, LLMMessage
 
@@ -39,6 +42,29 @@ SCORE_PROMPT = """你是一位专利审查专家。请对以下技术方案进�
 }}"""
 
 
+def _parse_llm_json(content: str) -> Dict[str, Any]:
+    """从 LLM 输出中解析 JSON，处理 markdown 代码块等情况"""
+    if not content:
+        return {}
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+    code_block_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
+    if code_block_match:
+        try:
+            return json.loads(code_block_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    brace_match = re.search(r'\{[\s\S]*\}', content)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group(0))
+        except json.JSONDecodeError:
+            pass
+    return {"raw_content": content}
+
+
 class PatentabilityScorerTool(HermesTool):
     """专利性评分工具"""
     name = "patentability_scorer"
@@ -66,11 +92,43 @@ class PatentabilityScorerTool(HermesTool):
         self, invention: str, prior_art: str = "未提供", **kwargs
     ) -> Dict[str, Any]:
         """执行专利性评分"""
+        start_time = datetime.now()
         logger.info("Scoring patentability")
-        llm = get_llm_service()
-        prompt = SCORE_PROMPT.format(invention=invention, prior_art=prior_art)
-        response = await llm.chat_completion(
-            messages=[LLMMessage(role="user", content=prompt)],
-            temperature=0.2,
-        )
-        return {"patentability_score": response.content, "tool": self.name}
+        
+        try:
+            llm = get_llm_service()
+            prompt = SCORE_PROMPT.format(invention=invention, prior_art=prior_art)
+            response = await llm.chat_completion(
+                messages=[LLMMessage(role="user", content=prompt)],
+                temperature=0.2,
+            )
+            
+            # 解析 LLM 返回的 JSON
+            parsed = _parse_llm_json(response.content)
+            
+            # 标准化输出数据
+            data = {
+                "novelty": parsed.get("novelty", {}),
+                "inventive_step": parsed.get("inventive_step", {}),
+                "utility": parsed.get("utility", {}),
+                "overall_patentability": parsed.get("overall_patentability", "unknown"),
+                "recommendation": parsed.get("recommendation", ""),
+            }
+            
+            return make_tool_output(
+                tool_name=self.name,
+                data=data,
+                success=True,
+                raw_response=response.content if "raw_content" in parsed else None,
+                start_time=start_time,
+            )
+            
+        except Exception as e:
+            logger.error(f"Patentability scoring failed: {e}")
+            return make_tool_output(
+                tool_name=self.name,
+                data={},
+                success=False,
+                error=str(e),
+                start_time=start_time,
+            )

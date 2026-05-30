@@ -7,7 +7,7 @@ import hashlib
 from loguru import logger
 
 from ..models.domain import FinalizedPatent, KeyFeature, Claim, DescriptionSection
-from ..document_gen.docx_parser import (
+from .docx_parser import (
     FinalizedPatentEntry,
     ParsedPatentDocx,
     scan_finalized_patents_dir,

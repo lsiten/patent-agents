@@ -7,6 +7,9 @@ Patent Tools Adapter — 将现有 21 个 HermesTool 类桥接为 hermes-agent r
 import asyncio
 import json
 import logging
+import os
+import tempfile
+import time
 from typing import Any, Dict
 
 from tools.registry import registry
@@ -34,6 +37,57 @@ def _json_result(result: Any) -> str:
     if isinstance(result, str):
         return result
     return json.dumps(result, ensure_ascii=False, default=str)
+
+
+def _save_result_to_temp_file(tool_name: str, result_str: str) -> str:
+    """
+    将工具结果写入临时文件，确保内容不因 LLM max_tokens 截断而丢失。
+
+    Args:
+        tool_name: 工具名称，用于文件名
+        result_str: 工具结果字符串
+
+    Returns:
+        写入的文件路径
+    """
+    # 使用 HERMES_HOME/tool_outputs/ 目录（如不可用则回退到系统临时目录）
+    hermes_home = os.environ.get("HERMES_HOME", "")
+    if hermes_home:
+        out_dir = os.path.join(hermes_home, "tool_outputs")
+    else:
+        out_dir = os.path.join(tempfile.gettempdir(), "patent_tool_outputs")
+    os.makedirs(out_dir, exist_ok=True)
+
+    timestamp = int(time.time() * 1000)
+    safe_name = tool_name.replace("/", "_").replace(" ", "_")
+    filepath = os.path.join(out_dir, f"{safe_name}_{timestamp}.json")
+
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(result_str)
+        logger.debug("Tool result saved to temp file: %s (%d bytes)", filepath, len(result_str))
+    except Exception as e:
+        logger.warning("Failed to save tool result to temp file: %s", e)
+
+    return filepath
+
+
+def _make_temp_file_saver(tool_name: str):
+    """
+    创建一个包装器，在调用工具 handler 后将结果写入临时文件。
+    在原始结果末尾追加文件路径引用，方便 LLM 和下游访问。
+
+    Args:
+        tool_name: 工具名称，用于文件名
+    """
+    def decorator(handler):
+        def wrapped(args: Dict[str, Any], **kw) -> str:
+            result_str = handler(args, **kw)
+            filepath = _save_result_to_temp_file(tool_name, result_str)
+            # 追加文件引用（不影响原始结果的结构化解析）
+            return result_str + f"\n\n[TOOL_OUTPUT_SAVED_TO]: {filepath}"
+        return wrapped
+    return decorator
 
 
 # ============ Tool Handlers ============
@@ -651,11 +705,15 @@ PATENT_TOOL_DEFINITIONS = [
 def register_patent_tools():
     """注册所有专利工具到 hermes-agent registry"""
     for tool_def in PATENT_TOOL_DEFINITIONS:
+        handler = tool_def["handler"]
+        # 包装 handler：每个工具结果自动写入临时文件，不依赖 LLM max_tokens
+        saver = _make_temp_file_saver(tool_def["name"])
+        wrapped_handler = saver(handler)
         registry.register(
             name=tool_def["name"],
             toolset="patent",
             schema=tool_def["schema"],
-            handler=tool_def["handler"],
+            handler=wrapped_handler,
             emoji=tool_def.get("emoji", "🔧"),
             description=tool_def["schema"].get("description", ""),
         )

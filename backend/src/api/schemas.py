@@ -397,3 +397,43 @@ class SystemStatusResponse(BaseModel):
     agents: List[AgentStatusResponse]
     knowledge_base_count: int
     data_sources: List[str]
+
+
+class ProviderConfigResponse(BaseModel):
+    """供应商配置响应（key 做掩码处理）"""
+    base_url: str = ""
+    model_id: str = ""
+    api_key_masked: str = ""  # 显示前8位 + ****
+    configured: bool = False
+
+
+class ModelConfigSectionResponse(BaseModel):
+    """模型配置段落"""
+    active_provider: str = ""
+    providers: Dict[str, ProviderConfigResponse] = {}
+
+
+class SystemConfigResponse(BaseModel):
+    """系统配置响应"""
+    text_llm: ModelConfigSectionResponse
+    image_gen: ModelConfigSectionResponse
+    image_gen_fallback_to_llm: bool = False
+
+
+class ProviderConfigUpdate(BaseModel):
+    """更新单个供应商配置"""
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model_id: Optional[str] = None
+
+
+class ModelConfigSectionUpdate(BaseModel):
+    """更新模型配置段落"""
+    active_provider: Optional[str] = None
+    providers: Optional[Dict[str, ProviderConfigUpdate]] = None
+
+
+class SystemConfigUpdateRequest(BaseModel):
+    """系统配置更新请求"""
+    text_llm: Optional[ModelConfigSectionUpdate] = None
+    image_gen: Optional[ModelConfigSectionUpdate] = None

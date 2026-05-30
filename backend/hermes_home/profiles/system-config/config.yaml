@@ -1,0 +1,25 @@
+# System Default Configuration
+# 所有 Hermes Agent 的默认配置，当 Agent 自身未配置时使用此处的值
+
+profile_id: system-config
+name: 系统默认配置
+description: 所有 Agent 的默认配置模板
+
+# 模型配置
+model: default
+temperature: 0.7
+max_tokens: 4096
+max_iterations: 20
+
+# 默认工具集
+enabled_toolsets:
+  - patent
+
+# 默认工具（空，由各 Agent 自行配置）
+enabled_tools: []
+
+# 记忆配置
+memory:
+  short_term: true
+  long_term: false
+  knowledge_base: false

@@ -27,9 +27,10 @@ interface ToolStructure {
 interface SkillStructure {
   name: string;
   description: string;
-  proficiency: number;
-  keywords: string[];
   version: string;
+  tags: string[];
+  enabled: boolean;
+  file: string;
   injection_method: string;
   injection_description: string;
   template: string;
@@ -264,8 +265,10 @@ export default function RelatedDetailModal({
                       </code>
                     </div>
                     <div>
-                      <span className="text-slate">熟练度：</span>
-                      <span className="font-medium text-ink">{(structure as SkillStructure).proficiency}</span>
+                      <span className="text-slate">状态：</span>
+                      <span className={`font-medium ${(structure as SkillStructure).enabled ? 'text-green-600' : 'text-slate'}`}>
+                        {(structure as SkillStructure).enabled ? '已启用' : '已禁用'}
+                      </span>
                     </div>
                     <div>
                       <span className="text-slate">注入方式：</span>
@@ -280,14 +283,14 @@ export default function RelatedDetailModal({
                   </div>
                 </div>
 
-                {/* 关键词 */}
-                {(structure as SkillStructure).keywords.length > 0 && (
+                {/* 标签/关键词 */}
+                {((structure as SkillStructure).tags?.length ?? 0) > 0 && (
                   <div className="bg-blue-50 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-ink mb-3">匹配关键词</h4>
+                    <h4 className="text-sm font-semibold text-ink mb-3">标签</h4>
                     <div className="flex flex-wrap gap-2">
-                      {(structure as SkillStructure).keywords.map((kw, i) => (
+                      {(structure as SkillStructure).tags.map((tag, i) => (
                         <span key={i} className="px-2.5 py-1 bg-white border rounded-full text-xs text-blue-700">
-                          {kw}
+                          {tag}
                         </span>
                       ))}
                     </div>

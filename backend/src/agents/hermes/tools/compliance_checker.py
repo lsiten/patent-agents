@@ -2,9 +2,12 @@
 Compliance Checker Tool - 形式合规检查工具
 检查专利文件的格式和形式合规性
 """
+import json
+import re
+from datetime import datetime
 from typing import Any, Dict
 
-from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
+from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
 from src.core.llm_client import get_llm_service, LLMMessage
 
@@ -38,6 +41,27 @@ COMPLIANCE_PROMPT = """你是一位专利形式审查专家。请检查以下专
 }}"""
 
 
+def _extract_json_from_response(text: str) -> Dict[str, Any]:
+    """从 LLM 响应中提取 JSON"""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+    return {}
+
+
 class ComplianceCheckerTool(HermesTool):
     """形式合规检查工具"""
     name = "compliance_checker"
@@ -58,11 +82,44 @@ class ComplianceCheckerTool(HermesTool):
 
     async def execute(self, patent_document: str, **kwargs) -> Dict[str, Any]:
         """执行形式合规检查"""
+        start_time = datetime.now()
         logger.info("Checking formal compliance")
-        llm = get_llm_service()
-        prompt = COMPLIANCE_PROMPT.format(patent_document=patent_document)
-        response = await llm.chat_completion(
-            messages=[LLMMessage(role="user", content=prompt)],
-            temperature=0.2,
-        )
-        return {"compliance_result": response.content, "tool": self.name}
+        
+        try:
+            llm = get_llm_service()
+            prompt = COMPLIANCE_PROMPT.format(patent_document=patent_document)
+            response = await llm.chat_completion(
+                messages=[LLMMessage(role="user", content=prompt)],
+                temperature=0.2,
+            )
+            
+            parsed = _extract_json_from_response(response.content)
+            
+            # 标准化输出数据
+            data = {
+                "compliance_issues": parsed.get("compliance_issues", []),
+                "format_issues": [i for i in parsed.get("compliance_issues", []) 
+                                 if i.get("severity") in ["critical", "high"]],
+                "terminology_issues": [],  # 可从 issues 中按类型筛选
+                "overall_compliance": parsed.get("overall_compliance", "unknown"),
+                "score": parsed.get("score", 0),
+                "summary": parsed.get("summary", ""),
+            }
+            
+            return make_tool_output(
+                tool_name=self.name,
+                data=data,
+                success=True,
+                raw_response=response.content,
+                start_time=start_time,
+            )
+            
+        except Exception as e:
+            logger.error(f"Compliance check failed: {e}")
+            return make_tool_output(
+                tool_name=self.name,
+                data={},
+                success=False,
+                error=str(e),
+                start_time=start_time,
+            )

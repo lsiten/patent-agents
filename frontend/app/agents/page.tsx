@@ -176,7 +176,6 @@ export default function AgentsPage() {
   const [editCron, setEditCron] = useState({ minute: '*', hour: '*', day: '*', month: '*', weekday: '*' });
   const [viewMemory, setViewMemory] = useState<AgentMemory | null>(null);
   const [viewToolSource, setViewToolSource] = useState<AgentTool | null>(null);
-  const [viewSkillSource, setViewSkillSource] = useState<AgentSkill | null>(null);
   const [viewMemoryEntry, setViewMemoryEntry] = useState<MemoryEntry | null>(null);
   const [showHermesChat, setShowHermesChat] = useState(false);
   const [showHermesSkillChat, setShowHermesSkillChat] = useState(false);
@@ -992,17 +991,6 @@ export default function AgentsPage() {
                                     详情
                                   </Button>
                                 )}
-                                {tool.related_files && tool.related_files.length > 0 && selectedAgent && (
-                                  <Button variant="ghost" size="sm" onClick={() => setShowRelatedDetail({
-                                    open: true,
-                                    type: 'tool',
-                                    itemId: tool.id,
-                                    name: tool.name,
-                                  })}>
-                                    <FolderOpen className="w-4 h-4 mr-1" />
-                                    相关文件 ({tool.related_files.length})
-                                  </Button>
-                                )}
                                 {tool.is_hermes && (
                                   <Badge variant="soft" className="bg-cyan-100 text-cyan-700 text-xs">Hermes</Badge>
                                 )}
@@ -1113,12 +1101,6 @@ export default function AgentsPage() {
                               </div>
                             </div>
                             <div className="flex items-center gap-2 ml-4">
-                              {(skill.source_code || skill.source_markdown) && (
-                                <Button variant="ghost" size="sm" onClick={() => setViewSkillSource(skill)}>
-                                  <Code className="w-4 h-4 mr-1" />
-                                  查看代码
-                                </Button>
-                              )}
                               {selectedAgent && (
                                 <Button variant="ghost" size="sm" onClick={() => setShowRelatedDetail({
                                   open: true,
@@ -1128,17 +1110,6 @@ export default function AgentsPage() {
                                 })}>
                                   <Info className="w-4 h-4 mr-1" />
                                   详情
-                                </Button>
-                              )}
-                              {skill.related_files && skill.related_files.length > 0 && selectedAgent && (
-                                <Button variant="ghost" size="sm" onClick={() => setShowRelatedDetail({
-                                  open: true,
-                                  type: 'skill',
-                                  itemId: skill.id,
-                                  name: skill.name,
-                                })}>
-                                  <FolderOpen className="w-4 h-4 mr-1" />
-                                  相关文件 ({skill.related_files.length})
                                 </Button>
                               )}
                               <Button
@@ -1706,39 +1677,6 @@ export default function AgentsPage() {
             </div>
             <div className="mt-6 pt-4 border-t border-hairline flex justify-end">
               <Button size="sm" onClick={() => setViewToolSource(null)}>
-                关闭
-              </Button>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Skill Source Code Modal */}
-      {viewSkillSource && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <Card className="w-full max-w-3xl p-6 relative animate-in fade-in zoom-in-95 max-h-[85vh] flex flex-col">
-            <button
-              onClick={() => setViewSkillSource(null)}
-              className="absolute top-4 right-4 p-1 hover:bg-slate-100 rounded transition-colors"
-            >
-              <X className="w-5 h-5 text-slate" />
-            </button>
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-xl bg-brand-green/10 flex items-center justify-center">
-                <Code className="w-5 h-5 text-brand-green" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-ink">{viewSkillSource.name}</h3>
-                <p className="text-sm text-slate">技能源代码</p>
-              </div>
-            </div>
-            <div className="overflow-auto flex-1">
-              <CodeBlock language="typescript">
-                {viewSkillSource.source_markdown || viewSkillSource.source_code}
-              </CodeBlock>
-            </div>
-            <div className="mt-6 pt-4 border-t border-hairline flex justify-end">
-              <Button size="sm" onClick={() => setViewSkillSource(null)}>
                 关闭
               </Button>
             </div>

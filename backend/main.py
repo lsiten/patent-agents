@@ -69,7 +69,7 @@ async def startup_event():
         from src.api.routes import restore_stores_from_db
         await restore_stores_from_db()
 
-        # Hermes 专利工具由 hermes_agent_service 按需注册（lazy init）
+        # Hermes 专利工具由 agent_config 模块按需注册（lazy init）
         logger.info("专利智脑服务启动成功!", port=settings.port)
 
     except Exception as e:

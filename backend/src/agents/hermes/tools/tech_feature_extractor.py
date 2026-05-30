@@ -2,9 +2,12 @@
 Tech Feature Extractor Tool - 技术特征提取工具
 从技术描述中提取关键技术特征和创新点
 """
+import json
+import re
+from datetime import datetime
 from typing import Any, Dict
 
-from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
+from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
 from src.core.llm_client import get_llm_service, LLMMessage
 
@@ -26,8 +29,30 @@ EXTRACT_PROMPT = """你是一位专利技术分析专家。请从以下技术描
     }}
   ],
   "core_innovation": "核心创新点总结",
-  "technical_problem": "解决的技术问题"
+  "technical_problem": "解决的技术问题",
+  "beneficial_effects": ["有益效果1", "有益效果2"]
 }}"""
+
+
+def _extract_json_from_response(text: str) -> Dict[str, Any]:
+    """从 LLM 响应中提取 JSON"""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+    return {}
 
 
 class TechFeatureExtractorTool(HermesTool):
@@ -50,11 +75,41 @@ class TechFeatureExtractorTool(HermesTool):
 
     async def execute(self, tech_description: str, **kwargs) -> Dict[str, Any]:
         """执行技术特征提取"""
+        start_time = datetime.now()
         logger.info("Extracting technical features from description")
-        llm = get_llm_service()
-        prompt = EXTRACT_PROMPT.format(tech_description=tech_description)
-        response = await llm.chat_completion(
-            messages=[LLMMessage(role="user", content=prompt)],
-            temperature=0.3,
-        )
-        return {"features_analysis": response.content, "tool": self.name}
+        
+        try:
+            llm = get_llm_service()
+            prompt = EXTRACT_PROMPT.format(tech_description=tech_description)
+            response = await llm.chat_completion(
+                messages=[LLMMessage(role="user", content=prompt)],
+                temperature=0.3,
+            )
+            
+            parsed = _extract_json_from_response(response.content)
+            
+            # 标准化输出数据
+            data = {
+                "features": parsed.get("features", []),
+                "core_innovation": parsed.get("core_innovation", ""),
+                "technical_problem": parsed.get("technical_problem", ""),
+                "beneficial_effects": parsed.get("beneficial_effects", []),
+            }
+            
+            return make_tool_output(
+                tool_name=self.name,
+                data=data,
+                success=True,
+                raw_response=response.content,
+                start_time=start_time,
+            )
+            
+        except Exception as e:
+            logger.error(f"Tech feature extraction failed: {e}")
+            return make_tool_output(
+                tool_name=self.name,
+                data={},
+                success=False,
+                error=str(e),
+                start_time=start_time,
+            )

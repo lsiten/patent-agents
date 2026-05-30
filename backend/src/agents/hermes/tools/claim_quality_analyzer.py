@@ -2,9 +2,12 @@
 Claim Quality Analyzer Tool - 权利要求质量分析工具
 分析权利要求的清楚性、保护范围和撰写质量
 """
+import json
+import re
+from datetime import datetime
 from typing import Any, Dict
 
-from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
+from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
 from src.core.llm_client import get_llm_service, LLMMessage
 
@@ -43,6 +46,27 @@ QUALITY_PROMPT = """你是一位资深专利审查员。请分析以下权利要
 }}"""
 
 
+def _extract_json_from_response(text: str) -> Dict[str, Any]:
+    """从 LLM 响应中提取 JSON"""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+    return {}
+
+
 class ClaimQualityAnalyzerTool(HermesTool):
     """权利要求质量分析工具"""
     name = "claim_quality_analyzer"
@@ -63,11 +87,46 @@ class ClaimQualityAnalyzerTool(HermesTool):
 
     async def execute(self, claims: str, **kwargs) -> Dict[str, Any]:
         """执行权利要求质量分析"""
+        start_time = datetime.now()
         logger.info("Analyzing claim quality")
-        llm = get_llm_service()
-        prompt = QUALITY_PROMPT.format(claims=claims)
-        response = await llm.chat_completion(
-            messages=[LLMMessage(role="user", content=prompt)],
-            temperature=0.2,
-        )
-        return {"quality_analysis": response.content, "tool": self.name}
+        
+        try:
+            llm = get_llm_service()
+            prompt = QUALITY_PROMPT.format(claims=claims)
+            response = await llm.chat_completion(
+                messages=[LLMMessage(role="user", content=prompt)],
+                temperature=0.2,
+            )
+            
+            parsed = _extract_json_from_response(response.content)
+            
+            # 标准化输出数据
+            data = {
+                "clarity_score": parsed.get("clarity_score", 0),
+                "conciseness_score": parsed.get("conciseness_score", 0),
+                "support_score": parsed.get("support_score", 0),
+                "breadth_score": parsed.get("breadth_score", 0),
+                "hierarchy_score": parsed.get("hierarchy_score", 0),
+                "overall_quality": parsed.get("overall_quality", 0),
+                "scope_analysis": parsed.get("recommendation", ""),
+                "issues": parsed.get("issues", []),
+                "strengths": parsed.get("strengths", []),
+            }
+            
+            return make_tool_output(
+                tool_name=self.name,
+                data=data,
+                success=True,
+                raw_response=response.content,
+                start_time=start_time,
+            )
+            
+        except Exception as e:
+            logger.error(f"Claim quality analysis failed: {e}")
+            return make_tool_output(
+                tool_name=self.name,
+                data={},
+                success=False,
+                error=str(e),
+                start_time=start_time,
+            )

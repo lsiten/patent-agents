@@ -43,8 +43,8 @@ function DispatchEntry({ entry }: { entry: AgentLogEntry }) {
 
 function ThinkingEntry({ entry }: { entry: AgentLogEntry }) {
   return (
-    <div className="pl-6 border-l-2 border-slate-600/40">
-      <span className="text-slate-300 italic text-xs">
+    <div className="pl-6 border-l-2 border-on-dark-muted/40">
+      <span className="text-on-dark-muted italic text-xs">
         💭 {entry.message}
       </span>
     </div>
@@ -81,7 +81,7 @@ function ContentEntry({ entry }: { entry: AgentLogEntry }) {
   return (
     <div className="pl-6 border-l-2 border-blue-500/40">
       <span className="text-blue-300 text-xs">📄 输出:</span>
-      <p className="text-on-dark text-sm mt-0.5 whitespace-pre-wrap line-clamp-4">
+      <p className="text-white text-sm mt-0.5 whitespace-pre-wrap line-clamp-4">
         {entry.content}
       </p>
     </div>
@@ -180,7 +180,7 @@ export function AgentTerminalLog({ entries, className }: AgentTerminalLogProps) 
               'px-2.5 py-1 rounded-full text-xs font-medium transition-colors',
               activeFilter === 'all'
                 ? 'bg-brand-green text-ink'
-                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                : 'bg-surface-soft text-slate hover:bg-hairline'
             )}
           >
             全部
@@ -193,7 +193,7 @@ export function AgentTerminalLog({ entries, className }: AgentTerminalLogProps) 
                 'px-2.5 py-1 rounded-full text-xs font-medium transition-colors inline-flex items-center gap-1',
                 activeFilter === name
                   ? 'bg-brand-green text-ink'
-                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  : 'bg-surface-soft text-slate hover:bg-hairline'
               )}
             >
               <span>{getAgentIcon(name)}</span>
@@ -226,7 +226,7 @@ export function AgentTerminalLog({ entries, className }: AgentTerminalLogProps) 
                 {shouldShowHeader(entry, index) && (
                   <div className="flex items-center gap-2 mt-3 mb-1 first:mt-0">
                     <span className="text-lg">{getAgentIcon(entry.agent_name)}</span>
-                    <span className="text-on-dark font-semibold text-xs">
+                    <span className="text-white font-semibold text-xs">
                       {entry.agent_name}
                     </span>
                     <span className="text-on-dark-muted text-micro">

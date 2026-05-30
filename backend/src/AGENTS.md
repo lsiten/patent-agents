@@ -1,6 +1,6 @@
 ## backend/src/ — Module Map
 
-### Structure (9 modules)
+### Structure (8 modules)
 ```
 src/
 ├── api/          → REST routes, request/response models, auth
@@ -8,8 +8,7 @@ src/
 ├── core/         → Foundation: config, DI, events, tasks, middleware, exceptions
 ├── models/       → SQLAlchemy ORM models + Pydantic schemas
 ├── data_sources/ → External patent DB connectors, web scraping
-├── document_gen/ → Patent doc templates (DOCX/PDF), LaTeX generation
-├── knowledge/    → Vector store, retrieval, knowledge base
+├── knowledge/    → Vector store, retrieval, knowledge base, docx parser
 ├── prompts/      → Prompt templates for each agent role
 └── tools/        → Agent tool definitions (search, db, web)
 ```
@@ -17,7 +16,7 @@ src/
 ### Dependency Direction
 ```
 api ← core ← agents ← (hermes, profiles, service)
-                    ↘ tools, prompts, knowledge, data_sources, document_gen
+                    ↘ tools, prompts, knowledge, data_sources
 ```
 **core** has zero internal deps — everything depends on it.
 
