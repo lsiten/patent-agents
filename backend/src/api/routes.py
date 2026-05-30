@@ -1593,8 +1593,11 @@ async def update_organization_tree(tree: OrgNodeResponse) -> OrganizationUpdateR
 # ============ 对话会话相关 ============
 
 def _get_brainstorm_agent():
-    from src.agents import get_agent_factory as _f
-    return _f().create_agent("patent.ceo.v1")
+    """获取 CEO Agent 实例（使用真实 hermes-agent AIAgent）"""
+    return _hermes_service.create_agent_instance(
+        profile_id="patent.ceo.v1",
+        session_id=f"conversation_{uuid.uuid4().hex[:8]}",
+    )
 
 
 @router.post("/conversations", response_model=ConversationDetail, status_code=status.HTTP_201_CREATED)
@@ -1727,20 +1730,12 @@ USER: {content}
 
 使用友好的 Markdown 格式回复。
 """
-        response = await agent.run(prompt)
-        response_text = str(response)
+        # 使用真实 hermes-agent AIAgent（run_conversation 是同步方法）
+        response = await asyncio.to_thread(agent.run_conversation, prompt)
+        response_text = str(response) if response else ""
 
-        # 收集 Hermes agent 的工具调用历史
+        # hermes-agent 的工具调用记录在 agent 内部，无需手动收集
         tool_calls_data = []
-        if hasattr(agent, '_context') and agent._context and agent._context.tool_results:
-            for tr in agent._context.tool_results:
-                tool_calls_data.append({
-                    "name": tr.name,
-                    "parameters": tr.parameters,
-                    "result": tr.result if tr.success else None,
-                    "success": tr.success,
-                    "error": tr.error,
-                })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 响应失败: {str(e)}")
 
@@ -1857,16 +1852,17 @@ USER: {content}
         final_content = ""
 
         try:
-            async for event in agent.run_stream(prompt):
+            # 使用真实 hermes-agent 流式对话
+            async for event in _hermes_service.run_conversation_stream(
+                profile_id="patent.ceo.v1",
+                user_input=prompt,
+                session_id=f"conv_{conv_id}",
+            ):
                 event_type = event["type"]
                 event_data = event["data"]
 
                 if event_type == "thinking":
                     yield f"event: thinking\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
-
-                elif event_type == "skill_use":
-                    skill_uses_data.append(event_data)
-                    yield f"event: skill_use\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
 
                 elif event_type == "tool_call_start":
                     yield f"event: tool_call_start\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
@@ -1877,7 +1873,6 @@ USER: {content}
 
                 elif event_type == "content":
                     final_content = event_data.get("content", "")
-                    # 检查推荐标记
                     has_recommendation = "[CREATE_PATENT_RECOMMENDATION]" in final_content
                     clean_content = final_content.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
                     yield f"event: content\ndata: {_json.dumps({'content': clean_content, 'has_recommendation': has_recommendation}, ensure_ascii=False)}\n\n"
