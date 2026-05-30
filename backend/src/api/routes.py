@@ -1824,12 +1824,181 @@ async def get_dashboard_stats():
 # ============ Agent 文件浏览与相关文件查看 ============
 import os as _os
 import stat as _stat
+import ast as _ast
+import re as _re
+
+
+def _extract_tool_structure(source_code: str | None, tool_name: str) -> dict:
+    """从工具源代码中提取结构元数据"""
+    if not source_code:
+        return {
+            "class_name": None,
+            "description": None,
+            "parameters": [],
+            "methods": [],
+            "file_path": _KNOWN_TOOL_IMPL_FILES.get(tool_name),
+            "template": _get_tool_template(),
+        }
+
+    try:
+        tree = _ast.parse(source_code)
+    except SyntaxError:
+        return {"class_name": None, "parameters": [], "methods": [], "template": _get_tool_template()}
+
+    class_name = None
+    description = None
+    parameters = []
+    methods = []
+
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.ClassDef):
+            # 找到 HermesTool 子类
+            for base in node.bases:
+                base_name = ""
+                if isinstance(base, _ast.Name):
+                    base_name = base.id
+                elif isinstance(base, _ast.Attribute):
+                    base_name = base.attr
+                if "Tool" in base_name:
+                    class_name = node.name
+                    # 提取 docstring
+                    if (node.body and isinstance(node.body[0], _ast.Expr)
+                            and isinstance(node.body[0].value, _ast.Constant)):
+                        description = node.body[0].value.value
+
+                    # 提取方法
+                    for item in node.body:
+                        if isinstance(item, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                            args_list = [
+                                a.arg for a in item.args.args if a.arg != "self"
+                            ]
+                            methods.append({
+                                "name": item.name,
+                                "args": args_list,
+                                "is_async": isinstance(item, _ast.AsyncFunctionDef),
+                            })
+                    break
+
+    # 提取 HermesToolParameter 定义
+    param_pattern = _re.compile(
+        r'"(\w+)":\s*HermesToolParameter\(\s*'
+        r'type="(\w+)",\s*description="([^"]*)"',
+        _re.DOTALL,
+    )
+    for match in param_pattern.finditer(source_code):
+        parameters.append({
+            "name": match.group(1),
+            "type": match.group(2),
+            "description": match.group(3),
+        })
+
+    return {
+        "class_name": class_name,
+        "description": description,
+        "parameters": parameters,
+        "methods": methods,
+        "file_path": _KNOWN_TOOL_IMPL_FILES.get(tool_name),
+        "template": _get_tool_template(),
+    }
+
+
+def _extract_skill_structure(profile_skill, skill_meta: dict) -> dict:
+    """从技能数据中提取结构元数据"""
+    return {
+        "name": skill_meta.get("name", ""),
+        "description": skill_meta.get("description", ""),
+        "proficiency": profile_skill.proficiency if profile_skill else 0.8,
+        "keywords": profile_skill.keywords if profile_skill else [],
+        "version": skill_meta.get("version", "1.0.0"),
+        "injection_method": "system_prompt",
+        "injection_description": "技能信息被注入到 Agent 的 system_prompt 中，引导 LLM 在回复时运用该技能",
+        "template": _get_skill_template(),
+    }
+
+
+def _get_tool_template() -> str:
+    """返回创建新工具的模板代码"""
+    return '''"""
+{工具描述}
+"""
+from typing import Any, Dict
+
+from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
+from src.core.logging import get_logger
+from src.core.llm_client import get_llm_service, LLMMessage
+
+logger = get_logger(__name__)
+
+
+class {ClassName}Tool(HermesTool):
+    """{工具描述}"""
+    name = "{tool_name}"
+    description = "{工具功能描述}"
+
+    def _build_definition(self) -> HermesToolDefinition:
+        return HermesToolDefinition(
+            name=self.name,
+            description=self.description,
+            parameters={
+                "param1": HermesToolParameter(
+                    type="string",
+                    description="参数1描述",
+                    required=True,
+                ),
+            },
+        )
+
+    async def execute(self, param1: str, **kwargs) -> Dict[str, Any]:
+        """执行工具逻辑"""
+        logger.info("Executing tool", tool=self.name)
+        # 实现工具逻辑...
+        return {"result": "...", "tool": self.name}
+
+
+def register(factory) -> None:
+    """注册此工具到 Agent 工厂"""
+    factory.register_tool_class("{tool_name}", {ClassName}Tool)
+'''
+
+
+def _get_skill_template() -> str:
+    """返回创建新技能的结构说明"""
+    return '''{
+  "name": "技能名称",
+  "description": "技能详细描述 — 说明该技能能做什么",
+  "proficiency": 0.85,  // 熟练度 0.0-1.0
+  "keywords": ["关键词1", "关键词2"]  // 用于匹配任务的关键词
+}
+
+// 技能工作原理：
+// 1. 技能定义被添加到 AgentProfile.skills 列表
+// 2. Agent 创建时，技能信息被注入到 system_prompt
+// 3. LLM 根据技能描述在回复中运用相应能力
+// 4. Agent 可以在回复中用 <skill_use> 标记声明使用了哪些技能
+'''
 
 _KNOWN_TOOL_IMPL_FILES: dict[str, str] = {
-    "task_planner": "backend/src/agents/hermes/tools/base.py",
-    "quality_assessor": "backend/src/agents/hermes/tools/base.py",
-    "report_generator": "backend/src/agents/hermes/tools/base.py",
-    "risk_analyzer": "backend/src/agents/hermes/tools/base.py",
+    "task_planner": "backend/src/agents/hermes/tools/task_planner.py",
+    "quality_assessor": "backend/src/agents/hermes/tools/quality_assessor.py",
+    "report_generator": "backend/src/agents/hermes/tools/report_generator.py",
+    "risk_analyzer": "backend/src/agents/hermes/tools/risk_analyzer.py",
+    "ipc_classifier": "backend/src/agents/hermes/tools/ipc_classifier.py",
+    "tech_feature_extractor": "backend/src/agents/hermes/tools/tech_feature_extractor.py",
+    "scenario_miner": "backend/src/agents/hermes/tools/scenario_miner.py",
+    "patent_search": "backend/src/agents/hermes/tools/patent_search.py",
+    "similarity_analyzer": "backend/src/agents/hermes/tools/similarity_analyzer.py",
+    "patentability_scorer": "backend/src/agents/hermes/tools/patentability_scorer.py",
+    "claim_drafter": "backend/src/agents/hermes/tools/claim_drafter.py",
+    "description_writer": "backend/src/agents/hermes/tools/description_writer.py",
+    "terminology_normalizer": "backend/src/agents/hermes/tools/terminology_normalizer.py",
+    "support_checker": "backend/src/agents/hermes/tools/support_checker.py",
+    "compliance_checker": "backend/src/agents/hermes/tools/compliance_checker.py",
+    "claim_quality_analyzer": "backend/src/agents/hermes/tools/claim_quality_analyzer.py",
+    "support_verifier": "backend/src/agents/hermes/tools/support_verifier.py",
+    "oa_predictor": "backend/src/agents/hermes/tools/oa_predictor.py",
+    "creative_thinking": "backend/src/agents/hermes/tools/creative_thinking.py",
+    "patent_strategy_guide": "backend/src/agents/hermes/tools/patent_strategy_guide.py",
+    "agent_selector": "backend/src/agents/hermes/tools/agent_selector.py",
 }
 
 
@@ -1869,7 +2038,10 @@ async def get_agent_related_files(
 
     if tool_id is not None:
         if tool_id not in profile.tool_config.enabled_tools:
-            raise HTTPException(status_code=404, detail=f"工具未找到: {tool_id}")
+            # 也检查 override store 中用户添加的工具
+            added_tools = _override_store.get_added_tools(agent_id)
+            if not any(t.get("id") == tool_id or t.get("name") == tool_id for t in added_tools):
+                raise HTTPException(status_code=404, detail=f"工具未找到: {tool_id}")
 
         tools = _agent_tools_from_profile(profile)
         tool = next((t for t in tools if t["id"] == tool_id), None)
@@ -1877,11 +2049,15 @@ async def get_agent_related_files(
         rel_path = _KNOWN_TOOL_IMPL_FILES.get(tool_id)
         source_code = _read_file(rel_path) if rel_path else None
 
+        # 提取工具结构元数据
+        structure_info = _extract_tool_structure(source_code, tool_id)
+
         return {
             "type": "tool",
             "name": tool["name"] if tool else tool_id,
             "source_code": source_code,
             "source_markdown": None,
+            "structure": structure_info,
             "files": [{"path": rel_path, "content": source_code}] if rel_path and source_code else [],
         }
 
@@ -1889,12 +2065,19 @@ async def get_agent_related_files(
         skills = _agent_skills_from_profile(profile)
         skill_meta = next((s for s in skills if s["id"] == skill_id), None)
         if skill_meta is None:
-            raise HTTPException(status_code=404, detail=f"技能未找到: {skill_id}")
+            # 也检查 override store 中用户添加的技能
+            added_skills = _override_store.get_added_skills(agent_id)
+            skill_meta = next((s for s in added_skills if s.get("id") == skill_id), None)
+            if skill_meta is None:
+                raise HTTPException(status_code=404, detail=f"技能未找到: {skill_id}")
 
         # 找到原始的 AgentSkill 对象以获取完整信息（熟练度、关键词等）
         profile_skill: AgentSkill | None = next(
             (s for s in profile.skills if s.name == skill_id), None
         )
+
+        # 结构元数据
+        structure_info = _extract_skill_structure(profile_skill, skill_meta)
 
         markdown_lines = [
             f"# {skill_meta['name']}",
@@ -1905,6 +2088,14 @@ async def get_agent_related_files(
             "",
             skill_meta["description"],
             "",
+            "## 工作原理",
+            "",
+            "技能通过以下方式影响 Agent 行为：",
+            "1. 技能定义被添加到 `AgentProfile.skills` 列表",
+            "2. Agent 创建时，所有技能信息注入到 `system_prompt`",
+            "3. LLM 根据技能描述和关键词在回复中运用相应能力",
+            "4. Agent 可用 `<skill_use>` 标记声明使用了哪些技能",
+            "",
         ]
         tags = skill_meta.get("tags", [])
         if tags:
@@ -1913,6 +2104,18 @@ async def get_agent_related_files(
             for tag in tags:
                 markdown_lines.append(f"- {tag}")
             markdown_lines.append("")
+
+        markdown_lines.append("## 创建新技能所需字段")
+        markdown_lines.append("")
+        markdown_lines.append("```json")
+        markdown_lines.append('{')
+        markdown_lines.append(f'  "name": "{skill_meta["name"]}",')
+        markdown_lines.append(f'  "description": "{skill_meta["description"]}",')
+        markdown_lines.append(f'  "proficiency": {profile_skill.proficiency if profile_skill else 0.8},')
+        kw_str = str(profile_skill.keywords if profile_skill else [])
+        markdown_lines.append(f'  "keywords": {kw_str}')
+        markdown_lines.append('}')
+        markdown_lines.append("```")
 
         source_markdown = "\n".join(markdown_lines)
 
@@ -1924,6 +2127,7 @@ async def get_agent_related_files(
             "name": skill_meta["name"],
             "source_code": source_code,
             "source_markdown": source_markdown,
+            "structure": structure_info,
             "files": [
                 {
                     "path": f"skills/{skill_meta['name']}.md",
@@ -1940,97 +2144,265 @@ import textwrap as _textwrap
 
 @router.post("/agents/{agent_id}/tools/chat-generate")
 async def chat_generate_tool(agent_id: str, body: dict):
-    """通过LLM生成Hermes工具代码（返回模板代码）"""
+    """通过 LLM 对话生成标准 HermesTool 子类代码"""
     _require_agent_profile(agent_id)
     name = body.get("name", "").strip()
     description = body.get("description", "").strip()
     parameters = body.get("parameters") or {}
 
-    # 根据参数生成工具函数签名
-    func_params = ", ".join(
-        f'{k}: str = None' for k in parameters.keys()
-    ) or "**kwargs"
+    if not name or not description:
+        raise HTTPException(status_code=400, detail="工具名称和描述不能为空")
 
-    param_lines = ""
-    for k, v in parameters.items():
-        param_lines += f"    {k}: {v or '参数描述'}\n"
+    # 使用 LLM 生成工具代码
+    from src.core.llm_client import get_llm_service, LLMMessage as _LLMMsg
 
-    param_json_lines = ""
-    for k in parameters:
-        param_json_lines += f'        "{k}": {k},\n'
+    llm = get_llm_service()
 
-    code = f'''\"\"\"
-{description}
+    # 构建 param 描述
+    param_desc = "\n".join(f"  - {k}: {v}" for k, v in parameters.items()) if parameters else "  （无额外参数）"
 
-Args:
-{param_lines}"""
-import json
+    prompt = f"""你是一个 Python 代码生成专家。请生成一个符合 Hermes Agent 框架的工具类。
+
+要求：
+- 工具名称: {name}
+- 功能描述: {description}
+- 输入参数:
+{param_desc}
+
+必须严格遵循以下模板结构（不要添加任何额外的导入或代码）：
+
+```python
+\"\"\"
+{{工具描述}}
+\"\"\"
 from typing import Any, Dict
 
+from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
+from src.core.logging import get_logger
+from src.core.llm_client import get_llm_service, LLMMessage
 
-async def run({func_params}) -> Dict[str, Any]:
-    """
-    {description}
-    """
-    # --- 在此实现工具逻辑 ---
-    result = {{
-        "success": True,
-        "message": f"工具 {name} 执行成功",
-        "data": {{
-{param_json_lines}        }},
-    }}
-    return result
+logger = get_logger(__name__)
+
+
+class {{ClassName}}Tool(HermesTool):
+    \"\"\"{{工具描述}}\"\"\"
+    name = "{{tool_name}}"
+    description = "{{功能描述}}"
+
+    def _build_definition(self) -> HermesToolDefinition:
+        return HermesToolDefinition(
+            name=self.name,
+            description=self.description,
+            parameters={{
+                # 每个参数都是 HermesToolParameter
+            }},
+        )
+
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        \"\"\"执行工具逻辑\"\"\"
+        logger.info("Executing tool", tool=self.name)
+        # 实现逻辑...
+        return {{"result": "...", "tool": self.name}}
+
+
+def register(factory) -> None:
+    factory.register_tool_class("{{tool_name}}", {{ClassName}}Tool)
+```
+
+请生成完整的工具代码，只输出 Python 代码，不要输出其他内容。确保：
+1. 类名使用 CamelCase（如 PatentSearch → PatentSearchTool）
+2. 参数使用 HermesToolParameter 定义（type, description, required）
+3. execute 方法实现真正的功能逻辑（可调用 LLM）
+4. 包含 register 函数
+"""
+
+    try:
+        response = await llm.chat_completion(
+            messages=[_LLMMsg(role="user", content=prompt)],
+            temperature=0.3,
+        )
+        generated_code = response.content or ""
+
+        # 清理可能的 markdown 包裹
+        if "```python" in generated_code:
+            generated_code = generated_code.split("```python", 1)[1]
+            if "```" in generated_code:
+                generated_code = generated_code.rsplit("```", 1)[0]
+        elif "```" in generated_code:
+            parts = generated_code.split("```")
+            if len(parts) >= 3:
+                generated_code = parts[1]
+
+        generated_code = generated_code.strip()
+
+        return {
+            "success": True,
+            "name": name,
+            "code": generated_code,
+            "message": "工具代码已通过 LLM 生成，请验证后注册",
+        }
+    except Exception as e:
+        # 降级：生成模板代码
+        class_name = "".join(word.capitalize() for word in name.split("_"))
+        param_defs = ""
+        param_args = ""
+        for k, v in parameters.items():
+            param_defs += f'''                "{k}": HermesToolParameter(\n                    type="string",\n                    description="{v or k}",\n                    required=True,\n                ),\n'''
+            param_args += f"    {k}: str, "
+
+        code = f'''"""
+{description}
+"""
+from typing import Any, Dict
+
+from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
+from src.core.logging import get_logger
+from src.core.llm_client import get_llm_service, LLMMessage
+
+logger = get_logger(__name__)
+
+
+class {class_name}Tool(HermesTool):
+    """{description}"""
+    name = "{name}"
+    description = "{description}"
+
+    def _build_definition(self) -> HermesToolDefinition:
+        return HermesToolDefinition(
+            name=self.name,
+            description=self.description,
+            parameters={{
+{param_defs}            }},
+        )
+
+    async def execute(self, {param_args}**kwargs) -> Dict[str, Any]:
+        """执行工具逻辑"""
+        logger.info("Executing tool", tool=self.name)
+        llm = get_llm_service()
+        response = await llm.chat_completion(
+            messages=[LLMMessage(role="user", content=f"{description}")],
+            temperature=0.3,
+        )
+        return {{"result": response.content, "tool": self.name}}
+
+
+def register(factory) -> None:
+    factory.register_tool_class("{name}", {class_name}Tool)
 '''
-
-    return {
-        "success": True,
-        "name": name,
-        "code": code,
-        "message": "工具代码已生成",
-    }
+        return {
+            "success": True,
+            "name": name,
+            "code": code,
+            "message": f"LLM 生成失败({str(e)[:50]})，已使用模板代码",
+        }
 
 
 @router.post("/agents/{agent_id}/skills/chat-generate")
 async def chat_generate_skill(agent_id: str, body: dict):
-    """通过LLM生成Hermes技能数据"""
+    """通过 LLM 对话生成技能定义"""
     _require_agent_profile(agent_id)
-    name = body.get("name", "").strip() or "auto_skill"
+    name = body.get("name", "").strip()
     description = body.get("description", "").strip()
-    parameters = body.get("parameters") or {}
 
-    # 生成技能元数据
-    skill_data = {
-        "name": name,
-        "description": description,
-        "proficiency": 5,
-        "keywords": [w.strip() for w in description.replace(",", " ").split() if len(w.strip()) > 1][:5],
-    }
+    if not description:
+        raise HTTPException(status_code=400, detail="技能描述不能为空")
 
-    # 生成技能内容
-    generated_content = f'''# {name}
+    # 使用 LLM 生成技能元数据
+    from src.core.llm_client import get_llm_service, LLMMessage as _LLMMsg
+
+    llm = get_llm_service()
+
+    prompt = f"""你是一个专利代理领域的 AI Agent 技能设计专家。
+
+请根据以下信息设计一个 Agent 技能：
+- 技能名称: {name or '（请根据描述自动命名）'}
+- 技能描述: {description}
+
+请输出 JSON 格式（不要输出其他内容）：
+{{
+  "name": "技能名称（2-6个中文字）",
+  "description": "技能的详细功能描述（一句话概括该技能能做什么）",
+  "proficiency": 0.85,
+  "keywords": ["关键词1", "关键词2", "关键词3", "keyword_en"]
+}}
+
+要求：
+1. name 简洁有力
+2. description 明确描述技能的作用
+3. proficiency 在 0.7-0.95 之间
+4. keywords 包含 3-6 个关键词（中英文混合），用于任务匹配
+"""
+
+    try:
+        response = await llm.chat_completion(
+            messages=[_LLMMsg(role="user", content=prompt)],
+            temperature=0.4,
+        )
+        content = response.content or ""
+
+        # 解析 JSON
+        import json as _json_parse
+        # 清理 markdown 包裹
+        if "```json" in content:
+            content = content.split("```json", 1)[1].split("```", 1)[0]
+        elif "```" in content:
+            content = content.split("```", 1)[1].split("```", 1)[0]
+
+        skill_data = _json_parse.loads(content.strip())
+
+        # 确保字段完整
+        skill_data.setdefault("name", name or "auto_skill")
+        skill_data.setdefault("description", description)
+        skill_data.setdefault("proficiency", 0.85)
+        skill_data.setdefault("keywords", [])
+
+        # 生成 Markdown 内容
+        generated_content = f"""# {skill_data['name']}
 
 ## 概述
-{description}
+{skill_data['description']}
 
 ## 配置
-- 名称: {name}
-- 熟练度: 5
-- 关键词: {", ".join(skill_data["keywords"])}
+- 名称: {skill_data['name']}
+- 熟练度: {skill_data['proficiency']}
+- 关键词: {', '.join(skill_data['keywords'])}
 
-## 参数
-{chr(10).join(f'- {k}: {v}' for k, v in parameters.items()) if parameters else "（无参数）"}
+## 工作原理
+该技能将被注入到 Agent 的 system_prompt 中：
+1. 技能描述告诉 LLM 该 Agent 具备此能力
+2. 关键词用于任务路由时匹配
+3. 熟练度影响 Agent 在该领域的置信度
 
-## 实现说明
-该技能通过AI对话自动生成，请在Agent配置中进一步编辑完善。
-'''
+## 使用场景
+当用户输入包含以下关键词时，Agent 会自动运用该技能：
+{chr(10).join(f'- {kw}' for kw in skill_data['keywords'])}
+"""
 
-    return {
-        "success": True,
-        "name": name,
-        "skill_data": skill_data,
-        "generated_content": generated_content,
-        "message": "技能已生成",
-    }
+        return {
+            "success": True,
+            "name": skill_data["name"],
+            "skill_data": skill_data,
+            "generated_content": generated_content,
+            "message": "技能已通过 LLM 生成，请确认后添加",
+        }
+    except Exception as e:
+        # 降级：手动生成
+        keywords = [w.strip() for w in description.replace(",", " ").split() if len(w.strip()) > 1][:5]
+        skill_data = {
+            "name": name or "auto_skill",
+            "description": description,
+            "proficiency": 0.85,
+            "keywords": keywords,
+        }
+        generated_content = f"# {skill_data['name']}\n\n{description}\n\n关键词: {', '.join(keywords)}"
+
+        return {
+            "success": True,
+            "name": skill_data["name"],
+            "skill_data": skill_data,
+            "generated_content": generated_content,
+            "message": f"LLM 生成失败({str(e)[:50]})，已使用基础模板",
+        }
 
 
 @router.post("/agents/{agent_id}/tools/validate")
@@ -2063,7 +2435,7 @@ async def validate_agent_tool(agent_id: str, body: dict):
 
 @router.post("/agents/{agent_id}/tools/hot-plug")
 async def hot_plug_agent_tool(agent_id: str, body: dict):
-    """热插拔注册新的Hermes工具"""
+    """热插拔注册新的 Hermes 工具（持久化到 override store + 写入文件）"""
     profile = _require_agent_profile(agent_id)
     name = body.get("name", "").strip()
     description = body.get("description", "").strip()
@@ -2080,25 +2452,39 @@ async def hot_plug_agent_tool(agent_id: str, body: dict):
     except SyntaxError as e:
         raise HTTPException(status_code=400, detail=f"代码语法错误: {e}")
 
-    # 确保工具在启用列表中
-    if name not in profile.tool_config.enabled_tools:
-        profile.tool_config.enabled_tools.append(name)
+    # 写入工具文件
+    _project_root = _os.path.dirname(
+        _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    )
+    tool_file_path = _os.path.join(
+        _project_root, "backend", "src", "agents", "hermes", "tools", f"{name}.py"
+    )
+    try:
+        with open(tool_file_path, "w", encoding="utf-8") as f:
+            f.write(code)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"写入工具文件失败: {e}")
 
-    # 确保工具配置存在
-    if name not in profile.tool_config.tool_configs:
-        profile.tool_config.tool_configs[name] = {}
-
-    profile.tool_config.tool_configs[name].update({
+    # 持久化到 override store（添加到工具列表）
+    tool_entry = {
+        "id": name,
+        "name": name,
         "description": description,
         "enabled": True,
+        "category": "analysis",
         "source_code": code,
         "is_hermes": True,
-    })
+        "config": {},
+    }
+    _override_store.add_tool(agent_id, tool_entry)
+
+    # 更新工具文件映射
+    _KNOWN_TOOL_IMPL_FILES[name] = f"backend/src/agents/hermes/tools/{name}.py"
 
     return {
         "success": True,
         "name": name,
-        "message": f"工具 {name} 已通过热插拔注册",
+        "message": f"工具 {name} 已创建并注册（文件: tools/{name}.py）",
     }
 
 
