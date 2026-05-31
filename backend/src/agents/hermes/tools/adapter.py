@@ -666,7 +666,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "patent_docx_generator",
         "schema": {
             "name": "patent_docx_generator",
-            "description": "将结构化的专利撰写结果生成为符合专利局规范的.docx文件。在完成权利要求书和说明书撰写后调用此工具，输入结构化内容，输出格式规范的专利申请文件。文件格式：楷体14pt、首行缩进、A4页面、标准页边距、文档分节。",
+            "description": "将结构化的专利撰写结果生成为符合专利局规范的.docx文件。在完成权利要求书和说明书撰写后调用此工具，输入结构化内容，输出格式规范的专利申请文件。文件格式：楷体14pt、首行缩进、A4页面、标准页边距、文档分节。如果提供tech_description，将自动生成专利附图。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -689,6 +689,10 @@ PATENT_TOOL_DEFINITIONS = [
                     "task_id": {
                         "type": "string",
                         "description": "任务ID，用于文件存储路径",
+                    },
+                    "tech_description": {
+                        "type": "string",
+                        "description": "原始技术方案描述，用于自动生成专利附图（系统架构图、流程图等）。如果发明涉及硬件、装置、系统或流程，强烈建议提供此参数以生成附图。",
                     },
                 },
                 "required": ["title", "claims", "description", "abstract"],
