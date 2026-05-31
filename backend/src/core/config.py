@@ -437,6 +437,16 @@ class AppSettings(BaseSettings):
                 raise ValueError("生产环境必须设置API_SECRET_KEY")
         return self
 
+    @model_validator(mode="after")
+    def resolve_environment_isolation(self) -> "AppSettings":
+        if self.environment == Environment.TESTING:
+            self.db.url = "sqlite+aiosqlite:///./test_patent_agents.db"
+            self.storage.knowledge_base_path = "./test_finalized_patents"
+            self.storage.export_path = "./test_exports"
+            self.storage.finalized_patents_docx_path = "./test_定稿文件"
+            self.debug = False
+        return self
+
     @property
     def is_development(self) -> bool:
         return self.environment == Environment.DEVELOPMENT

@@ -238,8 +238,8 @@ export default function WorkflowPage() {
 
   // SSE连接：监听agent级别实时事件
   useEffect(() => {
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    const es = new EventSource(`${baseUrl}/api/v1/workflows/${taskId}/stream`);
+    const baseUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:10002/api/v1').replace(/\/+$/, '');
+    const es = new EventSource(`${baseUrl}/workflows/${taskId}/stream`);
 
     let logIdCounter = 0;
     const createLogId = () => `log_${Date.now()}_${logIdCounter++}`;
