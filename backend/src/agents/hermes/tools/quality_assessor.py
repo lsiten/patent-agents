@@ -45,11 +45,21 @@ class QualityAssessorTool(HermesTool):
 
     async def execute(
         self,
-        phase_name: str,
-        output_content: str,
+        phase_name: str = "",
+        output_content: str = "",
+        document: str = "",
+        assessment_type: str = "",
         requirements: Optional[str] = None,
+        **kwargs,
     ) -> Dict[str, Any]:
         """执行质量评估"""
+        # 兼容 adapter schema 传入的 param alias
+        #   adapter schema: document (内容), assessment_type (阶段类型)
+        #   tool original:  phase_name, output_content
+        if not phase_name:
+            phase_name = assessment_type or kwargs.get("phase_name", "requirement")
+        if not output_content:
+            output_content = document or kwargs.get("output_content", "")
         logger.info("Assessing quality", phase=phase_name)
 
         # 基础评分维度

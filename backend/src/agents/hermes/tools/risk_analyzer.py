@@ -33,8 +33,18 @@ class RiskAnalyzerTool(HermesTool):
                 ),
                 "tech_data": HermesToolParameter(
                     type="string",
-                    description="技术数据或专利文件内容",
+                    description="技术数据或专利文件内容（也可用 patent_document 或 document 参数名传入）",
                     required=True,
+                ),
+                "patent_document": HermesToolParameter(
+                    type="string",
+                    description="专利文件内容（与 tech_data 同义，二选一即可）",
+                    required=False,
+                ),
+                "document": HermesToolParameter(
+                    type="string",
+                    description="文档内容（与 tech_data 同义，二选一即可）",
+                    required=False,
                 ),
                 "prior_art_references": HermesToolParameter(
                     type="string",
@@ -46,31 +56,48 @@ class RiskAnalyzerTool(HermesTool):
 
     async def execute(
         self,
-        analysis_type: str,
-        tech_data: str,
+        analysis_type: Optional[str] = None,
+        tech_data: Optional[str] = None,
+        patent_document: Optional[str] = None,
+        document: Optional[str] = None,
         prior_art_references: Optional[str] = None,
+        risk_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """执行风险分析"""
-        logger.info("Analyzing risks", type=analysis_type)
+        # 兼容 adapter schema 和 LLM 可能使用的不同参数名
+        resolved_type = analysis_type or risk_type or "overall"
+        resolved_tech_data = tech_data or patent_document or document or ""
+        if not resolved_tech_data:
+            return {
+                "analysis_type": resolved_type,
+                "overall_risk_level": "unknown",
+                "risk_count": 0,
+                "risks": [],
+                "risk_matrix": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+                "mitigation_priorities": [],
+                "analysis_timestamp": datetime.now().isoformat(),
+                "error": "缺少技术数据或专利文件内容",
+            }
+        logger.info("Analyzing risks", type=resolved_type)
 
         risks = []
         overall_risk_level = "low"
 
-        # 基于分析类型识别风险
-        if analysis_type in ["novelty", "overall"]:
-            novelty_risks = self._analyze_novelty_risks(tech_data)
+        # 基于分析类型识别风险（使用 resolved 值兼容 adapter 传入的不同参数名）
+        if resolved_type in ["novelty", "overall"]:
+            novelty_risks = self._analyze_novelty_risks(resolved_tech_data)
             risks.extend(novelty_risks)
 
-        if analysis_type in ["inventive_step", "overall"]:
-            inventive_risks = self._analyze_inventive_step_risks(tech_data)
+        if resolved_type in ["inventive_step", "overall"]:
+            inventive_risks = self._analyze_inventive_step_risks(resolved_tech_data)
             risks.extend(inventive_risks)
 
-        if analysis_type in ["prior_art", "overall"] and prior_art_references:
+        if resolved_type in ["prior_art", "overall"] and prior_art_references:
             prior_art_risks = self._analyze_prior_art_risks(prior_art_references)
             risks.extend(prior_art_risks)
 
-        if analysis_type in ["support", "overall"]:
-            support_risks = self._analyze_support_risks(tech_data)
+        if resolved_type in ["support", "overall"]:
+            support_risks = self._analyze_support_risks(resolved_tech_data)
             risks.extend(support_risks)
 
         # 计算整体风险等级
@@ -82,7 +109,7 @@ class RiskAnalyzerTool(HermesTool):
             overall_risk_level = "medium"
 
         return {
-            "analysis_type": analysis_type,
+            "analysis_type": resolved_type,
             "overall_risk_level": overall_risk_level,
             "risk_count": len(risks),
             "risks": risks,

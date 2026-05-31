@@ -79,6 +79,13 @@ coverage.xml
 # === Playwright MCP debug artifacts ===
 .playwright-mcp/
 
+# === Hermes Agent Runtime Artifacts ===
+backend/hermes_home/profiles/*/auth.json
+backend/hermes_home/profiles/*/auth.lock
+backend/hermes_home/profiles/*/sessions/
+backend/hermes_home/profiles/*/tool_outputs/
+backend/hermes_home/profiles/*/models_dev_cache.json
+
 # === VCS ===
 .agit
 

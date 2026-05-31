@@ -135,7 +135,7 @@ class OpenAIClient(BaseLLMClient):
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         self.api_key = api_key or settings.llm.openai_api_key
         self.base_url = base_url or settings.llm.openai_base_url
-        self.default_model = settings.llm.llm_model
+        self.default_model = settings.llm.openai_model
         self.default_temperature = settings.llm.llm_temperature
         self.default_max_tokens = settings.llm.llm_max_tokens
         self.timeout = settings.llm.llm_timeout
@@ -317,7 +317,7 @@ class AnthropicClient(BaseLLMClient):
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         self.api_key = api_key or settings.llm.anthropic_api_key
         self.base_url = base_url or settings.llm.anthropic_base_url
-        self.default_model = settings.llm.claude_model
+        self.default_model = settings.llm.anthropic_model
         self.default_temperature = settings.llm.llm_temperature
         self.default_max_tokens = settings.llm.llm_max_tokens
         self.timeout = settings.llm.llm_timeout

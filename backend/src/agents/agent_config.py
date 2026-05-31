@@ -318,12 +318,12 @@ def create_ai_agent(
         from src.core.config import settings
         api_key = settings.llm.api_key
         base_url = settings.llm.base_url
-        default_model = settings.llm.llm_model
+        default_model = settings.llm.openai_model
         api_mode = getattr(settings.llm, "api_mode", None)
     except Exception:
         api_key = os.environ.get("OPENAI_API_KEY", "")
         base_url = os.environ.get("OPENAI_BASE_URL", os.environ.get("LLM_BASE_URL", ""))
-        default_model = os.environ.get("LLM_MODEL", "gpt-4-turbo")
+        default_model = os.environ.get("LLM_OPENAI_MODEL", "gpt-4-turbo")
         api_mode = None
 
     # 应用前端 override（用户在页面修改的配置）
