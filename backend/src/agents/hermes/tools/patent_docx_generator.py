@@ -295,7 +295,7 @@ def _generate_patent_figures(
         output_dir = Path("./exports") / task_id / "figures"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    scripts_dir = Path(__file__).resolve().parent.parent.parent.parent.parent / "scripts"
+    scripts_dir = Path(__file__).resolve().parent.parent.parent.parent.parent.parent / "scripts"
     script_path = scripts_dir / "generate_patent_figures.py"
     if not script_path.exists():
         logger.warning(f"Patent figures script not found: {script_path}")
@@ -419,32 +419,31 @@ class PatentDocxGeneratorTool:
             margins = _get_margins_for_section("摘要", profile)
             _set_section_margins(first_section, margins)
 
-            # ── 说明书摘要 ──
-            add_document_heading(doc, "说明书摘要", profile)
-            add_body_paragraph(doc, _strip_markdown(abstract) if abstract else "（待补充）", profile)
+            # ── 说明书摘要 ── (仅在有内容时生成)
+            if abstract and abstract.strip():
+                add_document_heading(doc, "说明书摘要", profile)
+                add_body_paragraph(doc, _strip_markdown(abstract), profile)
 
             # 先生成附图（异步）
             figure_paths = []
             if tech_description:
                 figure_paths = _generate_patent_figures(tech_description, task_id)
 
-            # ── 摘要附图 ──
-            add_new_section(doc, "摘要附图", profile)
-            add_document_heading(doc, "摘要附图", profile)
+            # ── 摘要附图 ── (仅在有附图时生成)
             if figure_paths:
+                add_new_section(doc, "摘要附图", profile)
+                add_document_heading(doc, "摘要附图", profile)
                 try:
                     from docx.shared import Inches as _Inches
                     doc.add_picture(figure_paths[0]["path"], width=_Inches(5.0))
                 except Exception:
-                    add_body_paragraph(doc, "（附图加载失败）", profile, first_line_indent=False)
-            else:
-                add_body_paragraph(doc, "（无附图）", profile, first_line_indent=False)
+                    pass  # 附图加载失败时跳过，不显示错误信息
 
-            # ── 权利要求书 ──
-            add_new_section(doc, "权利要求书", profile)
-            add_document_heading(doc, "权利要求书", profile)
-
+            # ── 权利要求书 ── (仅在有内容时生成)
             if claims:
+                add_new_section(doc, "权利要求书", profile)
+                add_document_heading(doc, "权利要求书", profile)
+
                 ind_claim = _strip_markdown(claims.get("independent_claim", ""))
                 if ind_claim:
                     ind_claim = re.sub(r'^\d+[\.\、]\s*', '', ind_claim.strip())
@@ -454,61 +453,70 @@ class PatentDocxGeneratorTool:
                     dep_text = _strip_markdown(dep)
                     dep_text = re.sub(r'^\d+[\.\、]\s*', '', dep_text.strip())
                     add_body_paragraph(doc, f"{i}、{dep_text}", profile)
-            else:
-                add_body_paragraph(doc, "（待补充权利要求）", profile)
 
-            # ── 说明书 ──
-            add_new_section(doc, "说明书", profile)
-            add_document_heading(doc, "说明书", profile)
+            # ── 说明书 ── (仅在有 description 内容时生成)
+            has_description_content = any([
+                description.get("technical_field"),
+                description.get("background_art"),
+                description.get("summary_of_invention"),
+                description.get("description_of_drawings"),
+                description.get("detailed_description"),
+            ])
+            
+            if has_description_content:
+                add_new_section(doc, "说明书", profile)
+                add_document_heading(doc, "说明书", profile)
 
-            # 专利名称（16pt楷体）
-            title_para = doc.add_paragraph()
-            title_run = title_para.add_run(_strip_markdown(title))
-            _set_run_font(title_run, "楷体", 16.0)
+                # 专利名称（16pt楷体）
+                title_para = doc.add_paragraph()
+                title_run = title_para.add_run(_strip_markdown(title))
+                _set_run_font(title_run, "楷体", 16.0)
 
-            # 技术领域
-            add_section_heading(doc, "技术领域", profile)
-            tech_field = description.get("technical_field", "")
-            if isinstance(tech_field, dict):
-                tech_field = tech_field.get("content", "") or str(tech_field)
-            _add_multiline_content(doc, tech_field, profile)
+                # 技术领域 (仅在有内容时生成)
+                tech_field = description.get("technical_field", "")
+                if isinstance(tech_field, dict):
+                    tech_field = tech_field.get("content", "") or str(tech_field)
+                if tech_field and tech_field.strip():
+                    add_section_heading(doc, "技术领域", profile)
+                    _add_multiline_content(doc, tech_field, profile)
 
-            # 背景技术
-            add_section_heading(doc, "背景技术", profile)
-            background = description.get("background_art", "")
-            if isinstance(background, dict):
-                background = background.get("content", "") or str(background)
-            _add_multiline_content(doc, background, profile)
+                # 背景技术 (仅在有内容时生成)
+                background = description.get("background_art", "")
+                if isinstance(background, dict):
+                    background = background.get("content", "") or str(background)
+                if background and background.strip():
+                    add_section_heading(doc, "背景技术", profile)
+                    _add_multiline_content(doc, background, profile)
 
-            # 发明内容
-            add_section_heading(doc, "发明内容", profile)
-            summary = description.get("summary_of_invention", "")
-            if isinstance(summary, dict):
-                # 结构化格式：包含 technical_problem, technical_solution, beneficial_effects
-                parts = []
-                if summary.get("technical_problem"):
-                    parts.append(f"本发明要解决的技术问题是：{summary['technical_problem']}")
-                if summary.get("technical_solution"):
-                    parts.append(f"\n{summary['technical_solution']}")
-                if summary.get("beneficial_effects"):
-                    effects = summary['beneficial_effects']
-                    if isinstance(effects, str):
-                        parts.append(f"\n本发明的有益效果包括：{effects}")
-                    elif isinstance(effects, list):
-                        parts.append(f"\n本发明的有益效果包括：" + "；".join(str(e) for e in effects))
-                summary = "\n".join(parts) if parts else str(summary)
-            _add_multiline_content(doc, summary, profile)
+                # 发明内容 (仅在有内容时生成)
+                summary = description.get("summary_of_invention", "")
+                if isinstance(summary, dict):
+                    # 结构化格式：包含 technical_problem, technical_solution, beneficial_effects
+                    parts = []
+                    if summary.get("technical_problem"):
+                        parts.append(f"本发明要解决的技术问题是：{summary['technical_problem']}")
+                    if summary.get("technical_solution"):
+                        parts.append(f"\n{summary['technical_solution']}")
+                    if summary.get("beneficial_effects"):
+                        effects = summary['beneficial_effects']
+                        if isinstance(effects, str):
+                            parts.append(f"\n本发明的有益效果包括：{effects}")
+                        elif isinstance(effects, list):
+                            parts.append(f"\n本发明的有益效果包括：" + "；".join(str(e) for e in effects))
+                    summary = "\n".join(parts) if parts else str(summary)
+                if summary and summary.strip():
+                    add_section_heading(doc, "发明内容", profile)
+                    _add_multiline_content(doc, summary, profile)
 
-            # 附图说明（可选）
-            drawings_desc = description.get("description_of_drawings", "")
-            if isinstance(drawings_desc, dict):
-                drawings_desc = drawings_desc.get("content", "") or str(drawings_desc)
-            if drawings_desc:
-                add_section_heading(doc, "附图说明", profile)
-                _add_multiline_content(doc, drawings_desc, profile)
+                # 附图说明（仅在有内容时生成）
+                drawings_desc = description.get("description_of_drawings", "")
+                if isinstance(drawings_desc, dict):
+                    drawings_desc = drawings_desc.get("content", "") or str(drawings_desc)
+                if drawings_desc and drawings_desc.strip():
+                    add_section_heading(doc, "附图说明", profile)
+                    _add_multiline_content(doc, drawings_desc, profile)
 
-            # 具体实施方式
-            add_section_heading(doc, "具体实施方式", profile)
+            # 具体实施方式 (仅在有内容时生成)
             detailed = description.get("detailed_description", "")
             if isinstance(detailed, dict):
                 detailed = detailed.get("content", "") or str(detailed)
@@ -526,12 +534,14 @@ class PatentDocxGeneratorTool:
                     else:
                         parts.append(str(item))
                 detailed = "\n\n".join(parts)
-            _add_multiline_content(doc, detailed, profile)
+            if detailed and detailed.strip():
+                add_section_heading(doc, "具体实施方式", profile)
+                _add_multiline_content(doc, detailed, profile)
 
-            # ── 说明书附图 ──
-            add_new_section(doc, "说明书附图", profile)
-            add_document_heading(doc, "说明书附图", profile)
+            # ── 说明书附图 ── (仅在有附图时生成)
             if figure_paths:
+                add_new_section(doc, "说明书附图", profile)
+                add_document_heading(doc, "说明书附图", profile)
                 from docx.shared import Inches as _Inches
                 for fig_info in figure_paths:
                     try:
@@ -540,9 +550,7 @@ class PatentDocxGeneratorTool:
                         doc.add_picture(fig_info["path"], width=_Inches(5.0))
                         doc.add_paragraph("")
                     except Exception:
-                        add_body_paragraph(doc, f"（图{fig_info.get('figure_number', '')}加载失败）", profile, first_line_indent=False)
-            else:
-                add_body_paragraph(doc, "（无附图）", profile, first_line_indent=False)
+                        pass  # 附图加载失败时跳过
 
             # ── 保存文件 ──
             export_dir = Path("./exports") / (task_id or "default")

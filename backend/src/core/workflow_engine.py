@@ -411,14 +411,14 @@ class PatentWorkflowEngine:
                 # 发射 Agent 输出完成事件
                 if event_callback:
                     event_callback(agent_display_name, "agent.content",
-                        f"📄 输出: {agent_text[:200] if agent_text else ''}",
-                        {"agent_name": agent_display_name, "content": agent_text[:500] if agent_text else "", "phase": phase_state.value})
+                        f"📄 输出",
+                        {"agent_name": agent_display_name, "content": agent_text if agent_text else "", "phase": phase_state.value})
                 else:
                     await publish_event(AgentContentEvent(
                         task_id=context.task_id,
                         user_id=context.user_id,
                         agent_name=agent_display_name,
-                        content=agent_text[:500] if agent_text else "",
+                        content=agent_text if agent_text else "",
                         phase=phase_state.value,
                     ))
 
@@ -503,8 +503,8 @@ class PatentWorkflowEngine:
 
                         if event_callback:
                             event_callback(agent_display_name, "agent.content",
-                                f"📄 输出（修正）: {agent_text[:200] if agent_text else ''}",
-                                {"agent_name": agent_display_name, "content": agent_text[:500] if agent_text else "", "phase": phase_state.value})
+                                f"📄 输出（修正）",
+                                {"agent_name": agent_display_name, "content": agent_text if agent_text else "", "phase": phase_state.value})
 
                         context_data = self._normalize_phase_output(context_field, context_data)
                         setattr(context, context_field, context_data)
@@ -2119,7 +2119,7 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
             if text.startswith("{") or text.startswith("["):
                 return
             with events_lock:
-                events.append({"type": "thinking", "data": {"message": text[:300]}})
+                events.append({"type": "thinking", "data": {"message": text}})
 
         def on_tool_start(call_id, name, args):
             params = {}
@@ -2127,14 +2127,14 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
                 try:
                     params = json.loads(args)
                 except Exception:
-                    params = {"raw": args[:200]}
+                    params = {"raw": args}
             elif isinstance(args, dict):
                 params = args
             with events_lock:
                 events.append({"type": "tool_call_start", "data": {"name": name, "parameters": params}})
 
         def on_tool_complete(call_id, name, args, result):
-            result_str = str(result)[:500] if result else ""
+            result_str = str(result) if result else ""
             with events_lock:
                 events.append({
                     "type": "tool_call_end",
@@ -2180,7 +2180,7 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
 
                     if event_type == "thinking":
                         thought = event_data.get("message", "")
-                        _emit("agent.thinking", f"💭 {thought[:200]}", {
+                        _emit("agent.thinking", f"💭 {thought}", {
                             "agent_name": agent_name,
                             "thought": thought,
                             "step": 0,
@@ -2214,21 +2214,21 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
                     elif event_type == "tool_call_end":
                         tool_name = event_data.get("name", "")
                         result = event_data.get("result", "")
-                        result_preview = event_data.get("result_preview", str(result)[:500])
+                        result_str = str(result) if result else ""
                         success = event_data.get("success", True)
                         status_icon = "✅" if success else "❌"
-                        _emit("agent.tool_call_end", f"{status_icon} {tool_name} 返回: {result_preview[:150]}", {
+                        _emit("agent.tool_call_end", f"{status_icon} {tool_name} 返回", {
                             "agent_name": agent_name,
                             "tool_name": tool_name,
                             "parameters": event_data.get("parameters", {}),
-                            "result": result_preview,
+                            "result": result_str,
                             "success": success,
                         })
                         tool_results.append({
                             "tool": tool_name,
                             "parameters": event_data.get("parameters", {}),
                             "result": result,
-                            "result_preview": result_preview,
+                            "result_preview": result_str,
                             "success": success,
                         })
                         if not event_callback:
@@ -2320,9 +2320,9 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
                 if collecting_result and result_lines:
                     result_text = "; ".join(result_lines)
                     event_callback(agent_name, "agent.tool_call_end",
-                        f"✅ {current_tool} 返回: {result_text[:200]}",
+                        f"✅ {current_tool} 返回",
                         {"agent_name": agent_name, "tool_name": current_tool,
-                         "result": result_text[:500], "success": True})
+                         "result": result_text, "success": True})
                     result_lines = []
                     collecting_result = False
                 continue
@@ -2339,9 +2339,9 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
                     if result_lines:
                         result_text = "; ".join(result_lines)
                         event_callback(agent_name, "agent.tool_call_end",
-                            f"✅ {current_tool} 返回: {result_text[:200]}",
+                            f"✅ {current_tool} 返回",
                             {"agent_name": agent_name, "tool_name": current_tool,
-                             "result": result_text[:500], "success": True})
+                             "result": result_text, "success": True})
                         result_lines = []
                     collecting_result = False
 
@@ -2385,9 +2385,9 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
         if collecting_result and result_lines:
             result_text = "; ".join(result_lines)
             event_callback(agent_name, "agent.tool_call_end",
-                f"✅ {current_tool} 返回: {result_text[:200]}",
+                f"✅ {current_tool} 返回",
                 {"agent_name": agent_name, "tool_name": current_tool,
-                 "result": result_text[:500], "success": True})
+                 "result": result_text, "success": True})
 
     async def _publish_progress_event(
         self,
