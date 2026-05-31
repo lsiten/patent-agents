@@ -1613,13 +1613,10 @@ async def update_system_config(body: SystemConfigUpdateRequest):
     LLM_ENV_MAP: Dict[str, Dict[str, str]] = {
         "openai": {"api_key": "OPENAI_API_KEY", "base_url": "OPENAI_BASE_URL", "model_id": "LLM_OPENAI_MODEL"},
         "anthropic": {"api_key": "ANTHROPIC_API_KEY", "base_url": "ANTHROPIC_BASE_URL", "model_id": "LLM_ANTHROPIC_MODEL"},
-        "deepseek": {"api_key": "LLM_DEEPSEEK_API_KEY", "base_url": "LLM_DEEPSEEK_BASE_URL", "model_id": "LLM_DEEPSEEK_MODEL"},
-        "openrouter": {"api_key": "LLM_OPENROUTER_API_KEY", "base_url": "LLM_OPENROUTER_BASE_URL", "model_id": "LLM_OPENROUTER_MODEL"},
     }
     IMG_ENV_MAP: Dict[str, Dict[str, str]] = {
         "azure_aoai": {"api_key": "IMAGE_GEN_AZURE_AOAI_API_KEY", "base_url": "IMAGE_GEN_AZURE_AOAI_BASE_URL", "model_id": "IMAGE_GEN_AZURE_AOAI_MODEL_ID"},
         "openai": {"api_key": "IMAGE_GEN_OPENAI_API_KEY", "base_url": "IMAGE_GEN_OPENAI_BASE_URL", "model_id": "IMAGE_GEN_OPENAI_MODEL_ID"},
-        "stability": {"api_key": "IMAGE_GEN_STABILITY_API_KEY", "base_url": "IMAGE_GEN_STABILITY_BASE_URL", "model_id": "IMAGE_GEN_STABILITY_MODEL_ID"},
     }
 
     # 写入函数
@@ -2863,6 +2860,17 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
         )
         task_id = context.task_id
         task_events[task_id] = []
+        patent_task = PatentTask(
+            task_id=task_id,
+            user_id=request.user_id,
+            tech_description=tech_description,
+            current_state=WorkflowState.INITIAL,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            iteration_count=0,
+            max_iterations=3,
+        )
+        tasks_store[task_id] = patent_task
         _append_workflow_event(
             task_id=task_id,
             agent="workflow_engine",

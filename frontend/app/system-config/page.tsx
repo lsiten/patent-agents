@@ -189,10 +189,7 @@ export default function SystemConfigPage() {
   const providerLabels: Record<string, string> = {
     openai: 'OpenAI',
     anthropic: 'Anthropic',
-    deepseek: 'DeepSeek',
-    openrouter: 'OpenRouter',
     azure_aoai: 'Azure OpenAI',
-    stability: 'Stability AI',
   };
 
   const ProviderSelect = ({

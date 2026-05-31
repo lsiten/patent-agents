@@ -72,13 +72,14 @@ export default function HermesSkillChatModal({
       );
 
       if (result.success && result.skill_data) {
-        setGeneratedSkill(result.skill_data);
+        const skillData = result.skill_data;
+        setGeneratedSkill(skillData);
         setGeneratedContent(result.generated_content || '');
         setChatHistory(prev => [
           ...prev,
           {
             role: 'assistant',
-            content: `技能已设计完成！\n\n• 名称: **${result.skill_data.name}**\n• 熟练度: ${result.skill_data.proficiency}\n• 关键词: ${result.skill_data.keywords.join(', ')}\n\n请确认后点击"确认添加"将技能注册到 Agent。`,
+            content: `技能已设计完成！\n\n• 名称: **${skillData.name}**\n• 熟练度: ${skillData.proficiency}\n• 关键词: ${skillData.keywords.join(', ')}\n\n请确认后点击"确认添加"将技能注册到 Agent。`,
           },
         ]);
         setStep('preview');

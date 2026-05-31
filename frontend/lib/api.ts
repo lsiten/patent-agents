@@ -4,7 +4,7 @@
 
 import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory, OrgNode, DirEntry, BrowseDirResponse, FileContentResponse, SystemConfigResponse, SystemConfigUpdateRequest } from '@/types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:10002/api/v1';
 
 // ============ Helper Functions ============
 async function request<T>(

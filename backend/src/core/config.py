@@ -24,8 +24,8 @@ class Environment(str, Enum):
 
 
 # ── 所有已知供应商列表（用于校验等） ──
-TEXT_LLM_PROVIDERS = {"openai", "anthropic", "deepseek", "openrouter"}
-IMAGE_GEN_PROVIDERS = {"azure_aoai", "openai", "stability"}
+TEXT_LLM_PROVIDERS = {"openai", "anthropic"}
+IMAGE_GEN_PROVIDERS = {"azure_aoai", "openai"}
 
 
 class LogLevel(str, Enum):

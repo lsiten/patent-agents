@@ -2217,7 +2217,17 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
 
         try:
             event_count = 0
+            AGENT_TIMEOUT_SECONDS = 600
+            deadline = asyncio.get_event_loop().time() + AGENT_TIMEOUT_SECONDS
             while not result_holder["done"] or events:
+                if asyncio.get_event_loop().time() > deadline:
+                    self._logger.warning(
+                        f"Agent {agent_name} timed out after {AGENT_TIMEOUT_SECONDS}s, falling back to sync"
+                    )
+                    if not result_holder["done"]:
+                        result_holder["done"] = True
+                        result_holder["error"] = "timeout"
+                    break
                 with events_lock:
                     batch = list(events)
                     events.clear()
