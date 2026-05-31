@@ -90,3 +90,4 @@ backend/hermes_home/profiles/*/models_dev_cache.json
 .agit
 
 定稿文件
+.env.testing

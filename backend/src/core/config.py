@@ -14,6 +14,11 @@ _env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file_
 if os.path.isfile(_env_path):
     load_dotenv(_env_path)
 
+if os.getenv("ENVIRONMENT") == "testing":
+    _test_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env.testing")
+    if os.path.isfile(_test_env_path):
+        load_dotenv(_test_env_path, override=True)
+
 
 class Environment(str, Enum):
     """运行环境枚举"""
