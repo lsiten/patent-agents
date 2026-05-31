@@ -19,6 +19,11 @@ if os.getenv("ENVIRONMENT") == "testing":
     if os.path.isfile(_test_env_path):
         load_dotenv(_test_env_path, override=True)
 
+if os.getenv("ENVIRONMENT") == "production":
+    _prod_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env.production")
+    if os.path.isfile(_prod_env_path):
+        load_dotenv(_prod_env_path, override=True)
+
 
 class Environment(str, Enum):
     """运行环境枚举"""
@@ -444,7 +449,12 @@ class AppSettings(BaseSettings):
 
     @model_validator(mode="after")
     def resolve_environment_isolation(self) -> "AppSettings":
-        if self.environment == Environment.TESTING:
+        if self.environment == Environment.PRODUCTION:
+            self.db.url = "sqlite+aiosqlite:///./prod_patent_agents.db"
+            self.storage.knowledge_base_path = "./prod_finalized_patents"
+            self.storage.export_path = "./prod_exports"
+            self.storage.finalized_patents_docx_path = "./prod_定稿文件"
+        elif self.environment == Environment.TESTING:
             self.db.url = "sqlite+aiosqlite:///./test_patent_agents.db"
             self.storage.knowledge_base_path = "./test_finalized_patents"
             self.storage.export_path = "./test_exports"

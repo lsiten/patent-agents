@@ -2,26 +2,64 @@
 
 # 专利智脑 - 启动脚本
 # Usage:
-#   ./start.sh          # 启动前端 + 后端
-#   ./start.sh backend  # 仅启动后端
-#   ./start.sh frontend # 仅启动前端
+#   ./start.sh dev          # 启动开发环境 (frontend:3000, backend:8000)
+#   ./start.sh testing      # 启动测试环境 (frontend:3000, backend:8000, ENVIRONMENT=testing)
+#   ./start.sh production   # 启动生产环境 (frontend:10001, backend:10002, ENVIRONMENT=production)
+#   ./start.sh backend      # 仅启动后端 (默认 dev)
+#   ./start.sh frontend     # 仅启动前端 (默认 dev)
 
 set -e
 
-echo "========================================"
-echo "   专利智脑 - AI专利申请多智能体系统"
-echo "========================================"
-echo ""
-
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-# 颜色输出
+# ── 颜色输出 ──────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-# 检查 Python
+# ── 环境配置 ──────────────────────────────────────────────
+# 默认值 (dev)
+ENV_MODE="dev"
+ENV_VAR=""
+BACKEND_PORT=8000
+FRONTEND_PORT=3000
+BACKEND_TITLE="Dev"
+
+# ── 函数: 解析环境参数 ────────────────────────────────────
+parse_env() {
+    case "${1:-dev}" in
+        dev)
+            ENV_MODE="dev"
+            ENV_VAR=""
+            BACKEND_PORT=8000
+            FRONTEND_PORT=3000
+            BACKEND_TITLE="Dev"
+            ;;
+        testing)
+            ENV_MODE="testing"
+            ENV_VAR="ENVIRONMENT=testing"
+            BACKEND_PORT=8000
+            FRONTEND_PORT=3000
+            BACKEND_TITLE="Testing"
+            ;;
+        production)
+            ENV_MODE="production"
+            ENV_VAR="ENVIRONMENT=production"
+            BACKEND_PORT=10002
+            FRONTEND_PORT=10001
+            BACKEND_TITLE="Production"
+            ;;
+        *)
+            echo -e "${RED}❌ 未知环境: $1${NC}"
+            echo "可用选项: dev, testing, production"
+            exit 1
+            ;;
+    esac
+}
+
+# ── 检查工具 ──────────────────────────────────────────────
 check_python() {
     if ! command -v python3 &> /dev/null; then
         echo -e "${RED}❌ Python 3 未安装${NC}"
@@ -30,7 +68,6 @@ check_python() {
     echo -e "${GREEN}✓ Python: $(python3 --version)${NC}"
 }
 
-# 检查 Node.js
 check_node() {
     if ! command -v node &> /dev/null; then
         echo -e "${RED}❌ Node.js 未安装${NC}"
@@ -39,21 +76,22 @@ check_node() {
     echo -e "${GREEN}✓ Node.js: $(node --version)${NC}"
 }
 
-# 启动后端
+# ── 启动后端 ──────────────────────────────────────────────
 start_backend() {
+    local env_mode="${1:-dev}"
+    parse_env "$env_mode"
+
     echo ""
-    echo "🚀 启动后端服务..."
+    echo -e "🚀 启动后端服务 (${CYAN}${BACKEND_TITLE}${NC})..."
     echo "-------------------"
 
     cd "$PROJECT_ROOT/backend"
 
-    # 创建虚拟环境（如果不存在
+    # 创建/激活虚拟环境
     if [ ! -d "venv" ]; then
         echo "📦 创建 Python 虚拟环境..."
         python3 -m venv venv
     fi
-
-    # 激活虚拟环境
     source venv/bin/activate
 
     # 安装依赖
@@ -63,26 +101,26 @@ start_backend() {
         touch venv/.deps_installed
     fi
 
-    # 复制环境配置
-    if [ ! -f ".env" ]; then
-        cp .env.example .env
-        echo ""
-        echo -e "${YELLOW}⚠️  已创建默认配置: backend/.env${NC}"
-        echo -e "${YELLOW}   请配置 API Key 后重新启动${NC}"
-        echo ""
-    fi
-
-    echo "✅ 后端服务启动在 http://localhost:8000"
-    echo "📖 API文档: http://localhost:8000/docs"
+    echo "✅ 后端启动中..."
+    echo "   端口:  ${BACKEND_PORT}"
+    echo "   API:   http://localhost:${BACKEND_PORT}"
+    echo "   Docs:  http://localhost:${BACKEND_PORT}/docs"
     echo ""
 
-    python main.py
+    if [ -n "$ENV_VAR" ]; then
+        eval "$ENV_VAR python main.py"
+    else
+        python main.py
+    fi
 }
 
-# 启动前端
+# ── 启动前端 ──────────────────────────────────────────────
 start_frontend() {
+    local env_mode="${1:-dev}"
+    parse_env "$env_mode"
+
     echo ""
-    echo "🎨 启动前端服务..."
+    echo -e "🎨 启动前端服务 (${CYAN}${BACKEND_TITLE}${NC})..."
     echo "-------------------"
 
     cd "$PROJECT_ROOT/frontend"
@@ -93,69 +131,119 @@ start_frontend() {
         npm install
     fi
 
-    echo "✅ 前端服务启动在 http://localhost:3000"
+    echo "✅ 前端启动中..."
+    echo "   端口:  ${FRONTEND_PORT}"
+    echo "   URL:   http://localhost:${FRONTEND_PORT}"
     echo ""
 
-    npm run dev
+    npx next dev -p "${FRONTEND_PORT}"
 }
 
-# 主逻辑
-case "${1:-all}" in
+# ── 一键启动 (前后端) ────────────────────────────────────
+start_all() {
+    local env_mode="${1:-dev}"
+    parse_env "$env_mode"
+
+    echo "========================================"
+    echo "   专利智脑 - AI专利申请多智能体系统"
+    echo "   环境: ${CYAN}${BACKEND_TITLE}${NC}"
+    echo "========================================"
+    echo ""
+
+    check_python
+    check_node
+
+    echo ""
+    echo "📋 启动前后端..."
+    echo "   后端 → http://localhost:${BACKEND_PORT}"
+    echo "   前端 → http://localhost:${FRONTEND_PORT}"
+    echo ""
+
+    cd "$PROJECT_ROOT/backend"
+
+    # 创建/激活虚拟环境
+    if [ ! -d "venv" ]; then
+        echo "📦 创建 Python 虚拟环境..."
+        python3 -m venv venv
+    fi
+    source venv/bin/activate
+
+    # 安装后端依赖
+    if [ ! -f "venv/.deps_installed" ]; then
+        echo "📦 安装 Python 依赖..."
+        pip install -r requirements.txt
+        touch venv/.deps_installed
+    fi
+
+    # 启动后端 (后台)
+    BACKEND_LOG="$PROJECT_ROOT/backend/logs/server.log"
+    mkdir -p "$(dirname "$BACKEND_LOG")"
+    echo "📋 后端日志: ${BACKEND_LOG}"
+    echo ""
+
+    if [ -n "$ENV_VAR" ]; then
+        eval "$ENV_VAR nohup python main.py > \"$BACKEND_LOG\" 2>&1 &"
+    else
+        nohup python main.py > "$BACKEND_LOG" 2>&1 &
+    fi
+    BACKEND_PID=$!
+    echo -e "${GREEN}✓ 后端已启动 (PID: ${BACKEND_PID})${NC}"
+
+    # 安装前端依赖
+    cd "$PROJECT_ROOT/frontend"
+    if [ ! -d "node_modules" ]; then
+        echo "📦 安装 npm 依赖..."
+        npm install
+    fi
+
+    # 启动前端 (前台)
+    echo ""
+    echo -e "🎨 启动前端..."
+    echo ""
+
+    # 退出时杀掉后端
+    trap "echo ''; echo '🛑 关闭后端 (PID: ${BACKEND_PID})...'; kill ${BACKEND_PID} 2>/dev/null; exit 0" SIGINT SIGTERM
+
+    npx next dev -p "${FRONTEND_PORT}"
+
+    # 前端退出后杀掉后端
+    kill $BACKEND_PID 2>/dev/null
+}
+
+# ── 主逻辑 ──────────────────────────────────────────────
+case "${1:-help}" in
+    dev|development)
+        start_all dev
+        ;;
+    testing)
+        start_all testing
+        ;;
+    production|prod)
+        start_all production
+        ;;
     backend)
+        parse_env "${2:-dev}"
         check_python
-        start_backend
+        start_backend "${2:-dev}"
         ;;
-
     frontend)
+        parse_env "${2:-dev}"
         check_node
-        start_frontend
+        start_frontend "${2:-dev}"
         ;;
-
-    all)
-        check_python
-        check_node
-
-        echo ""
-        echo "📋 启动模式: 前端 + 后端 (需要两个终端窗口)"
-        echo "------------------------------------------------"
-
-        if [ -z "$TMUX" ] && [ -z "$(which tmux)" ]; then
-            echo -e "${YELLOW}💡 建议: 在不同终端分别运行:${NC}"
-            echo "   ./start.sh backend"
-            echo "   ./start.sh frontend"
-            echo ""
-            echo "   或安装 tmux 实现一键启动多窗口: brew install tmux"
-        fi
-
-        # 检查是否安装 concurrently
-        if command -v concurrently &> /dev/null; then
-            concurrently --names "BACKEND,FRONTEND" -c "bgBlue.bold,bgMagenta.bold" \
-                "$PROJECT_ROOT/start.sh backend 2>&1 | head -20" \
-                "$PROJECT_ROOT/start.sh frontend 2>&1 | head -20"
-        else
-            echo ""
-            echo "请分别在两个终端运行："
-            echo ""
-            echo "终端 1 (后端):"
-            echo "  cd $PROJECT_ROOT && ./start.sh backend"
-            echo ""
-            echo "终端 2 (前端):"
-            echo "  cd $PROJECT_ROOT && ./start.sh frontend"
-            echo ""
-        fi
-        ;;
-
-    help)
+    help|--help|-h)
         echo "使用方法:"
-        echo "  ./start.sh          # 显示启动说明"
-        echo "  ./start.sh backend  # 启动后端服务"
-        echo "  ./start.sh frontend # 启动前端服务"
-        echo "  ./start.sh help     # 显示帮助"
+        echo "  ./start.sh dev          # 启动开发环境 (frontend:3000, backend:8000)"
+        echo "  ./start.sh testing      # 启动测试环境 (frontend:3000, backend:8000)"
+        echo "  ./start.sh production   # 启动生产环境 (frontend:10001, backend:10002)"
+        echo ""
+        echo "  ./start.sh backend [env]   # 仅后端服务"
+        echo "  ./start.sh frontend [env]  # 仅前端服务"
+        echo "  ./start.sh help            # 显示帮助"
         ;;
     *)
-        echo -e "${RED}未知参数: $1${NC}"
-        echo ""
-        echo "使用 ./start.sh help 查看帮助"
+        echo -e "${RED}❌ 未知参数: $1${NC}"
+        echo "使用: ./start.sh help 查看帮助"
         exit 1
         ;;
 esac
