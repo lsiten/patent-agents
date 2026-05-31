@@ -410,6 +410,7 @@ class AppSettings(BaseSettings):
     debug: bool = Field(default=True, alias="DEBUG")
     environment: Environment = Field(
         default=Environment.DEVELOPMENT,
+        alias="ENVIRONMENT",
         description="运行环境"
     )
     log_level: LogLevel = Field(default=LogLevel.INFO, alias="LOG_LEVEL")
