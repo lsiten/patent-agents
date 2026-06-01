@@ -316,14 +316,15 @@ def create_ai_agent(
     # 从项目 settings 获取 LLM 配置
     try:
         from src.core.config import settings
-        api_key = settings.llm.api_key
-        base_url = settings.llm.base_url
-        default_model = settings.llm.openai_model
+        provider_cfg = settings.llm.get_provider_config()
+        api_key = provider_cfg.get("api_key") or ""
+        base_url = provider_cfg.get("base_url") or ""
+        default_model = provider_cfg.get("model_id") or settings.llm.openai_model
         api_mode = getattr(settings.llm, "api_mode", None)
     except Exception:
         api_key = os.environ.get("OPENAI_API_KEY", "")
         base_url = os.environ.get("OPENAI_BASE_URL", os.environ.get("LLM_BASE_URL", ""))
-        default_model = os.environ.get("LLM_OPENAI_MODEL", "gpt-4-turbo")
+        default_model = os.environ.get("LLM_OPENAI_MODEL", os.environ.get("LLM_MODEL", "gpt-4-turbo"))
         api_mode = None
 
     # 应用前端 override（用户在页面修改的配置）
