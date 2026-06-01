@@ -177,7 +177,7 @@ class LLMServiceProvider:
                 self.openai_client = AsyncOpenAI(
                     api_key=self.config.openai_api_key,
                     base_url=self.config.openai_base_url,
-                    timeout=self.config.llm_timeout,
+                    timeout=self.config.timeout,
                     max_retries=self.config.max_retries,
                 )
                 logger.info("OpenAI client initialized")
@@ -192,7 +192,7 @@ class LLMServiceProvider:
                 self.anthropic_client = AsyncAnthropic(
                     api_key=self.config.anthropic_api_key,
                     base_url=self.config.anthropic_base_url,
-                    timeout=self.config.llm_timeout,
+                    timeout=self.config.timeout,
                 )
                 logger.info("Anthropic client initialized")
             except Exception as e:

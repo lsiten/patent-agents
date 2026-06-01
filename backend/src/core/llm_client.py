@@ -136,9 +136,9 @@ class OpenAIClient(BaseLLMClient):
         self.api_key = api_key or settings.llm.openai_api_key
         self.base_url = base_url or settings.llm.openai_base_url
         self.default_model = settings.llm.openai_model
-        self.default_temperature = settings.llm.llm_temperature
-        self.default_max_tokens = settings.llm.llm_max_tokens
-        self.timeout = settings.llm.llm_timeout
+        self.default_temperature = settings.llm.temperature
+        self.default_max_tokens = settings.llm.max_tokens
+        self.timeout = settings.llm.timeout
         self.max_retries = settings.llm.max_retries
         self.retry_delay = settings.llm.retry_delay
 
@@ -318,9 +318,9 @@ class AnthropicClient(BaseLLMClient):
         self.api_key = api_key or settings.llm.anthropic_api_key
         self.base_url = base_url or settings.llm.anthropic_base_url
         self.default_model = settings.llm.anthropic_model
-        self.default_temperature = settings.llm.llm_temperature
-        self.default_max_tokens = settings.llm.llm_max_tokens
-        self.timeout = settings.llm.llm_timeout
+        self.default_temperature = settings.llm.temperature
+        self.default_max_tokens = settings.llm.max_tokens
+        self.timeout = settings.llm.timeout
         self.max_retries = settings.llm.max_retries
         self.retry_delay = settings.llm.retry_delay
 

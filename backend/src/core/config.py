@@ -79,7 +79,7 @@ class RedisSettings(BaseSettings):
 
 
 class LLMSettings(BaseSettings):
-    """文字 LLM API 配置 — 支持多供应商，base_url / api_key / model_id 三元组"""
+    """文字 LLM API 配置 — 统一命名: LLM_{PROVIDER}_{FIELD}"""
 
     # 当前激活的供应商
     active_provider: str = Field(
@@ -87,18 +87,18 @@ class LLMSettings(BaseSettings):
     )
 
     # ── OpenAI / 兼容代理 ──
-    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
+    openai_api_key: Optional[str] = Field(default=None, alias="LLM_OPENAI_API_KEY")
     openai_base_url: str = Field(
         default="https://api.openai.com/v1",
-        alias="OPENAI_BASE_URL"
+        alias="LLM_OPENAI_BASE_URL"
     )
     openai_model: str = Field(default="gpt-4-turbo-preview", alias="LLM_OPENAI_MODEL")
 
     # ── Anthropic Claude ──
-    anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
+    anthropic_api_key: Optional[str] = Field(default=None, alias="LLM_ANTHROPIC_API_KEY")
     anthropic_base_url: str = Field(
         default="https://api.anthropic.com/v1",
-        alias="ANTHROPIC_BASE_URL"
+        alias="LLM_ANTHROPIC_BASE_URL"
     )
     anthropic_model: str = Field(
         default="claude-3-opus-20240229", alias="LLM_ANTHROPIC_MODEL"
@@ -121,17 +121,15 @@ class LLMSettings(BaseSettings):
     openrouter_model: str = Field(default="openrouter/auto", alias="LLM_OPENROUTER_MODEL")
 
     # ── API 模式（覆盖自动检测） ──
-    # 可选值: anthropic_messages, chat_completions, bedrock_converse, codex_responses
-    # 留空则根据 base_url 自动检测
     api_mode: Optional[str] = Field(
         default=None, alias="LLM_API_MODE",
         description="强制指定 API 模式，覆盖自动检测",
     )
 
-    # 全局通用配置
-    llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    llm_max_tokens: int = Field(default=4096)
-    llm_timeout: int = Field(default=120, description="LLM请求超时(秒)")
+    # 通用配置
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0, alias="LLM_TEMPERATURE")
+    max_tokens: int = Field(default=4096, alias="LLM_MAX_TOKENS")
+    timeout: int = Field(default=120, description="LLM请求超时(秒)", alias="LLM_TIMEOUT")
     enable_fallback: bool = Field(default=True, description="启用LLM降级策略")
     fallback_order: List[str] = Field(
         default_factory=lambda: ["openai", "anthropic"]
@@ -139,15 +137,7 @@ class LLMSettings(BaseSettings):
     max_retries: int = Field(default=3, description="最大重试次数")
     retry_delay: float = Field(default=1.0, description="重试延迟(秒)")
 
-    model_config = {"env_prefix": "LLM_"}
-
-    @model_validator(mode="after")
-    def resolve_legacy_model_var(self) -> "LLMSettings":
-        """兼容旧版 LLM_MODEL 环境变量 — 若 LLM_OPENAI_MODEL 未设置，则回退到 LLM_MODEL"""
-        legacy_model = os.environ.get("LLM_MODEL")
-        if legacy_model and self.openai_model == "gpt-4-turbo-preview":
-            self.openai_model = legacy_model
-        return self
+    model_config = {"extra": "ignore"}
 
     def get_provider_config(self, provider: Optional[str] = None) -> dict:
         """获取指定供应商（或当前激活供应商）的连接配置"""

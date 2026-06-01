@@ -313,19 +313,13 @@ def create_ai_agent(
     else:
         os.environ["HERMES_HOME"] = str(HERMES_HOME_DIR)
 
-    # 从项目 settings 获取 LLM 配置
-    try:
-        from src.core.config import settings
-        provider_cfg = settings.llm.get_provider_config()
-        api_key = provider_cfg.get("api_key") or ""
-        base_url = provider_cfg.get("base_url") or ""
-        default_model = provider_cfg.get("model_id") or settings.llm.openai_model
-        api_mode = getattr(settings.llm, "api_mode", None)
-    except Exception:
-        api_key = os.environ.get("OPENAI_API_KEY", "")
-        base_url = os.environ.get("OPENAI_BASE_URL", os.environ.get("LLM_BASE_URL", ""))
-        default_model = os.environ.get("LLM_OPENAI_MODEL", os.environ.get("LLM_MODEL", "gpt-4-turbo"))
-        api_mode = None
+    # 从项目 settings 获取 LLM 配置（单一事实源）
+    from src.core.config import settings
+    provider_cfg = settings.llm.get_provider_config()
+    api_key = provider_cfg.get("api_key") or ""
+    base_url = provider_cfg.get("base_url") or ""
+    default_model = provider_cfg.get("model_id") or "gpt-4-turbo-preview"
+    api_mode = settings.llm.api_mode
 
     # 应用前端 override（用户在页面修改的配置）
     try:

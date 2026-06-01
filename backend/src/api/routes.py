@@ -1549,8 +1549,8 @@ _CONFIG_ENV_FILE_MAP: Dict[str, str] = {
 
 # 供应商 → 环境变量名映射（GET 和 PUT 共用）
 _LLM_ENV_MAP: Dict[str, Dict[str, str]] = {
-    "openai": {"api_key": "OPENAI_API_KEY", "base_url": "OPENAI_BASE_URL", "model_id": "LLM_OPENAI_MODEL"},
-    "anthropic": {"api_key": "ANTHROPIC_API_KEY", "base_url": "ANTHROPIC_BASE_URL", "model_id": "LLM_ANTHROPIC_MODEL"},
+    "openai": {"api_key": "LLM_OPENAI_API_KEY", "base_url": "LLM_OPENAI_BASE_URL", "model_id": "LLM_OPENAI_MODEL"},
+    "anthropic": {"api_key": "LLM_ANTHROPIC_API_KEY", "base_url": "LLM_ANTHROPIC_BASE_URL", "model_id": "LLM_ANTHROPIC_MODEL"},
 }
 _IMG_ENV_MAP: Dict[str, Dict[str, str]] = {
     "azure_aoai": {"api_key": "IMAGE_GEN_AZURE_AOAI_API_KEY", "base_url": "IMAGE_GEN_AZURE_AOAI_BASE_URL", "model_id": "IMAGE_GEN_AZURE_AOAI_MODEL_ID"},
@@ -1593,15 +1593,9 @@ def _read_config_from_env_file(env_path: str) -> SystemConfigResponse:
     # 文字 LLM 供应商
     llm_providers: Dict[str, ProviderConfigResponse] = {}
     for provider, mapping in _LLM_ENV_MAP.items():
-        # 兼容旧变量名：LLM_MODEL → LLM_OPENAI_MODEL
-        if provider == "openai":
-            api_key = _get_env_value(values, mapping["api_key"])
-            base_url = _get_env_value(values, mapping["base_url"])
-            model_id = _get_env_value(values, mapping["model_id"], "LLM_MODEL")
-        else:
-            api_key = _get_env_value(values, mapping["api_key"])
-            base_url = _get_env_value(values, mapping["base_url"])
-            model_id = _get_env_value(values, mapping["model_id"])
+        api_key = _get_env_value(values, mapping["api_key"])
+        base_url = _get_env_value(values, mapping["base_url"])
+        model_id = _get_env_value(values, mapping["model_id"])
 
         llm_providers[provider] = ProviderConfigResponse(
             base_url=base_url,
