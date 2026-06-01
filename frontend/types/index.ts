@@ -48,10 +48,19 @@ export interface InventiveStepAssessment extends Assessment {
 }
 
 export interface SimilarPatent {
-  patent_id: string;
+  patent_id?: string;
+  reference_id?: string;
   title: string;
+  source?: string;
+  url?: string;
+  applicant?: string;
+  publication_date?: string;
   similarity_score: number;
-  key_differences: string[];
+  risk_level?: Severity;
+  key_similarities?: string[];
+  matching_features?: string[];
+  key_differences?: string[];
+  differences?: string;
 }
 
 export interface RetrievalReport {
@@ -59,6 +68,7 @@ export interface RetrievalReport {
   inventive_step_assessment: InventiveStepAssessment;
   utility_assessment: Assessment;
   similar_patents: SimilarPatent[];
+  prior_art_references?: SimilarPatent[];
   writing_recommendations: string[];
   overall_patentability: 'high' | 'medium' | 'low';
   risk_factors: string[];
