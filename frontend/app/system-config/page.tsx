@@ -305,14 +305,14 @@ export default function SystemConfigPage() {
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
-            <table className="w-full text-left">
+            <table className="w-full text-left table-fixed">
               <thead>
                 <tr className="border-b border-hairline">
-                  <th className="pb-sm text-body-sm-medium text-steel font-medium min-w-[100px]">供应商</th>
-                  <th className="pb-sm text-body-sm-medium text-steel font-medium min-w-[60px]">状态</th>
-                  <th className="pb-sm text-body-sm-medium text-steel font-medium min-w-[140px]">模型</th>
-                  <th className="pb-sm text-body-sm-medium text-steel font-medium min-w-[200px]">Base URL</th>
-                  <th className="pb-sm text-body-sm-medium text-steel font-medium min-w-[160px]">API Key</th>
+                  <th className="pb-sm text-body-sm-medium text-steel font-medium w-[100px]">供应商</th>
+                  <th className="pb-sm text-body-sm-medium text-steel font-medium w-[70px]">状态</th>
+                  <th className="pb-sm text-body-sm-medium text-steel font-medium w-[160px]">模型</th>
+                  <th className="pb-sm text-body-sm-medium text-steel font-medium">Base URL</th>
+                  <th className="pb-sm text-body-sm-medium text-steel font-medium w-[180px]">API Key</th>
                 </tr>
               </thead>
               <tbody>
@@ -334,7 +334,7 @@ export default function SystemConfigPage() {
                           <Badge variant="gray" className="text-xs">未配置</Badge>
                         )}
                       </td>
-                      <td className="py-md max-w-[200px]">
+                      <td className="py-md pr-3 min-w-[160px]">
                         <EditableField
                           id={modelField}
                           value={editing ? draft[modelField] || '' : cfg.model_id}
@@ -344,7 +344,7 @@ export default function SystemConfigPage() {
                           editing={editing}
                         />
                       </td>
-                      <td className="py-md max-w-[300px]">
+                      <td className="py-md pr-3 min-w-[220px]">
                         <EditableField
                           id={baseUrlField}
                           value={editing ? draft[baseUrlField] || '' : cfg.base_url}
@@ -354,7 +354,7 @@ export default function SystemConfigPage() {
                           editing={editing}
                         />
                       </td>
-                      <td className="py-md">
+                      <td className="py-md min-w-[180px]">
                         <div className="flex items-center gap-1.5">
                           <EditableField
                             id={keyField}
