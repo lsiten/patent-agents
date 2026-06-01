@@ -27,6 +27,51 @@ from src.core.events import (
 from src.core.llm_client import LLMError
 
 
+# ═══════════════════════════════════════════════════════════════════
+# 专利任务目录管理 — 每个 task_id 独立目录，子目录按阶段组织
+# ═══════════════════════════════════════════════════════════════════
+
+from pathlib import Path as _Path
+
+_BACKEND_DIR = _Path(__file__).resolve().parent.parent.parent
+
+# 阶段 → 子目录映射
+_PHASE_DIR_MAP = {
+    "requirement_analysis": "requirement",
+    "retrieval_report": "retrieval",
+    "patent_draft": "draft",
+    "review_report": "review",
+}
+
+
+def _get_task_dir(task_id: str) -> _Path:
+    """获取专利任务根目录（绝对路径）"""
+    task_dir = _BACKEND_DIR / "exports" / task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+    return task_dir
+
+
+def _get_phase_dir(task_id: str, phase_field: str) -> _Path:
+    """获取某阶段的子目录"""
+    sub = _PHASE_DIR_MAP.get(phase_field, phase_field)
+    phase_dir = _get_task_dir(task_id) / sub
+    phase_dir.mkdir(parents=True, exist_ok=True)
+    return phase_dir
+
+
+def _persist_phase_result(task_id: str, phase_field: str, data: dict) -> str:
+    """将阶段结果持久化为 JSON 文件，返回文件绝对路径"""
+    phase_dir = _get_phase_dir(task_id, phase_field)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{phase_field}_{timestamp}.json"
+    file_path = phase_dir / filename
+    file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 同时写一个 latest.json 方便快速读取
+    latest_path = phase_dir / "latest.json"
+    latest_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(file_path)
+
+
 def _get_agent_factory():
     """返回 Agent 配置注册表实例，用于工作流阶段调用 Agent。
     通过 create_ai_agent(profile_id) 创建 AIAgent，然后调用 agent.run_conversation(prompt)。
@@ -426,6 +471,16 @@ class PatentWorkflowEngine:
                 context_data = self._normalize_phase_output(context_field, context_data)
                 setattr(context, context_field, context_data)
 
+                # 持久化阶段结果到对应子目录
+                try:
+                    saved_path = _persist_phase_result(
+                        context.task_id, context_field,
+                        context_data if isinstance(context_data, dict) else {"output": str(context_data)},
+                    )
+                    self._logger.info(f"Phase result persisted: {saved_path}")
+                except Exception as e:
+                    self._logger.warning(f"Failed to persist phase result: {e}")
+
                 # 记录阶段完成
                 context.add_phase_result(PhaseResult(
                     phase=phase_enum,
@@ -500,6 +555,11 @@ class PatentWorkflowEngine:
 
                     context_data = self._normalize_phase_output("patent_draft", context_data)
                     context.patent_draft = context_data
+                    # 持久化修正后的撰写结果
+                    try:
+                        _persist_phase_result(context.task_id, "patent_draft", context_data if isinstance(context_data, dict) else {"output": str(context_data)})
+                    except Exception:
+                        pass
                     context.add_phase_result(PhaseResult(
                         phase=WorkflowPhase.WRITING, success=True, duration_seconds=0,
                         output=context_data if isinstance(context_data, dict) else {},
@@ -540,6 +600,11 @@ class PatentWorkflowEngine:
 
                     context_data = self._normalize_phase_output("review_report", context_data)
                     context.review_report = context_data
+                    # 持久化审查结果
+                    try:
+                        _persist_phase_result(context.task_id, "review_report", context_data if isinstance(context_data, dict) else {"output": str(context_data)})
+                    except Exception:
+                        pass
                     context.add_phase_result(PhaseResult(
                         phase=WorkflowPhase.REVIEW, success=True, duration_seconds=0,
                         output=context_data if isinstance(context_data, dict) else {},

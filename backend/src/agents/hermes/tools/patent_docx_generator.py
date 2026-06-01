@@ -567,7 +567,7 @@ class PatentDocxGeneratorTool:
 
             # ── 保存文件 ──
             backend_dir = Path(__file__).resolve().parent.parent.parent.parent.parent
-            export_dir = backend_dir / "exports" / (task_id or "default")
+            export_dir = backend_dir / "exports" / (task_id or "default") / "final"
             export_dir.mkdir(parents=True, exist_ok=True)
 
             safe_title = re.sub(r'[\\/:*?"<>|]', '', title)[:50] or "专利申请书"
