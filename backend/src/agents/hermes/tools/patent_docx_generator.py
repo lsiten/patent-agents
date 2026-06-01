@@ -289,13 +289,15 @@ def _generate_patent_figures(
     2. gen-img (gpt-image-2) AI 生成（设 IMAGE_GEN_* / LLM_* 环境变量）
 
     Returns:
-        [{"path": "...", "title": "...", "figure_number": int}]
+        [{"path": "绝对路径", "title": "...", "figure_number": int}]
     """
+    # 附图生成到对应专利 task 的 export 目录下
+    backend_dir = Path(__file__).resolve().parent.parent.parent.parent.parent
     if output_dir is None:
-        output_dir = Path("./exports") / task_id / "figures"
+        output_dir = backend_dir / "exports" / (task_id or "default") / "figures"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    scripts_dir = Path(__file__).resolve().parent.parent.parent.parent.parent.parent / "scripts"
+    scripts_dir = backend_dir.parent / "scripts"
     script_path = scripts_dir / "generate_patent_figures.py"
     if not script_path.exists():
         logger.warning(f"Patent figures script not found: {script_path}")
@@ -329,11 +331,22 @@ def _generate_patent_figures(
             if idx >= 0:
                 json_str = result.stdout[idx + len(marker):].strip()
                 figures = json.loads(json_str)
+                # 确保所有路径为绝对路径
                 for f in figures:
+                    fig_path = Path(f["path"])
+                    if not fig_path.is_absolute():
+                        # 相对路径基于 output_dir 解析
+                        resolved = output_dir / fig_path.name
+                        if resolved.exists():
+                            f["path"] = str(resolved)
+                        else:
+                            # 尝试基于 backend_dir 解析
+                            resolved = backend_dir / fig_path
+                            f["path"] = str(resolved)
                     logger.info(f"Figure {f.get('figure_number')}: {f.get('title')} → {f.get('path')}")
                 return figures
         else:
-            logger.warning(f"Figure script stderr: {result.stderr[:500]}")
+            logger.warning(f"Figure script failed (rc={result.returncode}): {result.stderr[:500]}")
     except Exception as e:
         logger.warning(f"Figure generation failed: {e}")
 
@@ -436,8 +449,8 @@ class PatentDocxGeneratorTool:
                 try:
                     from docx.shared import Inches as _Inches
                     doc.add_picture(figure_paths[0]["path"], width=_Inches(5.0))
-                except Exception:
-                    pass  # 附图加载失败时跳过，不显示错误信息
+                except Exception as e:
+                    logger.warning(f"Failed to add abstract figure: {e} (path: {figure_paths[0].get('path', '')})")
 
             # ── 权利要求书 ── (仅在有内容时生成)
             if claims:
@@ -549,11 +562,12 @@ class PatentDocxGeneratorTool:
                         add_body_paragraph(doc, fig_title, profile, first_line_indent=False, bold=True)
                         doc.add_picture(fig_info["path"], width=_Inches(5.0))
                         doc.add_paragraph("")
-                    except Exception:
-                        pass  # 附图加载失败时跳过
+                    except Exception as e:
+                        logger.warning(f"Failed to add figure {fig_info.get('figure_number')}: {e} (path: {fig_info.get('path', '')})")
 
             # ── 保存文件 ──
-            export_dir = Path("./exports") / (task_id or "default")
+            backend_dir = Path(__file__).resolve().parent.parent.parent.parent.parent
+            export_dir = backend_dir / "exports" / (task_id or "default")
             export_dir.mkdir(parents=True, exist_ok=True)
 
             safe_title = re.sub(r'[\\/:*?"<>|]', '', title)[:50] or "专利申请书"
