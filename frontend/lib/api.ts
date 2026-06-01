@@ -646,13 +646,12 @@ export function createEventStream(
 // ============ Conversation API ============
 export interface ConversationSummary {
   id: string;
-  user_id: string;
   title: string;
   created_at: string;
   updated_at: string;
   message_count: number;
-  workflow_task_id?: string;
-  workflow_state?: string;
+  status: string;
+  linked_workflow_id?: string | null;
 }
 
 export interface ConversationDetail extends ConversationSummary {

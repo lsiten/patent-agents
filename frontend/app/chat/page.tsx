@@ -70,6 +70,8 @@ function ChatPageContent() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sendingRef = useRef(false);
+  const skipNextConversationLoadRef = useRef<string | null>(null);
+  const conversationLoadSeqRef = useRef(0);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -94,42 +96,56 @@ function ChatPageContent() {
 
   // Load conversation detail
   const loadConversation = useCallback(async (convId: string) => {
+    const loadSeq = conversationLoadSeqRef.current + 1;
+    conversationLoadSeqRef.current = loadSeq;
     setIsLoadingConv(true);
     setError(null);
     try {
       const detail = await conversationApi.get(convId);
+      if (conversationLoadSeqRef.current !== loadSeq) return;
       setMessages(detail.messages.length > 0 ? detail.messages : [createWelcomeMessage()]);
-      setWorkflowTaskId(detail.workflow_task_id ?? null);
-      setWorkflowState(detail.workflow_state ?? null);
+      setWorkflowTaskId(detail.linked_workflow_id ?? null);
+      setWorkflowState(detail.status ?? null);
     } catch (err) {
+      if (conversationLoadSeqRef.current !== loadSeq) return;
       setError(err instanceof Error ? err.message : '加载对话失败');
       setMessages([createWelcomeMessage()]);
     } finally {
-      setIsLoadingConv(false);
+      if (conversationLoadSeqRef.current === loadSeq) {
+        setIsLoadingConv(false);
+      }
     }
   }, []);
-
-  const initialMountDone = useRef(false);
 
   useEffect(() => {
     void loadConversations();
   }, [loadConversations]);
 
   useEffect(() => {
-    if (!initialMountDone.current) {
-      initialMountDone.current = true;
-      if (convIdFromParam) {
-        void loadConversation(convIdFromParam);
-      } else {
-        setMessages([createWelcomeMessage()]);
-        setWorkflowTaskId(null);
-        setWorkflowState(null);
-      }
-    } else if (convIdFromParam && convIdFromParam !== activeConvId) {
+    if (convIdFromParam) {
       setActiveConvId(convIdFromParam);
+
+      if (skipNextConversationLoadRef.current === convIdFromParam) {
+        skipNextConversationLoadRef.current = null;
+        return;
+      }
+
       void loadConversation(convIdFromParam);
+      return;
     }
-  }, [convIdFromParam, activeConvId, loadConversation]);
+
+    skipNextConversationLoadRef.current = null;
+    conversationLoadSeqRef.current += 1;
+    setActiveConvId(null);
+    setMessages([createWelcomeMessage()]);
+    setIsLoadingConv(false);
+    setWorkflowTaskId(null);
+    setWorkflowState(null);
+    setRecommendStartWorkflow(false);
+    setSuggestedTitle(null);
+    setDispatchActivities([]);
+    setError(null);
+  }, [convIdFromParam, loadConversation]);
 
   useEffect(() => {
     if (!taskIdFromParam || convIdFromParam) return;
@@ -216,6 +232,7 @@ function ChatPageContent() {
         });
         convId = created.id;
         setActiveConvId(convId);
+        skipNextConversationLoadRef.current = convId;
         router.replace(`/chat?conv_id=${encodeURIComponent(convId)}`);
         void loadConversations();
       }
@@ -451,23 +468,23 @@ function ChatPageContent() {
                     <p className="text-xs text-slate/60 mt-0.5">
                       {conv.message_count} 条消息 · {formatDate(conv.updated_at)}
                     </p>
-                    {conv.workflow_state && (
+                    {conv.linked_workflow_id && (
                       <div className="flex items-center gap-1 mt-1">
-                        {conv.workflow_state === 'completed' ? (
+                        {conv.status === 'completed' ? (
                           <CheckCircle2 className="w-3 h-3 text-green-600" />
                         ) : (
                           <Clock className="w-3 h-3 text-amber-500" />
                         )}
                         <span className="text-xs text-slate/60">
-                          {conv.workflow_state === 'completed' ? '已完成' :
-                           conv.workflow_state === 'failed' ? '已失败' :
-                           conv.workflow_state === 'initial' ? '待启动' : '进行中'}
+                          {conv.status === 'completed' ? '已完成' :
+                           conv.status === 'failed' ? '已失败' :
+                           conv.status === 'initial' ? '待启动' : '进行中'}
                         </span>
-                        {conv.workflow_task_id && (
+                        {conv.linked_workflow_id && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              router.push(`/workflow/${encodeURIComponent(conv.workflow_task_id!)}`);
+                              router.push(`/workflow/${encodeURIComponent(conv.linked_workflow_id!)}`);
                             }}
                             className="ml-2 text-xs text-brand-green-dark hover:text-brand-green font-medium underline-offset-2 hover:underline"
                           >
