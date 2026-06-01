@@ -415,6 +415,12 @@ export interface SystemConfigUpdateRequest {
   image_gen?: ModelConfigSectionUpdate;
 }
 
+export interface EnvInfoResponse {
+  environment: string;
+  env_file: string;
+  env_file_exists: boolean;
+}
+
 export interface DirEntry {
   name: string;
   path: string;

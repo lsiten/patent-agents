@@ -11,7 +11,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { systemApi } from '@/lib/api';
-import type { SystemConfigResponse, SystemConfigUpdateRequest, ProviderConfigResponse } from '@/types';
+import type { SystemConfigResponse, SystemConfigUpdateRequest, ProviderConfigResponse, EnvInfoResponse } from '@/types';
 
 type EditingValues = Record<string, string>;
 
@@ -24,13 +24,18 @@ export default function SystemConfigPage() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<EditingValues>({});
+  const [envInfo, setEnvInfo] = useState<EnvInfoResponse | null>(null);
 
   const fetchConfig = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await systemApi.config();
+      const [data, env] = await Promise.all([
+        systemApi.config(),
+        systemApi.envInfo(),
+      ]);
       setConfig(data);
+      setEnvInfo(env);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载配置失败');
     } finally {
@@ -384,6 +389,11 @@ export default function SystemConfigPage() {
           <div className="flex items-center gap-3">
             <Settings className="w-6 h-6 text-steel" />
             <h1 className="text-heading-3 font-semibold text-ink">系统配置</h1>
+            {envInfo && (
+              <Badge variant="purple">
+                {envInfo.environment} → {envInfo.env_file}
+              </Badge>
+            )}
             {saveSuccess && (
               <span className="flex items-center gap-1 text-body-sm text-brand-green-dark">
                 <CheckCircle2 className="w-4 h-4" /> 已保存
@@ -448,7 +458,7 @@ export default function SystemConfigPage() {
               <div className="text-body-sm text-steel">
                 <p className="font-medium text-ink mb-1">配置方式</p>
                 <p>
-                  修改将立即写入 <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">backend/.env</code> 文件。
+                  修改将立即写入 <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">backend/{envInfo?.env_file || '.env'}</code> 文件。
                   部分配置项（如 base_url）需要重启后端服务才能生效。
                 </p>
               </div>

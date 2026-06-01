@@ -2,7 +2,7 @@
  * API Client for Patent Multi-Agent System
  */
 
-import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory, OrgNode, DirEntry, BrowseDirResponse, FileContentResponse, SystemConfigResponse, SystemConfigUpdateRequest } from '@/types';
+import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory, OrgNode, DirEntry, BrowseDirResponse, FileContentResponse, SystemConfigResponse, SystemConfigUpdateRequest, EnvInfoResponse } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:10002/api/v1';
 
@@ -557,6 +557,9 @@ export const systemApi = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+
+  envInfo: () =>
+    request<EnvInfoResponse>('/system/config/env-info'),
 
   health: () =>
     request<{ status: string; timestamp: string }>('/health'),

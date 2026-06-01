@@ -1538,139 +1538,163 @@ async def search_knowledge_base(query: str, top_k: int = 5):
     )
 
 
-@router.get("/system/config", response_model=SystemConfigResponse)
-async def get_system_config():
-    """获取系统大模型配置（含掩码后的 API key）"""
-    from ..core.config import settings, TEXT_LLM_PROVIDERS, IMAGE_GEN_PROVIDERS
+# ── 系统配置辅助函数 ──
 
-    def mask_key(key: Optional[str]) -> str:
-        if not key:
-            return ""
-        if len(key) <= 12:
-            return key[:4] + "****"
-        return key[:8] + "****"
+# 环境变量 → .env 文件映射
+_CONFIG_ENV_FILE_MAP: Dict[str, str] = {
+    "development": ".env",
+    "testing": ".env.testing",
+    "production": ".env.production",
+}
+
+# 供应商 → 环境变量名映射（GET 和 PUT 共用）
+_LLM_ENV_MAP: Dict[str, Dict[str, str]] = {
+    "openai": {"api_key": "OPENAI_API_KEY", "base_url": "OPENAI_BASE_URL", "model_id": "LLM_OPENAI_MODEL"},
+    "anthropic": {"api_key": "ANTHROPIC_API_KEY", "base_url": "ANTHROPIC_BASE_URL", "model_id": "LLM_ANTHROPIC_MODEL"},
+}
+_IMG_ENV_MAP: Dict[str, Dict[str, str]] = {
+    "azure_aoai": {"api_key": "IMAGE_GEN_AZURE_AOAI_API_KEY", "base_url": "IMAGE_GEN_AZURE_AOAI_BASE_URL", "model_id": "IMAGE_GEN_AZURE_AOAI_MODEL_ID"},
+    "openai": {"api_key": "IMAGE_GEN_OPENAI_API_KEY", "base_url": "IMAGE_GEN_OPENAI_BASE_URL", "model_id": "IMAGE_GEN_OPENAI_MODEL_ID"},
+}
+
+
+def _get_env_file_path() -> tuple:
+    """返回 (env_file_path, environment_name)，根据当前 ENVIRONMENT 变量路由"""
+    env = os.getenv("ENVIRONMENT", "development")
+    filename = _CONFIG_ENV_FILE_MAP.get(env, ".env")
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(backend_dir, filename), env
+
+
+def _get_env_value(values: dict, *keys: str) -> str:
+    """按优先级顺序尝试多个 key，返回第一个非空值"""
+    for key in keys:
+        val = values.get(key)
+        if val:
+            return val
+    return ""
+
+
+def _mask_key(key: Optional[str]) -> str:
+    """掩码 API key"""
+    if not key:
+        return ""
+    if len(key) <= 12:
+        return key[:4] + "****"
+    return key[:8] + "****"
+
+
+def _read_config_from_env_file(env_path: str) -> SystemConfigResponse:
+    """从指定 .env 文件读取配置并构建响应"""
+    from dotenv import dotenv_values
+
+    values = dotenv_values(env_path)
 
     # 文字 LLM 供应商
     llm_providers: Dict[str, ProviderConfigResponse] = {}
-    for p in TEXT_LLM_PROVIDERS:
-        cfg = settings.llm.get_provider_config(p)
-        api_key = cfg.get("api_key")
-        llm_providers[p] = ProviderConfigResponse(
-            base_url=cfg.get("base_url") or "",
-            model_id=cfg.get("model_id") or "",
-            api_key_masked=mask_key(api_key),
+    for provider, mapping in _LLM_ENV_MAP.items():
+        # 兼容旧变量名：LLM_MODEL → LLM_OPENAI_MODEL
+        if provider == "openai":
+            api_key = _get_env_value(values, mapping["api_key"])
+            base_url = _get_env_value(values, mapping["base_url"])
+            model_id = _get_env_value(values, mapping["model_id"], "LLM_MODEL")
+        else:
+            api_key = _get_env_value(values, mapping["api_key"])
+            base_url = _get_env_value(values, mapping["base_url"])
+            model_id = _get_env_value(values, mapping["model_id"])
+
+        llm_providers[provider] = ProviderConfigResponse(
+            base_url=base_url,
+            model_id=model_id,
+            api_key_masked=_mask_key(api_key),
             configured=bool(api_key),
         )
 
     # 生图供应商
     img_providers: Dict[str, ProviderConfigResponse] = {}
-    for p in IMAGE_GEN_PROVIDERS:
-        cfg = settings.image_gen.get_provider_config(p)
-        api_key = cfg.get("api_key")
-        img_providers[p] = ProviderConfigResponse(
-            base_url=cfg.get("base_url") or "",
-            model_id=cfg.get("model_id") or "",
-            api_key_masked=mask_key(api_key),
+    for provider, mapping in _IMG_ENV_MAP.items():
+        api_key = _get_env_value(values, mapping["api_key"])
+        base_url = _get_env_value(values, mapping["base_url"])
+        model_id = _get_env_value(values, mapping["model_id"])
+        img_providers[provider] = ProviderConfigResponse(
+            base_url=base_url,
+            model_id=model_id,
+            api_key_masked=_mask_key(api_key),
             configured=bool(api_key),
         )
 
-    image_gen_fallback = not settings.image_gen.is_configured()
+    # active provider（兼容旧变量名）
+    llm_active = _get_env_value(values, "LLM_ACTIVE_PROVIDER") or "openai"
+    img_active = _get_env_value(values, "IMAGE_GEN_ACTIVE_PROVIDER") or "azure_aoai"
+
+    # 判断是否有任何生图供应商配置了 key
+    img_configured = any(p.configured for p in img_providers.values())
 
     return SystemConfigResponse(
         text_llm=ModelConfigSectionResponse(
-            active_provider=settings.llm.active_provider,
+            active_provider=llm_active,
             providers=llm_providers,
         ),
         image_gen=ModelConfigSectionResponse(
-            active_provider=settings.image_gen.active_provider,
+            active_provider=img_active,
             providers=img_providers,
         ),
-        image_gen_fallback_to_llm=image_gen_fallback,
+        image_gen_fallback_to_llm=not img_configured,
     )
+
+
+@router.get("/system/config", response_model=SystemConfigResponse)
+async def get_system_config():
+    """获取系统大模型配置（从对应环境的 .env 文件直接读取）"""
+    env_path, _ = _get_env_file_path()
+    if not os.path.isfile(env_path):
+        raise HTTPException(status_code=400, detail=f"配置文件不存在: {os.path.basename(env_path)}")
+    return _read_config_from_env_file(env_path)
 
 
 @router.put("/system/config", response_model=SystemConfigResponse)
 async def update_system_config(body: SystemConfigUpdateRequest):
-    """更新系统大模型配置（写入 .env 文件）"""
+    """更新系统大模型配置（写入对应环境的 .env 文件）"""
     from dotenv import set_key
 
-    # 计算 .env 文件路径
-    _env_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        ".env",
-    )
-    if not os.path.isfile(_env_path):
-        raise HTTPException(status_code=400, detail=".env 文件不存在，请先创建")
-
-    def mask_key(key: Optional[str]) -> str:
-        if not key:
-            return ""
-        if len(key) <= 12:
-            return key[:4] + "****"
-        return key[:8] + "****"
-
-    # ── 环境变量映射表 ──
-    LLM_ENV_MAP: Dict[str, Dict[str, str]] = {
-        "openai": {"api_key": "OPENAI_API_KEY", "base_url": "OPENAI_BASE_URL", "model_id": "LLM_OPENAI_MODEL"},
-        "anthropic": {"api_key": "ANTHROPIC_API_KEY", "base_url": "ANTHROPIC_BASE_URL", "model_id": "LLM_ANTHROPIC_MODEL"},
-    }
-    IMG_ENV_MAP: Dict[str, Dict[str, str]] = {
-        "azure_aoai": {"api_key": "IMAGE_GEN_AZURE_AOAI_API_KEY", "base_url": "IMAGE_GEN_AZURE_AOAI_BASE_URL", "model_id": "IMAGE_GEN_AZURE_AOAI_MODEL_ID"},
-        "openai": {"api_key": "IMAGE_GEN_OPENAI_API_KEY", "base_url": "IMAGE_GEN_OPENAI_BASE_URL", "model_id": "IMAGE_GEN_OPENAI_MODEL_ID"},
-    }
+    env_path, _ = _get_env_file_path()
+    if not os.path.isfile(env_path):
+        raise HTTPException(status_code=400, detail=f"配置文件不存在: {os.path.basename(env_path)}")
 
     # 写入函数
     def apply_updates(section: str, env_map: Dict[str, Dict[str, str]], updates: Optional[ModelConfigSectionUpdate]) -> None:
         if not updates:
             return
         if updates.active_provider is not None:
-            set_key(_env_path, f"{section}_ACTIVE_PROVIDER", updates.active_provider)
+            set_key(env_path, f"{section}_ACTIVE_PROVIDER", updates.active_provider)
         if updates.providers:
             for provider, cfg in updates.providers.items():
                 mapping = env_map.get(provider)
                 if not mapping:
                     continue
                 if cfg.base_url is not None and mapping.get("base_url"):
-                    set_key(_env_path, mapping["base_url"], cfg.base_url)
+                    set_key(env_path, mapping["base_url"], cfg.base_url)
                 if cfg.api_key is not None and mapping.get("api_key"):
-                    set_key(_env_path, mapping["api_key"], cfg.api_key)
+                    set_key(env_path, mapping["api_key"], cfg.api_key)
                 if cfg.model_id is not None and mapping.get("model_id"):
-                    set_key(_env_path, mapping["model_id"], cfg.model_id)
+                    set_key(env_path, mapping["model_id"], cfg.model_id)
 
-    apply_updates("LLM", LLM_ENV_MAP, body.text_llm)
-    apply_updates("IMAGE_GEN", IMG_ENV_MAP, body.image_gen)
+    apply_updates("LLM", _LLM_ENV_MAP, body.text_llm)
+    apply_updates("IMAGE_GEN", _IMG_ENV_MAP, body.image_gen)
 
-    # 写入后从 os.environ 读取最新值（set_key 会同步更新 os.environ）
-    def env_val(key: str, fallback: str = "") -> str:
-        return os.environ.get(key, fallback)
+    # 写入后从文件重新读取，确保返回最新状态
+    return _read_config_from_env_file(env_path)
 
-    def read_section(
-        active_provider_key: str,
-        env_map: Dict[str, Dict[str, str]],
-    ) -> ModelConfigSectionResponse:
-        active = env_val(active_provider_key)
-        providers: Dict[str, ProviderConfigResponse] = {}
-        for provider, mapping in env_map.items():
-            ak = env_val(mapping.get("api_key", ""))
-            providers[provider] = ProviderConfigResponse(
-                base_url=env_val(mapping.get("base_url", "")),
-                model_id=env_val(mapping.get("model_id", "")),
-                api_key_masked=mask_key(ak),
-                configured=bool(ak),
-            )
-        return ModelConfigSectionResponse(active_provider=active, providers=providers)
 
-    llm_section = read_section("LLM_ACTIVE_PROVIDER", LLM_ENV_MAP)
-    img_section = read_section("IMAGE_GEN_ACTIVE_PROVIDER", IMG_ENV_MAP)
-
-    # 判断是否有任何生图供应商配置了 key
-    img_configured = any(p.configured for p in img_section.providers.values())
-
-    return SystemConfigResponse(
-        text_llm=llm_section,
-        image_gen=img_section,
-        image_gen_fallback_to_llm=not img_configured,
-    )
+@router.get("/system/config/env-info")
+async def get_system_config_env_info():
+    """获取当前环境配置信息（环境名称、文件名、是否存在）"""
+    env_path, env_name = _get_env_file_path()
+    return {
+        "environment": env_name,
+        "env_file": os.path.basename(env_path),
+        "env_file_exists": os.path.isfile(env_path),
+    }
 
 
 @router.get("/system/status", response_model=SystemStatusResponse)
