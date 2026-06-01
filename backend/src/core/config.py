@@ -476,3 +476,32 @@ class AppSettings(BaseSettings):
 
 # 全局配置实例
 settings = AppSettings()
+
+
+def reload_settings() -> None:
+    """
+    运行时重新加载配置（不重启服务）。
+
+    调用时机：
+    - 用户在 system-config 页面保存新配置后
+    - `.env` 文件已被外部写入后
+
+    工作原理：
+    1. 重读 `.env` 文件并覆盖到 os.environ（确保新建进程/线程也能拿到新值）
+    2. 创建全新的 AppSettings 实例
+    3. 将全部字段逐个 setattr 到全局 settings 对象上
+
+    由于 Python 属性访问是运行时动态的，所有 import 了 settings 的模块
+    （from config import settings）都能立即读取到新值。
+    """
+    from dotenv import load_dotenv
+
+    env_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"
+    )
+    if os.path.isfile(env_path):
+        load_dotenv(env_path, override=True)
+
+    fresh = AppSettings()
+    for field_name in settings.model_fields:
+        setattr(settings, field_name, getattr(fresh, field_name))

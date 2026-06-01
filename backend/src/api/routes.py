@@ -1676,6 +1676,13 @@ async def update_system_config(body: SystemConfigUpdateRequest):
     apply_updates("LLM", _LLM_ENV_MAP, body.text_llm)
     apply_updates("IMAGE_GEN", _IMG_ENV_MAP, body.image_gen)
 
+    # 让配置立即生效（无需重启服务）
+    try:
+        from src.core.config import reload_settings
+        reload_settings()
+    except Exception as e:
+        logger.warning(f"热重载配置失败（不影响文件写入）: {e}")
+
     # 写入后从文件重新读取，确保返回最新状态
     return _read_config_from_env_file(env_path)
 
@@ -2566,6 +2573,15 @@ async def get_conversation(conv_id: str):
     async with conversations_lock:
         conv = conversations_store.get(conv_id)
     if not conv:
+        # 内存未命中：从 DB 持久化存储恢复（应对 uvicorn reload 导致的内存清除）
+        try:
+            stored = await _get_persist_store().load("conversations", conv_id)
+        except Exception:
+            stored = None
+        if stored:
+            async with conversations_lock:
+                conversations_store[conv_id] = stored
+            return stored
         raise HTTPException(status_code=404, detail="对话不存在")
     return conv
 
