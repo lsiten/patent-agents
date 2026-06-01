@@ -464,8 +464,7 @@ export default function SystemConfigPage() {
               <div className="text-body-sm text-steel">
                 <p className="font-medium text-ink mb-1">配置方式</p>
                 <p>
-                  修改将立即写入 <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">backend/{envInfo?.env_file || '.env'}</code> 文件。
-                  部分配置项（如 base_url）需要重启后端服务才能生效。
+                  修改将写入 <code className="bg-surface px-1.5 py-0.5 rounded text-xs font-mono">backend/{envInfo?.env_file || '.env'}</code> 文件，<strong className="text-ink font-medium">保存后即时生效</strong>，无需重启服务。
                 </p>
               </div>
             </div>
