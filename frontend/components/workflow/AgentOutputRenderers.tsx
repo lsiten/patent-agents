@@ -27,6 +27,7 @@ import { useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { getRetrievalPatentReferences } from '@/lib/retrieval-report';
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -251,8 +252,7 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
   const riskFactors = arr(parsedData.risk_factors).filter(isRecord);
   const recommendations = arr(parsedData.writing_recommendations).map((r) => str(r)).filter(Boolean);
 
-  // similar_patents 字段
-  const priorArtReferences = arr(parsedData.similar_patents || parsedData.prior_art_references).filter(isRecord);
+  const priorArtReferences = getRetrievalPatentReferences(parsedData);
 
   const ratingScore = (rating: unknown) => {
     switch (str(rating)) {
@@ -320,7 +320,7 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
           </h4>
           <div className="space-y-sm">
             {priorArtReferences.map((ref, i) => {
-              const relevance = str(ref.relevance);
+              const relevance = ref.riskLevel === 'high' ? 'high' : ref.riskLevel === 'medium' ? 'medium' : 'low';
               const isExpanded = expandedRef === i;
               const relevanceColor = relevance === 'high' ? 'border-orange-200' :
                 relevance === 'medium' ? 'border-yellow-200' : 'border-hairline';
@@ -333,10 +333,10 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <span className="text-body-sm-medium text-muted flex-shrink-0">#{i + 1}</span>
                       <div className="flex-1 min-w-0">
-                        <p className="text-body-sm-medium font-medium text-ink truncate">{str(ref.title)}</p>
+                        <p className="text-body-sm-medium font-medium text-ink truncate">{ref.title}</p>
                         <div className="flex items-center gap-2 mt-xs">
-                          {str(ref.reference_id) && <span className="text-caption text-muted">{str(ref.reference_id)}</span>}
-                          {str(ref.source) && <Badge variant="gray">{str(ref.source)}</Badge>}
+                          {ref.patentId && <span className="text-caption text-muted">{ref.patentId}</span>}
+                          {ref.source && <Badge variant="gray">{ref.source}</Badge>}
                         </div>
                       </div>
                     </div>
@@ -351,32 +351,32 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
                     <div className="border-t border-hairline p-md bg-surface space-y-sm">
                       {/* 检索元信息 */}
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption text-muted">
-                        {str(ref.applicant) && (
-                          <span>申请人：<span className="text-ink">{str(ref.applicant)}</span></span>
+                        {ref.applicant && (
+                          <span>申请人：<span className="text-ink">{ref.applicant}</span></span>
                         )}
-                        {str(ref.publication_date) && (
-                          <span>公开日：<span className="text-ink">{str(ref.publication_date)}</span></span>
+                        {ref.publicationDate && (
+                          <span>公开日：<span className="text-ink">{ref.publicationDate}</span></span>
                         )}
-                        {str(ref.source) && (
-                          <span>来源：<span className="text-ink">{dbDisplayName[str(ref.source)] || str(ref.source)}</span></span>
+                        {ref.source && (
+                          <span>来源：<span className="text-ink">{dbDisplayName[ref.source] || ref.source}</span></span>
                         )}
                       </div>
-                      {str(ref.abstract) && (
+                      {ref.abstract && (
                         <div>
                           <p className="text-caption font-medium text-muted mb-xs">摘要</p>
-                          <p className="text-body-sm text-steel">{str(ref.abstract)}</p>
+                          <p className="text-body-sm text-steel">{ref.abstract}</p>
                         </div>
                       )}
-                      {str(ref.differences) && (
+                      {ref.differences.length > 0 && (
                         <div>
                           <p className="text-caption font-medium text-muted mb-xs">与本发明的区别</p>
-                          <p className="text-body-sm text-steel">{str(ref.differences)}</p>
+                          <p className="text-body-sm text-steel">{ref.differences.join('；')}</p>
                         </div>
                       )}
-                      {str(ref.url) && (
+                      {ref.url && (
                         <div className="pt-sm">
                           <a
-                            href={str(ref.url)}
+                            href={ref.url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1.5 text-body-sm font-medium text-brand-green-dark hover:underline"
