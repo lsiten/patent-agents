@@ -530,16 +530,6 @@ function ChatPageContent() {
                     <Sparkles className="w-4 h-4 mr-1" />
                     查看工作流
                   </Button>
-                  {workflowState === 'completed' && (
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={() => router.push(`/result/${encodeURIComponent(workflowTaskId)}`)}
-                    >
-                      <FileText className="w-4 h-4 mr-1" />
-                      查看结果
-                    </Button>
-                  )}
                 </>
               )}
             </div>

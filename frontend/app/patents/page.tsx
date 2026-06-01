@@ -483,11 +483,11 @@ export default function PatentsPage() {
                       size="sm"
                       onClick={(event) => {
                         event.stopPropagation();
-                        router.push(`/result/${patent.task_id}`);
+                        router.push(`/workflow/${patent.task_id}`);
                       }}
                     >
                       <Download className="w-4 h-4 mr-1.5" />
-                      下载文件
+                      查看流程
                     </Button>
                   )}
                   <Button
@@ -495,11 +495,11 @@ export default function PatentsPage() {
                     size="sm"
                     onClick={(event) => {
                       event.stopPropagation();
-                      router.push(`/result/${patent.task_id}`);
+                      router.push(`/workflow/${patent.task_id}`);
                     }}
                   >
                     <Eye className="w-4 h-4 mr-1.5" />
-                    查看详情
+                    查看流程
                   </Button>
                 </div>
               </div>
@@ -527,14 +527,14 @@ export default function PatentsPage() {
                       <FileText className="w-4 h-4 mr-1.5" />
                       查看阶段输出
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => router.push(`/result/${patent.task_id}`)}>
+                    <Button variant="ghost" size="sm" onClick={() => router.push(`/workflow/${patent.task_id}`)}>
                       <Search className="w-4 h-4 mr-1.5" />
-                      查看分析结果
+                      查看阶段输出
                     </Button>
                     {patent.progress >= 60 && (
-                      <Button variant="ghost" size="sm" onClick={() => router.push(`/result/${patent.task_id}`)}>
+                      <Button variant="ghost" size="sm" onClick={() => router.push(`/workflow/${patent.task_id}`)}>
                         <FileText className="w-4 h-4 mr-1.5" />
-                        查看专利草稿
+                        查看阶段输出
                       </Button>
                     )}
                   </div>
