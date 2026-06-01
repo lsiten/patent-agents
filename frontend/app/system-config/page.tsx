@@ -15,6 +15,73 @@ import type { SystemConfigResponse, SystemConfigUpdateRequest, ProviderConfigRes
 
 type EditingValues = Record<string, string>;
 
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  azure_aoai: 'Azure OpenAI',
+};
+
+// ── 提取到顶层避免 re-render 时重新创建导致失焦 ──
+
+function ProviderSelect({
+  providers, value, onChange, editing,
+}: {
+  providers: Record<string, ProviderConfigResponse>;
+  value: string;
+  onChange: (v: string) => void;
+  editing: boolean;
+}) {
+  if (!editing) {
+    return (
+      <Badge variant="purple">当前: {PROVIDER_LABELS[value] || value}</Badge>
+    );
+  }
+  return (
+    <select
+      className="text-body-sm rounded-md border border-hairline bg-canvas px-2 py-1 text-ink font-euclid focus:outline-none focus:ring-2 focus:ring-brand-green"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {Object.keys(providers).map((p) => (
+        <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>
+      ))}
+    </select>
+  );
+}
+
+function EditableField({
+  id, value, placeholder, onChange, type = 'text', mono, editing,
+}: {
+  id: string;
+  value: string;
+  placeholder?: string;
+  onChange: (v: string) => void;
+  type?: string;
+  mono?: boolean;
+  editing: boolean;
+}) {
+  if (!editing) {
+    return (
+      <span
+        className={`text-body-sm ${mono ? 'font-mono' : ''} ${value ? 'text-steel' : 'italic text-slate'}`}
+        title={value}
+      >
+        {value || '—'}
+      </span>
+    );
+  }
+  return (
+    <Input
+      id={id}
+      type={type}
+      value={value}
+      placeholder={placeholder || ''}
+      onChange={(e) => onChange(e.target.value)}
+      className="!w-full !text-body-sm !py-1 !px-2"
+    />
+  );
+}
+
 export default function SystemConfigPage() {
   const [config, setConfig] = useState<SystemConfigResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -191,70 +258,6 @@ export default function SystemConfigPage() {
 
   if (!config) return null;
 
-  const providerLabels: Record<string, string> = {
-    openai: 'OpenAI',
-    anthropic: 'Anthropic',
-    azure_aoai: 'Azure OpenAI',
-  };
-
-  const ProviderSelect = ({
-    section, providers, value, onChange,
-  }: {
-    section: string;
-    providers: Record<string, ProviderConfigResponse>;
-    value: string;
-    onChange: (v: string) => void;
-  }) => {
-    if (!editing) {
-      return (
-        <Badge variant="purple">当前: {providerLabels[value] || value}</Badge>
-      );
-    }
-    return (
-      <select
-        className="text-body-sm rounded-md border border-hairline bg-canvas px-2 py-1 text-ink font-euclid focus:outline-none focus:ring-2 focus:ring-brand-green"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {Object.keys(providers).map((p) => (
-          <option key={p} value={p}>{providerLabels[p] || p}</option>
-        ))}
-      </select>
-    );
-  };
-
-  const EditableField = ({
-    id, value, placeholder, onChange, type = 'text', mono,
-  }: {
-    id: string;
-    value: string;
-    placeholder?: string;
-    onChange: (v: string) => void;
-    type?: string;
-    mono?: boolean;
-  }) => {
-    if (!editing) {
-      return (
-        <span
-          className={`text-body-sm ${mono ? 'font-mono' : ''} ${value ? 'text-steel' : 'italic text-slate'}`}
-          title={value}
-        >
-          {value || '—'}
-        </span>
-      );
-    }
-    return (
-      <Input
-        id={id}
-        type={type}
-        value={value}
-        placeholder={placeholder || ''}
-        onChange={(e) => onChange(e.target.value)}
-        className="!w-full !text-body-sm !py-1 !px-2"
-      />
-    );
-  };
-
   const renderSection = (
     sectionKey: 'text_llm' | 'image_gen',
     title: string,
@@ -274,10 +277,10 @@ export default function SystemConfigPage() {
               <CardTitle>{title}</CardTitle>
             </div>
             <ProviderSelect
-              section={sectionKey}
               providers={data.providers}
               value={activeProvider}
               onChange={(v) => setDraftField(activeKey, v)}
+              editing={editing}
             />
           </div>
           {fallback !== undefined && (
@@ -322,7 +325,7 @@ export default function SystemConfigPage() {
                   return (
                     <tr key={provider} className="border-b border-hairline last:border-0">
                       <td className="py-md text-body-sm text-ink">
-                        {providerLabels[provider] || provider}
+                        {PROVIDER_LABELS[provider] || provider}
                       </td>
                       <td className="py-md">
                         {cfg.configured ? (
@@ -338,6 +341,7 @@ export default function SystemConfigPage() {
                           onChange={(v) => setDraftField(modelField, v)}
                           placeholder="model_id"
                           mono
+                          editing={editing}
                         />
                       </td>
                       <td className="py-md max-w-[300px]">
@@ -347,6 +351,7 @@ export default function SystemConfigPage() {
                           onChange={(v) => setDraftField(baseUrlField, v)}
                           placeholder="https://..."
                           mono
+                          editing={editing}
                         />
                       </td>
                       <td className="py-md">
@@ -358,6 +363,7 @@ export default function SystemConfigPage() {
                             placeholder={editing ? '输入新 key（留空不变）' : ''}
                             type={editing && !revealed ? 'password' : 'text'}
                             mono
+                            editing={editing}
                           />
                           {!editing && cfg.api_key_masked && (
                             <button
