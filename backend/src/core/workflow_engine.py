@@ -441,86 +441,173 @@ class PatentWorkflowEngine:
                     else:
                         phase_callback(phase_state, context.phase_history[-1])
 
-            # 完成前检查：质量审查是否有严重问题需要迭代修正
-            max_iterations = context.max_iterations  # 默认1次迭代机会
-            if context.review_report and context.iteration_count < max_iterations:
+            # ═══ 质量门循环：审查撰写内容 → 修正 → 再审查 → 通过后生成 docx ═══
+            max_iterations = context.max_iterations  # 最大修正迭代次数
+            review_passed = False
+
+            if context.review_report:
                 needs_revision = self._check_review_needs_revision(context.review_report)
-                if needs_revision:
+                if not needs_revision:
+                    review_passed = True
+
+            while not review_passed and context.iteration_count < max_iterations:
+                if context.review_report:
+                    # 审查未通过 — 提取问题并让 writer 修正
                     context.iteration_count += 1
+                    review_issues = self._extract_review_issues(context.review_report)
+                    context.latest_revision_suggestions = review_issues
+
                     self._logger.info(
-                        f"Quality review found critical issues, iterating (round {context.iteration_count})",
+                        f"Quality review requires revision (round {context.iteration_count})",
                         task_id=context.task_id,
                     )
                     if event_callback:
                         event_callback("CEO Agent", "agent.thinking",
-                            f"⚠️ 质量审查发现严重问题，启动修正迭代（第{context.iteration_count}轮）",
+                            f"⚠️ 质量审查发现问题，启动修正迭代（第{context.iteration_count}轮）",
                             {"agent_name": "CEO Agent", "thought": "质量审查未通过，需要修正"})
 
-                    # 重新执行撰写+审查
-                    revision_phases = [
-                        ("patent_writer", "patent.writer.v1", "patent_draft", WorkflowState.PATENT_WRITING, WorkflowPhase.WRITING),
-                        ("quality_reviewer", "patent.quality_reviewer.v1", "review_report", WorkflowState.QUALITY_REVIEW, WorkflowPhase.REVIEW),
-                    ]
+                    # ── 修正撰写 ──
+                    context.current_phase = WorkflowState.PATENT_WRITING
+                    await self._publish_progress_event(context, WorkflowState.PATENT_WRITING, "running")
 
-                    # 构建修正prompt（包含审查意见）
-                    review_issues = self._extract_review_issues(context.review_report)
-                    context.latest_revision_suggestions = review_issues
+                    revision_prompt = self._build_revision_prompt(context, review_issues)
 
-                    for agent_id, profile_id, context_field, phase_state, phase_enum in revision_phases:
-                        context.current_phase = phase_state
-                        await self._publish_progress_event(context, phase_state, "running")
+                    if event_callback:
+                        event_callback("CEO Agent", "agent.dispatch",
+                            f"🎯 调度 → 专利撰写 Agent（修正迭代第{context.iteration_count}轮）",
+                            {"from_agent": "CEO Agent", "to_agent": "专利撰写 Agent", "task_description": revision_prompt[:300]})
 
-                        agent_display_name = agent_display_names.get(agent_id, agent_id)
+                    agent_result = await self._run_agent_stream(
+                        service, "patent.writer.v1", revision_prompt,
+                        context, agent_name="专利撰写 Agent",
+                        event_callback=event_callback,
+                    )
+                    agent_text = agent_result.get("text", "")
+                    agent_tool_results = agent_result.get("tool_results", [])
 
-                        if agent_id == "patent_writer":
-                            # 撰写修正prompt包含审查意见
-                            task_desc = self._build_revision_prompt(context, review_issues)
-                        else:
-                            task_desc = self._build_phase_prompt(context, phase_state)
+                    parsed = self._try_parse_json(agent_text)
+                    if "raw_output" not in parsed:
+                        context_data = parsed
+                    else:
+                        context_data = {"agent": "patent_writer", "output": agent_text, "summary": agent_text[:500]}
+                    if agent_tool_results:
+                        context_data["tool_results"] = agent_tool_results
 
-                        if event_callback:
-                            event_callback("CEO Agent", "agent.dispatch",
-                                f"🎯 调度 → {agent_display_name}（修正迭代）: {task_desc[:80]}",
-                                {"from_agent": "CEO Agent", "to_agent": agent_display_name, "task_description": task_desc[:300]})
+                    if event_callback:
+                        event_callback("专利撰写 Agent", "agent.content",
+                            f"📄 输出（修正第{context.iteration_count}轮）",
+                            {"agent_name": "专利撰写 Agent", "content": agent_text[:500] if agent_text else "", "phase": "patent_writing"})
 
-                        agent_result = await self._run_agent_stream(
-                            service, profile_id, task_desc,
-                            context, agent_name=agent_display_name,
-                            event_callback=event_callback,
+                    context_data = self._normalize_phase_output("patent_draft", context_data)
+                    context.patent_draft = context_data
+                    context.add_phase_result(PhaseResult(
+                        phase=WorkflowPhase.WRITING, success=True, duration_seconds=0,
+                        output=context_data if isinstance(context_data, dict) else {},
+                    ))
+                    await self._publish_progress_event(context, WorkflowState.PATENT_WRITING, "completed")
+
+                    # ── 重新审查 ──
+                    context.current_phase = WorkflowState.QUALITY_REVIEW
+                    await self._publish_progress_event(context, WorkflowState.QUALITY_REVIEW, "running")
+
+                    review_prompt = self._build_phase_prompt(context, WorkflowState.QUALITY_REVIEW)
+
+                    if event_callback:
+                        event_callback("CEO Agent", "agent.dispatch",
+                            f"🎯 调度 → 质量审查 Agent（第{context.iteration_count + 1}轮审查）",
+                            {"from_agent": "CEO Agent", "to_agent": "质量审查 Agent", "task_description": review_prompt[:300]})
+
+                    agent_result = await self._run_agent_stream(
+                        service, "patent.quality_reviewer.v1", review_prompt,
+                        context, agent_name="质量审查 Agent",
+                        event_callback=event_callback,
+                    )
+                    agent_text = agent_result.get("text", "")
+                    agent_tool_results = agent_result.get("tool_results", [])
+
+                    parsed = self._try_parse_json(agent_text)
+                    if "raw_output" not in parsed:
+                        context_data = parsed
+                    else:
+                        context_data = {"agent": "quality_reviewer", "output": agent_text, "summary": agent_text[:500]}
+                    if agent_tool_results:
+                        context_data["tool_results"] = agent_tool_results
+
+                    if event_callback:
+                        event_callback("质量审查 Agent", "agent.content",
+                            f"📄 审查结果（第{context.iteration_count + 1}轮）",
+                            {"agent_name": "质量审查 Agent", "content": agent_text[:500] if agent_text else "", "phase": "quality_review"})
+
+                    context_data = self._normalize_phase_output("review_report", context_data)
+                    context.review_report = context_data
+                    context.add_phase_result(PhaseResult(
+                        phase=WorkflowPhase.REVIEW, success=True, duration_seconds=0,
+                        output=context_data if isinstance(context_data, dict) else {},
+                    ))
+                    await self._publish_progress_event(context, WorkflowState.QUALITY_REVIEW, "completed")
+
+                # 检查审查是否通过
+                needs_revision = self._check_review_needs_revision(context.review_report)
+                if not needs_revision:
+                    review_passed = True
+                    self._logger.info("Quality review passed", task_id=context.task_id)
+                    if event_callback:
+                        event_callback("CEO Agent", "agent.thinking",
+                            "✅ 质量审查通过，准备生成最终文档",
+                            {"agent_name": "CEO Agent", "thought": "审查通过"})
+                else:
+                    if context.iteration_count >= max_iterations:
+                        self._logger.warning(
+                            f"Max iterations ({max_iterations}) reached, proceeding with current draft",
+                            task_id=context.task_id,
                         )
-                        agent_text = agent_result.get("text", "")
-                        agent_tool_results = agent_result.get("tool_results", [])
-
-                        parsed = self._try_parse_json(agent_text)
-                        if "raw_output" not in parsed:
-                            context_data = parsed
-                        else:
-                            context_data = {"agent": agent_id, "output": agent_text, "summary": agent_text[:500]}
-                        
-                        # 将工具调用结果整合到 context_data
-                        if agent_tool_results:
-                            context_data["tool_results"] = agent_tool_results
-
                         if event_callback:
-                            event_callback(agent_display_name, "agent.content",
-                                f"📄 输出（修正）",
-                                {"agent_name": agent_display_name, "content": agent_text if agent_text else "", "phase": phase_state.value})
+                            event_callback("CEO Agent", "agent.thinking",
+                                f"⚠️ 已达最大修正次数({max_iterations})，使用当前版本生成文档",
+                                {"agent_name": "CEO Agent", "thought": "达到最大迭代次数"})
+                        break
 
-                        context_data = self._normalize_phase_output(context_field, context_data)
-                        setattr(context, context_field, context_data)
+            # ═══ 质量审查通过（或达到最大迭代次数）→ 生成最终 .docx 文件 ═══
+            if context.patent_draft and isinstance(context.patent_draft, dict):
+                if event_callback:
+                    event_callback("CEO Agent", "agent.thinking",
+                        "📝 正在生成最终专利文档 (.docx)...",
+                        {"agent_name": "CEO Agent", "thought": "生成最终文档"})
 
-                        context.add_phase_result(PhaseResult(
-                            phase=phase_enum,
-                            success=True,
-                            duration_seconds=0,
-                            output=context_data if isinstance(context_data, dict) else {},
-                        ))
-                        await self._publish_progress_event(context, phase_state, "completed")
+                try:
+                    from src.agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
+
+                    draft = context.patent_draft
+                    claims_data = draft.get("claims", {})
+                    description_data = draft.get("description", {})
+                    abstract_text = draft.get("abstract", "")
+
+                    docx_tool = PatentDocxGeneratorTool()
+                    docx_result = await docx_tool.execute(
+                        title=context.title or "专利申请文件",
+                        claims=claims_data,
+                        description=description_data,
+                        abstract=abstract_text,
+                        task_id=context.task_id,
+                        tech_description=context.original_description,
+                    )
+                    if docx_result.get("success"):
+                        docx_path = docx_result.get("file_path", "")
+                        context.patent_draft["docx_path"] = docx_path
+                        self._logger.info(f"Final DOCX generated after quality review: {docx_path}")
+                        if event_callback:
+                            event_callback("CEO Agent", "agent.content",
+                                f"✅ 最终专利文档已生成: {docx_path}",
+                                {"agent_name": "CEO Agent", "content": f"文档路径: {docx_path}", "phase": "completed"})
+                    else:
+                        self._logger.error(f"DOCX generation failed: {docx_result}")
+                except Exception as e:
+                    self._logger.error(f"Failed to generate final DOCX: {e}", exc_info=True)
 
             # 完成
             context.current_phase = WorkflowState.COMPLETED
             await self._publish_progress_event(context, WorkflowState.COMPLETED, "completed")
-            context.brainstorming_output = {"summary": "专利申请流程已完成。需求分析→检索→撰写→审查全部通过。"}
+            context.brainstorming_output = {"summary": "专利申请流程已完成。需求分析→检索→撰写→审查全部通过，已生成最终文档。"}
             self._logger.info("Workflow completed", task_id=context.task_id)
             return context
 
@@ -1086,7 +1173,8 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         ret_data = json.dumps(context.retrieval_report, ensure_ascii=False)[:1500] if context.retrieval_report else ""
         
         # 构建完整的专利撰写任务 prompt，让 Agent 通过工具调用完成
-        task_prompt = f"""请基于以下技术方案，通过调用工具生成完整的专利申请文件。
+        # 注：不在此阶段生成 docx，待质量审查通过后再生成
+        task_prompt = f"""请基于以下技术方案，通过调用工具生成完整的专利申请文件内容。
 
 【发明名称】
 {context.title or "待定"}
@@ -1115,12 +1203,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
    
 3. 调用 support_checker 检查权利要求与说明书的支持关系
 
-4. 最后必须调用 patent_docx_generator 生成 .docx 文件
-   - title: 发明名称
-   - claims: 权利要求数据
-   - description: 说明书数据
-   - abstract: 说明书摘要
-   - task_id: {context.task_id}
+注意：本阶段仅生成专利内容，不生成最终文档文件。请确保所有内容完整、规范。
 
 请开始执行工具调用。"""
 
@@ -1190,97 +1273,21 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             tool_call_data = self._parse_tool_call_from_text(final_response)
             if tool_call_data:
                 self._logger.info(f"Found tool_call in text: {tool_call_data.get('name')}")
-                # 如果是 patent_docx_generator 调用，直接提取参数
-                if tool_call_data.get("name") == "patent_docx_generator":
-                    args = tool_call_data.get("arguments", {})
-                    claims_data = args.get("claims", {})
-                    description_data = args.get("description", {})
-                    abstract_text = args.get("abstract", "")
-                    title = args.get("title", context.title or "专利申请文件")
-                    
-                    # 手动调用 patent_docx_generator 工具生成 docx
-                    self._logger.info("Manually invoking patent_docx_generator with parsed arguments")
-                    try:
-                        from src.agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
-                        docx_tool = PatentDocxGeneratorTool()
-                        docx_result = await docx_tool.execute(
-                            title=title,
-                            claims=claims_data,
-                            description=description_data,
-                            abstract=abstract_text,
-                            task_id=context.task_id,
-                            tech_description=context.original_description,
-                        )
-                        if docx_result.get("success"):
-                            docx_path = docx_result.get("file_path", "")
-                            self._logger.info(f"DOCX generated via manual invocation: {docx_path}")
-                    except Exception as e:
-                        self._logger.error(f"Failed to manually invoke patent_docx_generator: {e}")
-                else:
-                    # 其他工具调用，尝试提取 claims/description
-                    args = tool_call_data.get("arguments", {})
-                    if "claims" in args:
-                        claims_data = args["claims"]
-                    if "description" in args:
-                        description_data = args["description"]
-                    if "abstract" in args:
-                        abstract_text = args["abstract"]
+                # 提取 claims/description/abstract 数据（不生成 docx）
+                args = tool_call_data.get("arguments", {})
+                if "claims" in args:
+                    claims_data = args["claims"]
+                if "description" in args:
+                    description_data = args["description"]
+                if "abstract" in args:
+                    abstract_text = args["abstract"]
             
             # 如果仍然没有数据，回退到文本解析
             if not claims_data and not description_data:
                 self._logger.warning("No tool_call found, falling back to text parsing")
                 claims_data, description_data, abstract_text = self._parse_patent_from_text(final_response)
         
-        # ═══ 附图补充逻辑 ═══
-        # 如果已有 docx 但没有附图，检查是否需要生成附图
-        # 条件：有附图说明章节 或 内容涉及系统/装置/方法/流程
-        needs_figures = False
-        drawings_desc = description_data.get("description_of_drawings", "") or description_data.get("drawings_description", "")
-        if drawings_desc and drawings_desc.strip():
-            needs_figures = True
-            self._logger.info("Found drawings description, figures needed")
-        elif any(kw in context.original_description for kw in ["系统", "装置", "设备", "流程", "步骤", "方法", "模块"]):
-            needs_figures = True
-            self._logger.info("Tech description contains structural keywords, figures recommended")
-        
-        # 如果需要附图但还没生成 docx（或 docx 没有附图），重新生成
-        if needs_figures and context.original_description:
-            should_regenerate = False
-            if not docx_path:
-                should_regenerate = True
-                self._logger.info("No DOCX yet, will generate with figures")
-            elif docx_path:
-                # 检查现有 docx 是否有附图
-                try:
-                    from pathlib import Path
-                    figures_dir = Path(docx_path).parent / "figures"
-                    if not figures_dir.exists() or not list(figures_dir.glob("*.png")):
-                        should_regenerate = True
-                        self._logger.info("Existing DOCX has no figures, will regenerate")
-                except Exception:
-                    pass
-            
-            if should_regenerate:
-                self._logger.info("Regenerating DOCX with figures...")
-                try:
-                    from src.agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
-                    docx_tool = PatentDocxGeneratorTool()
-                    docx_result = await docx_tool.execute(
-                        title=context.title or "专利申请文件",
-                        claims=claims_data,
-                        description=description_data,
-                        abstract=abstract_text,
-                        task_id=context.task_id,
-                        tech_description=context.original_description,  # 确保传递以生成附图
-                    )
-                    if docx_result.get("success"):
-                        docx_path = docx_result.get("file_path", "")
-                        figures = docx_result.get("figures", [])
-                        self._logger.info(f"DOCX regenerated with {len(figures)} figures: {docx_path}")
-                except Exception as e:
-                    self._logger.error(f"Failed to regenerate DOCX with figures: {e}")
-        
-        # 组装为前端期望的结构化格式
+        # 组装为前端期望的结构化格式（不含 docx，待质量审查通过后生成）
         result = {
             "claims": {
                 "independent_claim": claims_data.get("independent_claim", ""),
@@ -1294,13 +1301,13 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 "detailed_description": description_data.get("detailed_description", ""),
             },
             "abstract": abstract_text,
-            "docx_path": docx_path,
+            "docx_path": "",
             "full_response": final_response,
         }
         
         claims_count = 1 + len(result["claims"]["dependent_claims"]) if result["claims"]["independent_claim"] else 0
         sections_count = sum(1 for v in result["description"].values() if v)
-        self._logger.info(f"Patent writer: complete. Claims={claims_count}, Sections={sections_count}, DOCX={bool(docx_path)}")
+        self._logger.info(f"Patent writer: content generated. Claims={claims_count}, Sections={sections_count} (DOCX deferred to post-review)")
         
         return result
     
