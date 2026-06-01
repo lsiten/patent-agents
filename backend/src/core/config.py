@@ -141,6 +141,14 @@ class LLMSettings(BaseSettings):
 
     model_config = {"env_prefix": "LLM_"}
 
+    @model_validator(mode="after")
+    def resolve_legacy_model_var(self) -> "LLMSettings":
+        """兼容旧版 LLM_MODEL 环境变量 — 若 LLM_OPENAI_MODEL 未设置，则回退到 LLM_MODEL"""
+        legacy_model = os.environ.get("LLM_MODEL")
+        if legacy_model and self.openai_model == "gpt-4-turbo-preview":
+            self.openai_model = legacy_model
+        return self
+
     def get_provider_config(self, provider: Optional[str] = None) -> dict:
         """获取指定供应商（或当前激活供应商）的连接配置"""
         p = provider or self.active_provider
