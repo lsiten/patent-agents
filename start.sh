@@ -139,13 +139,14 @@ start_frontend() {
     echo "   API:   ${FRONTEND_API_URL}"
     echo ""
 
+    echo "NEXT_PUBLIC_API_URL=${FRONTEND_API_URL}" > "$PROJECT_ROOT/frontend/.env.local"
+
     if [ "$ENV_MODE" = "production" ]; then
         echo "📦 构建生产版本..."
         npx next build
         echo "🚀 启动生产服务器..."
         npx next start -p "${FRONTEND_PORT}"
     else
-        echo "NEXT_PUBLIC_API_URL=${FRONTEND_API_URL}" > "$PROJECT_ROOT/frontend/.env.local"
         npx next dev -p "${FRONTEND_PORT}"
     fi
 }
@@ -213,13 +214,14 @@ start_all() {
 
     trap "echo ''; echo '🛑 关闭后端 (PID: ${BACKEND_PID})...'; kill ${BACKEND_PID} 2>/dev/null; exit 0" SIGINT SIGTERM
 
+    echo "NEXT_PUBLIC_API_URL=${FRONTEND_API_URL}" > "$PROJECT_ROOT/frontend/.env.local"
+
     if [ "$ENV_MODE" = "production" ]; then
         echo "📦 构建生产版本..."
         npx next build
         echo "🚀 启动生产服务器..."
         npx next start -p "${FRONTEND_PORT}"
     else
-        echo "NEXT_PUBLIC_API_URL=${FRONTEND_API_URL}" > "$PROJECT_ROOT/frontend/.env.local"
         npx next dev -p "${FRONTEND_PORT}"
     fi
 
