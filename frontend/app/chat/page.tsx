@@ -721,7 +721,14 @@ function ChatPageContent() {
                           </div>
                         )}
                         <div className="px-3.5 py-2.5 whitespace-pre-wrap">
-                          {msg.content}
+                          {msg.isStreaming && !msg.content ? (
+                            <div className="flex items-center gap-2 text-slate">
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>思考中...</span>
+                            </div>
+                          ) : (
+                            msg.content
+                          )}
                           {msg.role === 'assistant' && (msg.tool_calls?.length || msg.skill_uses?.length) ? (
                             <ToolCallCard
                               toolCalls={msg.tool_calls}
@@ -749,22 +756,6 @@ function ChatPageContent() {
                   )}
                 </div>
               ))
-            )}
-
-            {isLoading && (
-              <div className="flex gap-3">
-                <div className="flex-shrink-0 mt-1">
-                  <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
-                    <Bot className="w-4.5 h-4.5 text-ink" />
-                  </div>
-                </div>
-                <Card className="p-3.5 bg-canvas border border-hairline rounded-bl-md">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-brand-green-dark" />
-                    <span className="text-sm text-slate">思考中...</span>
-                  </div>
-                </Card>
-              </div>
             )}
 
             <div ref={messagesEndRef} />
