@@ -621,6 +621,21 @@ class PatentWorkflowEngine:
                             "✅ 质量审查通过，准备生成最终文档",
                             {"agent_name": "CEO Agent", "thought": "审查通过"})
                 else:
+                    # 关键优化 (避免无限循环): 当 writer 和 reviewer 连续失败
+                    # 且错误相同时 (例如 LLM API 一直不可用),继续迭代没有意义。
+                    # 立即跳出,以 FAILED 状态结束,节省时间和资源。
+                    if self._iteration_making_no_progress(context):
+                        self._logger.error(
+                            f"Iteration making no progress: writer/reviewer keep failing "
+                            f"with same error. Breaking out early. "
+                            f"task_id={context.task_id}, iteration_count={context.iteration_count}",
+                            task_id=context.task_id,
+                        )
+                        if event_callback:
+                            event_callback("CEO Agent", "agent.thinking",
+                                "❌ 修正迭代未取得进展（同一错误重复出现），提前终止",
+                                {"agent_name": "CEO Agent", "thought": "iteration_no_progress"})
+                        break
                     if context.iteration_count >= max_iterations:
                         self._logger.warning(
                             f"Max iterations ({max_iterations}) reached, proceeding with current draft",
@@ -633,6 +648,44 @@ class PatentWorkflowEngine:
                         break
 
             # ═══ 质量审查通过（或达到最大迭代次数）→ 生成最终 .docx 文件 ═══
+            # 关键修复 (Bug #1 用户可见层): 在生成 .docx 之前,必须先确认
+            # patent_draft 真的有内容、review 没有未解决的关键问题。
+            # 如果有问题,流程必须以 FAILED 结束,而不是 COMPLETED。
+            if self._has_unresolved_critical_issues(context):
+                self._logger.error(
+                    "Workflow cannot complete: unresolved critical issues remain "
+                    "(patent_draft incomplete OR review has critical issues). "
+                    f"task_id={context.task_id}, iteration_count={context.iteration_count}",
+                    task_id=context.task_id,
+                )
+                if event_callback:
+                    draft_failed = (
+                        not context.patent_draft
+                        or not isinstance(context.patent_draft, dict)
+                        or context.patent_draft.get("_agent_failed") is True
+                        or context.patent_draft.get("_incomplete_output") is True
+                    )
+                    review_failed = (
+                        not context.review_report
+                        or not isinstance(context.review_report, dict)
+                        or context.review_report.get("_agent_failed") is True
+                        or self._check_review_needs_revision(context.review_report or {})
+                    )
+                    reason = []
+                    if draft_failed:
+                        reason.append("撰写 Agent 未生成有效内容")
+                    if review_failed:
+                        reason.append("审查 Agent 发现未解决的关键问题")
+                    msg = f"❌ 流程未能完成: {'; '.join(reason) or '关键检查未通过'}"
+                    event_callback("CEO Agent", "agent.thinking", msg, {
+                        "agent_name": "CEO Agent",
+                        "thought": "workflow_failed_unresolved_critical_issues",
+                    })
+                context.current_phase = WorkflowState.FAILED
+                await self._publish_progress_event(context, WorkflowState.FAILED, "failed")
+                self._logger.warning("Workflow ended in FAILED state (unresolved critical issues)", task_id=context.task_id)
+                return context
+
             if context.patent_draft and isinstance(context.patent_draft, dict):
                 if event_callback:
                     event_callback("CEO Agent", "agent.thinking",
@@ -1090,7 +1143,21 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         return base_instruction
 
     def _check_review_needs_revision(self, review_report: Dict[str, Any]) -> bool:
-        """检查质量审查报告是否有需要修正的严重/高级别问题"""
+        """检查质量审查报告是否有需要修正的严重/高级别问题
+
+        关键：必须最先检查 _agent_failed 标记 — 当审查 Agent 自身执行失败
+        时 (LLM API 错误、超时等),即使结构化字段都为空,也必须返回 True
+        触发 iteration loop 重新审查。否则会出现"流程结束但实际未审查"的情况。
+        """
+        if not isinstance(review_report, dict):
+            return True  # 审查报告不是 dict 视为异常,触发重试
+
+        # Agent 自身执行失败 (同时检查 normalized 标记 _agent_failed 和原始字段 failed)
+        if review_report.get("_agent_failed") is True:
+            return True
+        if review_report.get("failed") is True:
+            return True
+
         # 检查recommendation字段
         recommendation = review_report.get("recommendation", "")
         if recommendation in ("reject", "revise"):
@@ -1149,6 +1216,102 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 issues.append(f"[{section}] {reason}。建议修改为：{suggested[:200]}")
 
         return issues[:10]  # 最多取10个问题
+
+    def _has_unresolved_critical_issues(self, context: WorkflowContext) -> bool:
+        """检查工作流是否还有未解决的关键问题 (在 COMPLETED 之前的最后一道闸)
+
+        关键修复 (Bug #1 用户可见层): 即便经过 max_iterations 轮修正,
+        最终的 patent_draft 仍可能是 _agent_failed / 空白内容,
+        最终 review_report 仍可能 recommendation="reject" 且包含 critical issue。
+        这种情况必须以 FAILED 状态结束,而不是 COMPLETED,
+        否则用户会看到一份"流程完成"的空专利文件。
+        """
+        # 1) 检查 patent_draft 是否真的成功生成
+        draft = context.patent_draft
+        if not draft or not isinstance(draft, dict):
+            return True
+        if draft.get("_agent_failed") is True:
+            return True
+        if draft.get("_incomplete_output") is True:
+            return True
+
+        # 检查实际内容是否为空
+        claims = draft.get("claims", {}) or {}
+        description = draft.get("description", {}) or {}
+        abstract = draft.get("abstract", "") or ""
+        has_independent_claim = bool(claims.get("independent_claim", "").strip())
+        has_description_section = any(
+            isinstance(description.get(k), str) and description.get(k, "").strip()
+            for k in ("technical_field", "background_art", "summary_of_invention", "detailed_description")
+        )
+        has_abstract = bool(abstract.strip())
+        if not (has_independent_claim and has_description_section and has_abstract):
+            # 草稿缺乏最基本的内容,绝对不能 COMPLETED
+            return True
+
+        # 2) 检查 review_report 是否有未解决的 critical issue
+        review = context.review_report
+        if not review or not isinstance(review, dict):
+            return True
+        if review.get("_agent_failed") is True:
+            return True
+        if self._check_review_needs_revision(review):
+            return True
+
+        return False
+
+    def _patent_draft_has_content(self, draft: Dict[str, Any]) -> bool:
+        """检查 patent_draft 是否包含任何真实可用的内容。
+
+        用于 iteration loop 中判断是否需要重新调用 writer。
+        """
+        if not draft or not isinstance(draft, dict):
+            return False
+        if draft.get("_agent_failed") is True or draft.get("_incomplete_output") is True:
+            return False
+        claims = draft.get("claims", {}) or {}
+        if not claims.get("independent_claim", "").strip():
+            return False
+        return True
+
+    def _iteration_making_no_progress(self, context: WorkflowContext) -> bool:
+        """检测 iteration loop 是否在原地踏步 (no progress)。
+
+        当 writer 和 reviewer 连续失败,且错误相同时 (例如 LLM API
+        一直不可用、key 错误、配额耗尽),继续迭代不会产生新内容。
+        应立即跳出,避免无谓等待和资源浪费。
+
+        Returns:
+            True 表示应当跳出 iteration loop
+        """
+        # 至少跑过一轮才有意义判断
+        if context.iteration_count < 1:
+            return False
+
+        # 检查最近一轮的 writer/reviewer 是否都失败
+        recent_phases = [p for p in context.phase_history[-2:]]
+        writer_failed = False
+        reviewer_failed = False
+        for p in recent_phases:
+            if not isinstance(p.output, dict):
+                continue
+            if p.phase == WorkflowPhase.WRITING and p.output.get("_agent_failed"):
+                writer_failed = True
+            if p.phase == WorkflowPhase.REVIEW and p.output.get("_agent_failed"):
+                reviewer_failed = True
+
+        # 只有 writer 和 reviewer 都失败,且失败原因相同时才是 no-progress
+        if not (writer_failed and reviewer_failed):
+            return False
+
+        writer_err = (context.patent_draft or {}).get("_agent_error", "")
+        reviewer_err = (context.review_report or {}).get("_agent_error", "")
+        if not writer_err or not reviewer_err:
+            return False
+
+        # 错误相同 (或非常相似) — 重复迭代没有意义
+        # 简单比较: 错误信息的前 100 个字符相同
+        return writer_err[:100] == reviewer_err[:100]
 
     def _build_revision_prompt(self, context: WorkflowContext, review_issues: List[str]) -> str:
         """构建修正撰写的prompt，包含审查问题和原有草稿"""
@@ -1638,9 +1801,105 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 
         不同阶段的 Agent 输出字段名可能与前端渲染器期望的不完全匹配，
         此方法做必要的字段映射和结构转换。
+
+        关键：检测 Agent 自身执行失败 (failed: True) — 这种情况下必须明确
+        标记 _agent_failed=True，让下游 iteration loop 知道需要重试。
+        不要用 "待生成" 之类的占位符掩盖失败。
         """
         if not isinstance(data, dict):
             return data
+
+        # ═══ 检测 Agent 自身执行失败 (LLM API 错误等) ═══
+        # 当 run_conversation 返回 {"failed": True, "error": "..."} 时
+        # 必须显式标记 _agent_failed=True，否则 _check_review_needs_revision
+        # 会读到空的 recommendation / issues 并误判为"没有问题"
+        if data.get("failed") is True or data.get("completed") is False and data.get("error"):
+            agent_error = data.get("error", "Agent execution failed")
+            error_preview = str(agent_error)[:500]
+            self._logger.warning(
+                f"Agent failure detected in {context_field}: {error_preview}"
+            )
+            if context_field == "review_report":
+                # 审查 Agent 失败 — 直接当作"严重问题，要求重审"
+                return {
+                    "_agent_failed": True,
+                    "_agent_error": error_preview,
+                    "recommendation": "reject",
+                    "revision_priority": "critical",
+                    "review_summary": {
+                        "overall_score": 0.0,
+                        "overall_rating": "poor",
+                        "recommendation": "reject",
+                        "reviewer_notes": (
+                            f"审查 Agent 执行失败，无法完成审查。错误：{error_preview}。"
+                            "将触发重新审查流程。"
+                        ),
+                    },
+                    "formal_compliance_review": {
+                        "score": 0.0,
+                        "passed": False,
+                        "issues": [
+                            {
+                                "severity": "critical",
+                                "location": "agent_execution",
+                                "description": f"审查 Agent 执行失败：{error_preview}",
+                                "suggestion": "请重试任务，或检查 LLM API 配置（API Key、配额、模型可用性）。",
+                            }
+                        ],
+                    },
+                    "claims_review": {"issues": []},
+                    "description_review": {"issues": []},
+                    "consistency_review": {"issues": []},
+                    "examination_risks": [
+                        {
+                            "risk_type": "agent_execution_failure",
+                            "likelihood": "critical",
+                            "description": f"审查 Agent 未成功执行：{error_preview}",
+                            "mitigation_suggestion": "重试任务；如持续失败，检查 LLM API 凭据与配额。",
+                        }
+                    ],
+                    "detailed_revision_suggestions": [],
+                }
+            elif context_field == "patent_draft":
+                # 撰写 Agent 失败 — 返回空白结构 + 失败标记，绝对不输出"待生成"
+                return {
+                    "_agent_failed": True,
+                    "_agent_error": error_preview,
+                    "claims": {
+                        "independent_claim": "",
+                        "dependent_claims": [],
+                    },
+                    "description": {
+                        "technical_field": "",
+                        "background_art": "",
+                        "summary_of_invention": "",
+                        "drawings_description": "",
+                        "detailed_description": "",
+                    },
+                    "abstract": "",
+                    "docx_path": "",
+                }
+            elif context_field == "retrieval_report":
+                return {
+                    "_agent_failed": True,
+                    "_agent_error": error_preview,
+                    "novelty_assessment": {"rating": "unknown", "rationale": ""},
+                    "inventive_step_assessment": {"rating": "unknown", "rationale": ""},
+                    "utility_assessment": {"rating": "unknown", "rationale": ""},
+                    "prior_art_references": [],
+                    "retrieval_keywords": [],
+                    "retrieval_databases": [],
+                    "risk_factors": [],
+                    "writing_recommendations": [],
+                    "claim_strategy_recommendations": [],
+                    "overall_patentability": "unknown",
+                    "confidence": 0,
+                }
+            else:
+                # 其他阶段也加失败标记
+                data = dict(data)
+                data["_agent_failed"] = True
+                data["_agent_error"] = error_preview
 
         # ═══ 处理 {agent, output, summary} 格式 ═══
         # 当 JSON 解析失败时，数据会被包装成这种格式
@@ -1658,7 +1917,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         # ═══ 为无法解析的数据提供兜底默认结构 ═══
         if "raw_output" in data or ("agent" in data and "output" in data):
             output_text = raw_output_text or data.get("output", "") or data.get("raw_output", "")
-            
+
             if context_field == "retrieval_report":
                 # 为检索报告提供兜底结构
                 data = self._build_fallback_retrieval_report(output_text)
@@ -2055,61 +2314,203 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         }
 
     def _build_fallback_patent_draft(self, output_text: str) -> Dict[str, Any]:
-        """为专利草稿构建兜底的默认结构"""
+        """为专利草稿构建兜底的默认结构
+
+        关键修复 (Bug #2): 严禁在兜底结构中插入"待生成"占位符。
+        之前的实现会在所有缺失字段写入"待生成",导致后续 .docx 生成
+        时将这些占位符作为正式内容写入专利文件。
+
+        新行为: 兜底结构显式标记 _agent_failed=True 与 _incomplete_output=True,
+        实际字段保持空白字符串或空列表。下游 .docx 生成逻辑必须先检查
+        _agent_failed / _incomplete_output,发现 True 时拒绝生成文档并标记
+        任务为 FAILED 状态。
+        """
         import re
-        
-        # 尝试从文本中提取权利要求
+
+        # 尝试从文本中提取权利要求 (仅在文本看起来是真实专利内容时)
+        # 关键：必须先检查 output_text 是否是真实的专利内容
+        # 之前用 regex 匹配 error/prompt 文本时,会把 prompt 的 section_type 标签
+        # 当作章节内容,导致 description 字段保存"section_type=..."这样的垃圾。
+        is_garbage_text = bool(
+            output_text and (
+                output_text.startswith("{") and "failed" in output_text
+                or "Error code:" in output_text
+                or '"failed": true' in output_text.lower()
+                or '"failed":true' in output_text.lower()
+            )
+        )
+
+        if is_garbage_text or not output_text:
+            # 输入是 API 错误或空 — 不做正则提取,直接返回空结构 + 失败标记
+            self._logger.warning(
+                "Patent draft fallback triggered with garbage input; "
+                "returning empty structure with _agent_failed=True"
+            )
+            return {
+                "_agent_failed": True,
+                "_incomplete_output": True,
+                "_raw_output": output_text[:3000] if output_text else "",
+                "claims": {
+                    "independent_claim": "",
+                    "dependent_claims": [],
+                },
+                "description": {
+                    "technical_field": "",
+                    "background_art": "",
+                    "summary_of_invention": "",
+                    "drawings_description": "",
+                    "detailed_description": "",
+                },
+                "abstract": "",
+                "docx_path": "",
+            }
+
+        # 真实文本 — 尝试正则提取
         claims_match = re.search(r'权利要求\s*1[.．、:：]\s*(.{50,500})', output_text, re.DOTALL)
         independent_claim = claims_match.group(1).strip() if claims_match else ""
-        
-        # 尝试提取从属权利要求
+
+        # 防御：如果提取出的"权利要求1"内容里包含 section_type 标签,
+        # 说明这是 prompt 文本泄漏,丢弃
+        if "section_type" in independent_claim or "调用" in independent_claim:
+            independent_claim = ""
+
         dependent_claims = []
         dep_matches = re.findall(r'权利要求\s*(\d+)[.．、:：]\s*(.{30,300})', output_text, re.DOTALL)
         for num, content in dep_matches:
             if num != "1":
-                dependent_claims.append(f"权利要求{num}. {content.strip()}")
-        
-        # 尝试提取技术领域
+                clean = content.strip()
+                if "section_type" not in clean and "调用" not in clean:
+                    dependent_claims.append(f"权利要求{num}. {clean}")
+
         tech_field_match = re.search(r'技术领域[：:]\s*(.{10,200})', output_text)
         tech_field = tech_field_match.group(1).strip() if tech_field_match else ""
-        
-        # 尝试提取背景技术
+        if "section_type" in tech_field:
+            tech_field = ""
+
         background_match = re.search(r'背景技术[：:]\s*(.{50,1000}?)(?=发明内容|技术方案|$)', output_text, re.DOTALL)
         background = background_match.group(1).strip() if background_match else ""
-        
-        # 尝试提取摘要
+        if "section_type" in background:
+            background = ""
+
         abstract_match = re.search(r'摘要[：:]\s*(.{50,500})', output_text)
         abstract = abstract_match.group(1).strip() if abstract_match else ""
-        
+        if "section_type" in abstract:
+            abstract = ""
+
+        # 检查是否真的提取到了任何内容
+        has_content = bool(independent_claim or dependent_claims or tech_field or background or abstract)
+        if not has_content:
+            self._logger.warning(
+                "Patent draft fallback: no real content extracted from output text"
+            )
+            return {
+                "_agent_failed": True,
+                "_incomplete_output": True,
+                "_raw_output": output_text[:3000] if output_text else "",
+                "claims": {"independent_claim": "", "dependent_claims": []},
+                "description": {
+                    "technical_field": "",
+                    "background_art": "",
+                    "summary_of_invention": "",
+                    "drawings_description": "",
+                    "detailed_description": "",
+                },
+                "abstract": "",
+                "docx_path": "",
+            }
+
         return {
             "claims": {
-                "independent_claim": independent_claim if independent_claim else "待生成",
-                "dependent_claims": dependent_claims if dependent_claims else [],
-                "claim_tree": {},
+                "independent_claim": independent_claim,
+                "dependent_claims": dependent_claims,
             },
             "description": {
-                "technical_field": tech_field if tech_field else "待生成",
-                "background_art": background if background else "待生成",
-                "summary_of_invention": {
-                    "technical_problem": "待生成",
-                    "technical_solution": "待生成",
-                    "beneficial_effects": "待生成",
-                },
-                "description_of_drawings": "",
-                "detailed_description": [],
+                "technical_field": tech_field,
+                "background_art": background,
+                "summary_of_invention": "",
+                "drawings_description": "",
+                "detailed_description": "",
             },
-            "abstract": abstract if abstract else "待生成",
-            "_raw_output": output_text[:3000] if output_text else "",  # 保留原始输出供参考
+            "abstract": abstract,
+            "docx_path": "",
+            "_raw_output": output_text[:3000] if output_text else "",
         }
 
     def _build_fallback_review_report(self, output_text: str) -> Dict[str, Any]:
-        """为审查报告构建兜底的默认结构"""
+        """为审查报告构建兜底的默认结构
+
+        关键修复 (Bug #1 根因): 之前的实现当 review 输出无法解析时
+        设置 recommendation='unknown' / revision_priority='medium' / issues=[],
+        导致 _check_review_needs_revision 全部检查都失败,workflow 误判为
+        "无问题"并直接完成,从来不回退到 writer。
+
+        新行为: 兜底结构必须明确包含一个 critical 级别 issue,
+        保证 _check_review_needs_revision 返回 True,触发 iteration loop。
+        """
         import re
-        
-        # 尝试提取评分
+
+        # 检测输入是否是 API 错误或空响应
+        is_garbage_text = bool(
+            output_text and (
+                "Error code:" in output_text
+                or '"failed": true' in output_text.lower()
+                or '"failed":true' in output_text.lower()
+                or output_text.startswith("{")
+                and "error" in output_text[:200].lower()
+            )
+        )
+
+        if is_garbage_text or not output_text:
+            # 输入是 API 错误或空 — 必须显式标记失败,让 iteration loop 触发
+            error_msg = (output_text or "审查 Agent 输出为空")[:500]
+            self._logger.warning(
+                f"Review report fallback triggered with garbage input: {error_msg[:200]}"
+            )
+            return {
+                "_agent_failed": True,
+                "_incomplete_output": True,
+                "_raw_output": output_text[:2000] if output_text else "",
+                "recommendation": "reject",
+                "revision_priority": "critical",
+                "review_summary": {
+                    "overall_score": 0.0,
+                    "overall_rating": "poor",
+                    "recommendation": "reject",
+                    "reviewer_notes": (
+                        f"审查 Agent 输出无法解析或为错误响应：{error_msg}。"
+                        "将触发重新审查。"
+                    ),
+                },
+                "formal_compliance_review": {
+                    "score": 0.0,
+                    "passed": False,
+                    "issues": [
+                        {
+                            "severity": "critical",
+                            "location": "agent_execution",
+                            "description": f"审查 Agent 未成功完成审查: {error_msg}",
+                            "suggestion": "请重试任务，或检查 LLM API 配置。",
+                        }
+                    ],
+                },
+                "claims_review": {"issues": []},
+                "description_review": {"issues": []},
+                "consistency_review": {"issues": []},
+                "examination_risks": [
+                    {
+                        "risk_type": "agent_execution_failure",
+                        "likelihood": "critical",
+                        "description": f"审查 Agent 未成功执行: {error_msg}",
+                        "mitigation_suggestion": "重试任务;如持续失败,检查 LLM API 凭据与配额。",
+                    }
+                ],
+                "detailed_revision_suggestions": [],
+            }
+
+        # 真实文本 — 尝试正则提取评分和建议
         score_match = re.search(r'(?:overall_score|总分|评分)["\s:：]*([0-9.]+)', output_text)
         score = float(score_match.group(1)) if score_match else 0.5
-        
+
         # 尝试提取建议
         recommendation = "unknown"
         if re.search(r'(?:reject|驳回|不通过)', output_text, re.IGNORECASE):
@@ -2118,8 +2519,18 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             recommendation = "revise"
         elif re.search(r'(?:approve|通过|accept)', output_text, re.IGNORECASE):
             recommendation = "approve"
-        
+
+        # 关键修复：如果 recommendation 解析不出 ("unknown")，
+        # 默认按"需重审"处理，revision_priority=critical，
+        # 这样 _check_review_needs_revision 一定返回 True
+        if recommendation == "unknown":
+            recommendation = "reject"
+            priority = "critical"
+        else:
+            priority = "high" if recommendation in ("reject", "revise") else "medium"
+
         return {
+            "recommendation": recommendation,
             "review_summary": {
                 "overall_score": score,
                 "overall_rating": "needs_revision" if score < 0.7 else "good",
@@ -2128,21 +2539,16 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             },
             "formal_compliance_review": {
                 "score": score,
+                "passed": recommendation == "approve",
                 "issues": [],
             },
-            "claims_review": {
-                "issues": [],
-            },
-            "description_review": {
-                "issues": [],
-            },
-            "consistency_review": {
-                "issues": [],
-            },
+            "claims_review": {"issues": []},
+            "description_review": {"issues": []},
+            "consistency_review": {"issues": []},
             "examination_risks": [],
             "detailed_revision_suggestions": [],
-            "revision_priority": "medium",
-            "_raw_output": output_text[:2000] if output_text else "",  # 保留原始输出供参考
+            "revision_priority": priority,
+            "_raw_output": output_text[:2000] if output_text else "",
         }
 
     def _build_patent_url(self, patent_id: str, source: str) -> str:
