@@ -2596,7 +2596,17 @@ async def chat_in_conversation(conv_id: str, request: ConversationChatRequest):
     async with conversations_lock:
         conv = conversations_store.get(conv_id)
     if not conv:
-        raise HTTPException(status_code=404, detail="对话不存在")
+        # 内存未命中：从 DB 持久化存储恢复（应对 uvicorn reload 导致的内存清除）
+        try:
+            stored = await _get_persist_store().load("conversations", conv_id)
+        except Exception:
+            stored = None
+        if stored:
+            async with conversations_lock:
+                conversations_store[conv_id] = stored
+            conv = stored
+        else:
+            raise HTTPException(status_code=404, detail="对话不存在")
     if conv.get("linked_workflow_id"):
         raise HTTPException(status_code=400, detail="该对话已关联工作流，请使用工作流聊天接口")
 
@@ -2686,7 +2696,17 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
     async with conversations_lock:
         conv = conversations_store.get(conv_id)
     if not conv:
-        raise HTTPException(status_code=404, detail="对话不存在")
+        # 内存未命中：从 DB 持久化存储恢复（应对 uvicorn reload 导致的内存清除）
+        try:
+            stored = await _get_persist_store().load("conversations", conv_id)
+        except Exception:
+            stored = None
+        if stored:
+            async with conversations_lock:
+                conversations_store[conv_id] = stored
+            conv = stored
+        else:
+            raise HTTPException(status_code=404, detail="对话不存在")
     if conv.get("linked_workflow_id"):
         raise HTTPException(status_code=400, detail="该对话已关联工作流，请使用工作流聊天接口")
 
@@ -2875,7 +2895,17 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
     async with conversations_lock:
         conv = conversations_store.get(conv_id)
     if not conv:
-        raise HTTPException(status_code=404, detail="对话不存在")
+        # 内存未命中：从 DB 持久化存储恢复（应对 uvicorn reload 导致的内存清除）
+        try:
+            stored = await _get_persist_store().load("conversations", conv_id)
+        except Exception:
+            stored = None
+        if stored:
+            async with conversations_lock:
+                conversations_store[conv_id] = stored
+            conv = stored
+        else:
+            raise HTTPException(status_code=404, detail="对话不存在")
     if conv.get("linked_workflow_id"):
         raise HTTPException(status_code=400, detail="该对话已关联工作流")
 
@@ -3019,7 +3049,17 @@ async def get_conversation_workflow_status(conv_id: str):
     async with conversations_lock:
         conv = conversations_store.get(conv_id)
     if not conv:
-        raise HTTPException(status_code=404, detail="对话不存在")
+        # 内存未命中：从 DB 持久化存储恢复（应对 uvicorn reload 导致的内存清除）
+        try:
+            stored = await _get_persist_store().load("conversations", conv_id)
+        except Exception:
+            stored = None
+        if stored:
+            async with conversations_lock:
+                conversations_store[conv_id] = stored
+            conv = stored
+        else:
+            raise HTTPException(status_code=404, detail="对话不存在")
 
     linked_id = conv.get("linked_workflow_id")
     if not linked_id:

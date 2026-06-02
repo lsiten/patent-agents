@@ -36,6 +36,7 @@ parse_env() {
             BACKEND_PORT=8000
             FRONTEND_PORT=3000
             BACKEND_TITLE="Dev"
+            FRONTEND_API_URL="http://localhost:8000/api/v1"
             ;;
         testing)
             ENV_MODE="testing"
@@ -43,6 +44,7 @@ parse_env() {
             BACKEND_PORT=8000
             FRONTEND_PORT=3000
             BACKEND_TITLE="Testing"
+            FRONTEND_API_URL="http://localhost:8000/api/v1"
             ;;
         production)
             ENV_MODE="production"
@@ -50,6 +52,7 @@ parse_env() {
             BACKEND_PORT=10002
             FRONTEND_PORT=10001
             BACKEND_TITLE="Production"
+            FRONTEND_API_URL="https://patent-api.lene.fun/api/v1"
             ;;
         *)
             echo -e "${RED}❌ 未知环境: $1${NC}"
@@ -134,7 +137,11 @@ start_frontend() {
     echo "✅ 前端启动中..."
     echo "   端口:  ${FRONTEND_PORT}"
     echo "   URL:   http://localhost:${FRONTEND_PORT}"
+    echo "   API:   ${FRONTEND_API_URL}"
     echo ""
+
+    # 写入 .env.local（Next.js 最高优先级 env 文件，覆盖 .env.development 等）
+    echo "NEXT_PUBLIC_API_URL=${FRONTEND_API_URL}" > "$PROJECT_ROOT/frontend/.env.local"
 
     npx next dev -p "${FRONTEND_PORT}"
 }
@@ -199,7 +206,11 @@ start_all() {
     # 启动前端 (前台)
     echo ""
     echo -e "🎨 启动前端..."
+    echo "   API:   ${FRONTEND_API_URL}"
     echo ""
+
+    # 写入 .env.local（Next.js 最高优先级，覆盖 .env.development 等）
+    echo "NEXT_PUBLIC_API_URL=${FRONTEND_API_URL}" > "$PROJECT_ROOT/frontend/.env.local"
 
     # 退出时杀掉后端
     trap "echo ''; echo '🛑 关闭后端 (PID: ${BACKEND_PID})...'; kill ${BACKEND_PID} 2>/dev/null; exit 0" SIGINT SIGTERM
