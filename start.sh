@@ -5,6 +5,7 @@
 #   ./start.sh dev          # 启动开发环境 (frontend:3000, backend:8000)
 #   ./start.sh testing      # 启动测试环境 (frontend:3000, backend:8000, ENVIRONMENT=testing)
 #   ./start.sh production   # 启动生产环境 (frontend:10001, backend:10002, ENVIRONMENT=production)
+#   ./start.sh stop [env]   # 停止服务 (all/dev/testing/production)
 #   ./start.sh backend      # 仅启动后端 (默认 dev)
 #   ./start.sh frontend     # 仅启动前端 (默认 dev)
 
@@ -229,6 +230,47 @@ start_all() {
     kill $BACKEND_PID 2>/dev/null
 }
 
+stop_service() {
+    local port=$1
+    local name=$2
+    local pid=$(lsof -ti:$port 2>/dev/null)
+    if [ -n "$pid" ]; then
+        kill $pid 2>/dev/null
+        echo -e "${GREEN}✓ ${name} 已停止 (PID: ${pid})${NC}"
+    else
+        echo -e "${YELLOW}⚠ ${name} 未运行${NC}"
+    fi
+}
+
+stop_env() {
+    local env_mode="${1:-all}"
+    echo "========================================"
+    echo "   停止服务 (${env_mode})"
+    echo "========================================"
+    echo ""
+    case "$env_mode" in
+        dev|development|testing)
+            stop_service 8000 "后端 (${env_mode})"
+            stop_service 3000 "前端 (${env_mode})"
+            ;;
+        production|prod)
+            stop_service 10002 "后端 (production)"
+            stop_service 10001 "前端 (production)"
+            ;;
+        all)
+            stop_service 8000 "后端 (dev/testing)"
+            stop_service 10002 "后端 (production)"
+            stop_service 3000 "前端 (dev/testing)"
+            stop_service 10001 "前端 (production)"
+            ;;
+        *)
+            echo -e "${RED}❌ 未知环境: $env_mode${NC}"
+            echo "可用选项: dev, testing, production, all"
+            exit 1
+            ;;
+    esac
+}
+
 # ── 主逻辑 ──────────────────────────────────────────────
 case "${1:-help}" in
     dev|development)
@@ -250,11 +292,15 @@ case "${1:-help}" in
         check_node
         start_frontend "${2:-dev}"
         ;;
+    stop)
+        stop_env "${2:-all}"
+        ;;
     help|--help|-h)
         echo "使用方法:"
         echo "  ./start.sh dev          # 启动开发环境 (frontend:3000, backend:8000)"
         echo "  ./start.sh testing      # 启动测试环境 (frontend:3000, backend:8000)"
         echo "  ./start.sh production   # 启动生产环境 (frontend:10001, backend:10002)"
+        echo "  ./start.sh stop [env]   # 停止服务 (all/dev/testing/production)"
         echo ""
         echo "  ./start.sh backend [env]   # 仅后端服务"
         echo "  ./start.sh frontend [env]  # 仅前端服务"
