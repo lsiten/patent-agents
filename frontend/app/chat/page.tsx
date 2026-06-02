@@ -12,7 +12,8 @@ import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { ToolCallCard } from '@/components/chat/ToolCallCard';
-import { DispatchPanel, type DispatchActivity } from '@/components/chat/DispatchPanel';
+import { type DispatchActivity } from '@/components/chat/DispatchPanel';
+import { WorkflowProgressStrip } from '@/components/chat/WorkflowProgressStrip';
 import { clsx } from 'clsx';
 import { conversationApi, workflowApi } from '@/lib/api';
 import type { ConversationSummary } from '@/lib/api';
@@ -109,6 +110,16 @@ function ChatPageContent() {
       setMessages(detail.messages.length > 0 ? detail.messages : [createWelcomeMessage()]);
       setWorkflowTaskId(detail.linked_workflow_id ?? null);
       setWorkflowState(detail.status ?? null);
+
+      if (detail.linked_workflow_id) {
+        try {
+          const workflow = await workflowApi.get(detail.linked_workflow_id);
+          if (conversationLoadSeqRef.current === loadSeq) {
+            setWorkflowState(workflow.current_state);
+          }
+        } catch {
+        }
+      }
     } catch (err) {
       if (conversationLoadSeqRef.current !== loadSeq) return;
       setError(err instanceof Error ? err.message : '加载对话失败');
@@ -618,38 +629,26 @@ function ChatPageContent() {
             </div>
             <div className="flex items-center gap-2">
               {workflowTaskId && (
-                <>
-                  <Badge
-                    variant="soft"
-                    color={
-                      workflowState === 'completed' ? 'green' :
-                      workflowState === 'failed' || workflowState === 'cancelled' ? 'orange' : 'blue'
-                    }
-                  >
-                    <CheckCircle2 className="w-3 h-3 mr-1" />
-                    {workflowState === 'completed' ? '已完成' :
-                     workflowState === 'failed' ? '已失败' :
-                     workflowState === 'cancelled' ? '已取消' : '流程中'}
-                  </Badge>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => router.push(`/workflow/${encodeURIComponent(workflowTaskId)}`)}
-                  >
-                    <Sparkles className="w-4 h-4 mr-1" />
-                    查看工作流
-                  </Button>
-                </>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => router.push(`/workflow/${encodeURIComponent(workflowTaskId)}`)}
+                >
+                  <Sparkles className="w-4 h-4 mr-1" />
+                  查看工作流
+                </Button>
               )}
             </div>
           </div>
         </div>
 
-        {/* Dispatch Status Panel */}
-        <DispatchPanel
-          activities={dispatchActivities}
-          workflowTaskId={workflowTaskId}
-          isActive={isLoading}
+        {/* Workflow Progress + CEO Dispatch (merged) */}
+        <WorkflowProgressStrip
+          taskId={workflowTaskId}
+          currentState={workflowState}
+          refreshKey={isLoading ? 1 : 0}
+          dispatchActivities={dispatchActivities}
+          isStreaming={isLoading}
         />
 
         {/* Messages */}

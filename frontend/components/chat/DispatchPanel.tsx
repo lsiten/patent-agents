@@ -42,7 +42,7 @@ function StatusIcon({ status }: { status: DispatchActivity['status'] }) {
 
 export function DispatchPanel({ activities, workflowTaskId, isActive }: DispatchPanelProps) {
   const router = useRouter();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Show panel when: (a) there are activities OR (b) streaming is active OR (c) a workflow is linked
@@ -50,6 +50,7 @@ export function DispatchPanel({ activities, workflowTaskId, isActive }: Dispatch
 
   const runningCount = activities.filter((a) => a.status === 'running').length;
   const completedCount = activities.filter((a) => a.status === 'completed').length;
+  const failedCount = activities.filter((a) => a.status === 'failed').length;
 
   return (
     <div className="border-b border-hairline bg-surface/80 backdrop-blur-sm px-6 py-2">
@@ -58,6 +59,12 @@ export function DispatchPanel({ activities, workflowTaskId, isActive }: Dispatch
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-slate">CEO 调度</span>
+            {activities.length === 0 && isActive && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-blue-600">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                分析中
+              </span>
+            )}
             {runningCount > 0 && (
               <span className="inline-flex items-center gap-1 text-[11px] text-blue-600">
                 <Loader2 className="w-3 h-3 animate-spin" />
@@ -68,6 +75,12 @@ export function DispatchPanel({ activities, workflowTaskId, isActive }: Dispatch
               <span className="inline-flex items-center gap-1 text-[11px] text-green-600">
                 <CheckCircle2 className="w-3 h-3" />
                 {completedCount} 已完成
+              </span>
+            )}
+            {failedCount > 0 && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-red-600">
+                <XCircle className="w-3 h-3" />
+                {failedCount} 失败
               </span>
             )}
           </div>
@@ -85,6 +98,7 @@ export function DispatchPanel({ activities, workflowTaskId, isActive }: Dispatch
             <button
               onClick={() => setExpanded(!expanded)}
               className="p-0.5 rounded hover:bg-canvas transition-colors"
+              title={expanded ? '收起' : '展开'}
             >
               {expanded ? (
                 <ChevronUp className="w-3.5 h-3.5 text-slate" />
@@ -127,8 +141,14 @@ export function DispatchPanel({ activities, workflowTaskId, isActive }: Dispatch
         )}
 
         {/* Expanded detail list */}
-        {expanded && activities.length > 0 && (
-          <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto">
+        {expanded && (
+          <div className="mt-2 space-y-1.5 max-h-56 overflow-y-auto">
+            {activities.length === 0 && isActive && (
+              <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate border border-dashed border-hairline rounded-lg bg-canvas/50">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                <span>等待 CEO 分析任务…</span>
+              </div>
+            )}
             {activities.map((activity) => {
               const agent = getAgentInfo(activity.agentId);
               const isItemExpanded = expandedId === activity.id;
