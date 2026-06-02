@@ -128,7 +128,6 @@ start_frontend() {
 
     cd "$PROJECT_ROOT/frontend"
 
-    # 安装依赖
     if [ ! -d "node_modules" ]; then
         echo "📦 安装 npm 依赖..."
         npm install
@@ -140,10 +139,15 @@ start_frontend() {
     echo "   API:   ${FRONTEND_API_URL}"
     echo ""
 
-    # 写入 .env.local（Next.js 最高优先级 env 文件，覆盖 .env.development 等）
-    echo "NEXT_PUBLIC_API_URL=${FRONTEND_API_URL}" > "$PROJECT_ROOT/frontend/.env.local"
-
-    npx next dev -p "${FRONTEND_PORT}"
+    if [ "$ENV_MODE" = "production" ]; then
+        echo "📦 构建生产版本..."
+        npx next build
+        echo "🚀 启动生产服务器..."
+        npx next start -p "${FRONTEND_PORT}"
+    else
+        echo "NEXT_PUBLIC_API_URL=${FRONTEND_API_URL}" > "$PROJECT_ROOT/frontend/.env.local"
+        npx next dev -p "${FRONTEND_PORT}"
+    fi
 }
 
 # ── 一键启动 (前后端) ────────────────────────────────────
@@ -196,26 +200,28 @@ start_all() {
     BACKEND_PID=$!
     echo -e "${GREEN}✓ 后端已启动 (PID: ${BACKEND_PID})${NC}"
 
-    # 安装前端依赖
     cd "$PROJECT_ROOT/frontend"
     if [ ! -d "node_modules" ]; then
         echo "📦 安装 npm 依赖..."
         npm install
     fi
 
-    # 启动前端 (前台)
     echo ""
     echo -e "🎨 启动前端..."
     echo "   API:   ${FRONTEND_API_URL}"
     echo ""
 
-    # 写入 .env.local（Next.js 最高优先级，覆盖 .env.development 等）
-    echo "NEXT_PUBLIC_API_URL=${FRONTEND_API_URL}" > "$PROJECT_ROOT/frontend/.env.local"
-
-    # 退出时杀掉后端
     trap "echo ''; echo '🛑 关闭后端 (PID: ${BACKEND_PID})...'; kill ${BACKEND_PID} 2>/dev/null; exit 0" SIGINT SIGTERM
 
-    npx next dev -p "${FRONTEND_PORT}"
+    if [ "$ENV_MODE" = "production" ]; then
+        echo "📦 构建生产版本..."
+        npx next build
+        echo "🚀 启动生产服务器..."
+        npx next start -p "${FRONTEND_PORT}"
+    else
+        echo "NEXT_PUBLIC_API_URL=${FRONTEND_API_URL}" > "$PROJECT_ROOT/frontend/.env.local"
+        npx next dev -p "${FRONTEND_PORT}"
+    fi
 
     # 前端退出后杀掉后端
     kill $BACKEND_PID 2>/dev/null
