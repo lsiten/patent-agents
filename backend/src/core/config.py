@@ -4,7 +4,7 @@
 """
 import os
 from enum import Enum
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from dotenv import load_dotenv
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
@@ -150,6 +150,42 @@ class LLMSettings(BaseSettings):
             "model_id": getattr(self, f"{p}_model", None),
         }
 
+    def resolve_for_agent(self, overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        解析指定 agent 的最终 LLM 配置。
+
+        合并策略：agent 覆盖 > 全局 active provider。
+        overrides 允许的字段：
+            - provider: 供应商名（不在白名单时回退 active_provider）
+            - base_url: 自定义 base URL
+            - api_key:  明文或 "enc:..." 加密值
+            - model:    模型 ID
+        缺失字段从全局同 provider 配置补齐。
+
+        返回 dict 形如 {"provider", "base_url", "api_key", "model_id"}。
+        """
+        from .secret_cipher import decrypt_value
+
+        overrides = overrides or {}
+
+        requested_provider = overrides.get("provider")
+        if requested_provider and requested_provider in TEXT_LLM_PROVIDERS:
+            provider = requested_provider
+        else:
+            provider = self.active_provider
+
+        base = self.get_provider_config(provider)
+
+        if "base_url" in overrides and overrides["base_url"] is not None:
+            base["base_url"] = overrides["base_url"]
+        if "api_key" in overrides and overrides["api_key"] is not None:
+            base["api_key"] = decrypt_value(overrides["api_key"])
+        if "model" in overrides and overrides["model"] is not None:
+            base["model_id"] = overrides["model"]
+
+        base["provider"] = provider
+        return base
+
     @field_validator("fallback_order")
     @classmethod
     def validate_fallback_order(cls, v: List[str]) -> List[str]:
@@ -223,6 +259,35 @@ class ImageGenSettings(BaseSettings):
             if getattr(self, f"{p}_api_key", None):
                 return True
         return False
+
+    def resolve_for_agent(self, overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        解析指定 agent 的最终生图配置。
+
+        合并策略同 LLMSettings.resolve_for_agent，但 override 字段名为 `model_id`
+        （区别于 LLM 的 `model`）。
+        """
+        from .secret_cipher import decrypt_value
+
+        overrides = overrides or {}
+
+        requested_provider = overrides.get("provider")
+        if requested_provider and requested_provider in IMAGE_GEN_PROVIDERS:
+            provider = requested_provider
+        else:
+            provider = self.active_provider
+
+        base = self.get_provider_config(provider)
+
+        if "base_url" in overrides and overrides["base_url"] is not None:
+            base["base_url"] = overrides["base_url"]
+        if "api_key" in overrides and overrides["api_key"] is not None:
+            base["api_key"] = decrypt_value(overrides["api_key"])
+        if "model_id" in overrides and overrides["model_id"] is not None:
+            base["model_id"] = overrides["model_id"]
+
+        base["provider"] = provider
+        return base
 
     def resolve_config(
         self, llm_settings: "LLMSettings",

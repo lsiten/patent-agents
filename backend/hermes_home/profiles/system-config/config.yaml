@@ -1,5 +1,6 @@
 # System Default Configuration
 # 所有 Hermes Agent 的默认配置，当 Agent 自身未配置时使用此处的值
+# 详细 per-agent LLM / 生图配置机制见 backend/src/agents/AGENTS.md
 
 profile_id: system-config
 name: 系统默认配置
@@ -23,3 +24,14 @@ memory:
   short_term: true
   long_term: false
   knowledge_base: false
+
+# ── Per-Agent LLM / 生图默认（可选） ──
+# 各 agent 可在自己的 config.yaml 覆盖 llm / image_gen 段。
+# 字段：provider / base_url / api_key / model(或 model_id)
+# 缺失时回退全局 LLMSettings / ImageGenSettings 的 active_provider。
+# 配置优先级（高→低）：runtime override > agent yaml > system-config 默认 > 全局
+llm:
+  provider: openai
+
+image_gen:
+  provider: azure_aoai

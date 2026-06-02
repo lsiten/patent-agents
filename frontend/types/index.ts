@@ -449,3 +449,45 @@ export interface FileContentResponse {
   content: string;
   encoding?: 'utf-8' | 'base64';
 }
+
+// ============ Per-Agent LLM / ImageGen Config ============
+
+export interface ResolvedLLMConfig {
+  provider: string;
+  base_url: string;
+  api_key_masked: string;
+  model: string;
+  is_default: boolean;
+  source: 'global' | 'agent_yaml' | 'runtime_override';
+}
+
+export interface ResolvedImageGenConfig {
+  provider: string;
+  base_url: string;
+  api_key_masked: string;
+  model_id: string;
+  is_default: boolean;
+  source: 'global' | 'agent_yaml' | 'runtime_override';
+}
+
+export interface AgentLLMConfigUpdate {
+  provider?: string | null;
+  base_url?: string | null;
+  api_key?: string | null;
+  model?: string | null;
+  use_default?: boolean;
+}
+
+export interface AgentImageGenConfigUpdate {
+  provider?: string | null;
+  base_url?: string | null;
+  api_key?: string | null;
+  model_id?: string | null;
+  use_default?: boolean;
+}
+
+export interface AgentModelConfigTestResponse {
+  success: boolean;
+  latency_ms: number;
+  error?: string | null;
+}

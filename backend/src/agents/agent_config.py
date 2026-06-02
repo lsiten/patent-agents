@@ -6,14 +6,31 @@ Agent 配置加载模块
 """
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-import re
 
 import yaml
 
 logger = logging.getLogger(__name__)
+
+
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_env(value: Any) -> Any:
+    """
+    递归将 dict / list / str 中的 ${VAR} 替换为环境变量值。
+    仅识别 ${...} 完整形式（$PARTIAL 不替换）。env 缺失时保持原样，让后续
+    resolve 阶段能识别并报告。
+    """
+    if isinstance(value, str):
+        return _ENV_VAR_PATTERN.sub(lambda m: os.environ.get(m.group(1), m.group(0)), value)
+    if isinstance(value, dict):
+        return {k: _expand_env(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env(item) for item in value]
+    return value
 
 
 def _parse_skill_frontmatter(content: str) -> Dict[str, Any]:
@@ -77,11 +94,12 @@ class AgentConfig:
         self._load()
 
     def _load(self) -> None:
-        """加载配置文件和 SOUL.md"""
+        """加载配置文件和 SOUL.md，递归展开 ${ENV_VAR} 引用"""
         config_path = self.dir_path / "config.yaml"
         if config_path.exists():
             with open(config_path, "r", encoding="utf-8") as f:
-                self._config = yaml.safe_load(f) or {}
+                raw = yaml.safe_load(f) or {}
+            self._config = _expand_env(raw)
 
         soul_path = self.dir_path / "SOUL.md"
         if soul_path.exists():
@@ -139,6 +157,28 @@ class AgentConfig:
     @property
     def api_mode(self) -> Optional[str]:
         return self._get("api_mode")
+
+    @property
+    def llm(self) -> Dict[str, Any]:
+        """LLM 子段配置。优先 agent 自己，否则 system-config 默认，否则空 dict。"""
+        val = self._config.get("llm")
+        if val:
+            return val
+        default = self._defaults.get("llm")
+        if default:
+            return default
+        return {}
+
+    @property
+    def image_gen(self) -> Dict[str, Any]:
+        """生图子段配置。优先 agent 自己，否则 system-config 默认，否则空 dict。"""
+        val = self._config.get("image_gen")
+        if val:
+            return val
+        default = self._defaults.get("image_gen")
+        if default:
+            return default
+        return {}
 
     @property
     def soul_md(self) -> str:
@@ -313,26 +353,36 @@ def create_ai_agent(
     else:
         os.environ["HERMES_HOME"] = str(HERMES_HOME_DIR)
 
-    # 从项目 settings 获取 LLM 配置（单一事实源）
+    # 解析 per-agent LLM 配置：runtime override > agent yaml > 全局 active
     from src.core.config import settings
-    provider_cfg = settings.llm.get_provider_config()
-    api_key = provider_cfg.get("api_key") or ""
-    base_url = provider_cfg.get("base_url") or ""
-    default_model = provider_cfg.get("model_id") or "gpt-4-turbo-preview"
-    api_mode = settings.llm.api_mode
 
-    # 应用前端 override（用户在页面修改的配置）
     try:
         from src.core.override_store import get_override_store
-        overrides = get_override_store().get_config_overrides(profile_id)
+        override_store = get_override_store()
+        runtime_overrides = override_store.get_config_overrides(profile_id)
+        llm_runtime = override_store.get_llm_override(profile_id) or {}
+        image_gen_runtime = override_store.get_image_gen_override(profile_id) or {}
     except Exception:
-        overrides = {}
+        runtime_overrides = {}
+        llm_runtime = {}
+        image_gen_runtime = {}
 
-    # 最终配置：override > agent config > project settings
-    model = overrides.get("model") or (config.model if config.model != "default" else None) or default_model
-    temperature = overrides.get("temperature", config.temperature)
-    max_tokens = overrides.get("max_tokens", config.max_tokens)
-    final_api_mode = config.api_mode or api_mode or overrides.get("api_mode")
+    yaml_llm = config.llm or {}
+    merged_llm: Dict[str, Any] = {**yaml_llm, **llm_runtime}
+    resolved_llm = settings.llm.resolve_for_agent(merged_llm)
+    base_url = resolved_llm.get("base_url") or ""
+    api_key = resolved_llm.get("api_key") or ""
+    default_model = resolved_llm.get("model_id") or "gpt-4-turbo-preview"
+    api_mode = settings.llm.api_mode
+
+    yaml_image_gen = config.image_gen or {}
+    merged_image_gen: Dict[str, Any] = {**yaml_image_gen, **image_gen_runtime}
+    resolved_image_gen = settings.image_gen.resolve_for_agent(merged_image_gen)
+
+    model = runtime_overrides.get("model") or (config.model if config.model != "default" else None) or default_model
+    temperature = runtime_overrides.get("temperature", config.temperature)
+    max_tokens = runtime_overrides.get("max_tokens", config.max_tokens)
+    final_api_mode = config.api_mode or api_mode or runtime_overrides.get("api_mode")
 
     cb = callbacks or {}
 
@@ -359,6 +409,10 @@ def create_ai_agent(
 
     logger.info(
         f"AIAgent created: profile={profile_id}, model={model}, "
+        f"llm_provider={resolved_llm.get('provider')}, "
+        f"llm_base_url={base_url}, "
+        f"image_gen_provider={resolved_image_gen.get('provider')}, "
+        f"image_gen_base_url={resolved_image_gen.get('base_url')}, "
         f"tools={len(agent.tools)}, toolsets={config.enabled_toolsets}"
     )
 

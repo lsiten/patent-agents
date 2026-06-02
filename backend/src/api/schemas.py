@@ -246,6 +246,53 @@ class AgentDetailResponse(BaseModel):
     skills: List[AgentSkillResponse]
     timers: List[AgentTimerResponse]
     memories: List[AgentMemoryResponse]
+    llm_config: Optional[ResolvedLLMConfigResponse] = None
+    image_gen_config: Optional[ResolvedImageGenConfigResponse] = None
+
+
+class ResolvedLLMConfigResponse(BaseModel):
+    """Agent 最终生效的 LLM 配置（用于前端展示）"""
+    provider: str
+    base_url: str
+    api_key_masked: str
+    model: str
+    is_default: bool
+    source: str  # "global" | "agent_yaml" | "runtime_override"
+
+
+class ResolvedImageGenConfigResponse(BaseModel):
+    """Agent 最终生效的生图配置"""
+    provider: str
+    base_url: str
+    api_key_masked: str
+    model_id: str
+    is_default: bool
+    source: str
+
+
+class AgentLLMConfigUpdateRequest(BaseModel):
+    """更新 agent LLM 配置请求"""
+    provider: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None  # 明文；后端会加密存储
+    model: Optional[str] = None
+    use_default: bool = False  # True 时清除 runtime override
+
+
+class AgentImageGenConfigUpdateRequest(BaseModel):
+    """更新 agent 生图配置请求"""
+    provider: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model_id: Optional[str] = None
+    use_default: bool = False
+
+
+class AgentModelConfigTestResponse(BaseModel):
+    """测试连通性响应"""
+    success: bool
+    latency_ms: float = 0.0
+    error: Optional[str] = None
 
 
 class AgentUpdateResponse(BaseModel):

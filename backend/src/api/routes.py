@@ -31,6 +31,11 @@ from .schemas import (
     AgentListResponse,
     AgentToggleResponse,
     AgentUpdateResponse,
+    AgentLLMConfigUpdateRequest,
+    AgentImageGenConfigUpdateRequest,
+    ResolvedLLMConfigResponse,
+    ResolvedImageGenConfigResponse,
+    AgentModelConfigTestResponse,
     OrganizationUpdateResponse,
     OrgNodeResponse,
     PriorArtReferenceResponse,
@@ -130,6 +135,78 @@ organization_tree_store: OrgNodeResponse | None = None
 from ..core.override_store import get_override_store
 
 _override_store = get_override_store()
+
+
+def _mask_api_key(key: Optional[str]) -> str:
+    """显示用：保留前 3 + *** + 后 4；空或短串不脱敏"""
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "***"
+    return f"{key[:3]}***{key[-4:]}"
+
+
+def _resolve_agent_llm_response(agent_id: str, cfg) -> "ResolvedLLMConfigResponse":
+    """聚合 agent 的最终 LLM 配置（含 source / is_default 溯源）"""
+    from ..core.config import settings
+    from ..api.schemas import ResolvedLLMConfigResponse
+
+    yaml_llm = cfg.llm or {}
+    runtime_llm = _override_store.get_llm_override(agent_id) or {}
+    has_runtime = bool(runtime_llm)
+    has_yaml = bool(yaml_llm)
+    merged = {**yaml_llm, **runtime_llm}
+    resolved = settings.llm.resolve_for_agent(merged)
+
+    if has_runtime:
+        source = "runtime_override"
+        is_default = False
+    elif has_yaml:
+        source = "agent_yaml"
+        is_default = False
+    else:
+        source = "global"
+        is_default = True
+
+    return ResolvedLLMConfigResponse(
+        provider=resolved.get("provider", ""),
+        base_url=resolved.get("base_url", "") or "",
+        api_key_masked=_mask_api_key(resolved.get("api_key")),
+        model=resolved.get("model_id", "") or "",
+        is_default=is_default,
+        source=source,
+    )
+
+
+def _resolve_agent_image_gen_response(agent_id: str, cfg) -> "ResolvedImageGenConfigResponse":
+    from ..core.config import settings
+    from ..api.schemas import ResolvedImageGenConfigResponse
+
+    yaml_img = cfg.image_gen or {}
+    runtime_img = _override_store.get_image_gen_override(agent_id) or {}
+    has_runtime = bool(runtime_img)
+    has_yaml = bool(yaml_img)
+    merged = {**yaml_img, **runtime_img}
+    resolved = settings.image_gen.resolve_for_agent(merged)
+
+    if has_runtime:
+        source = "runtime_override"
+        is_default = False
+    elif has_yaml:
+        source = "agent_yaml"
+        is_default = False
+    else:
+        source = "global"
+        is_default = True
+
+    return ResolvedImageGenConfigResponse(
+        provider=resolved.get("provider", ""),
+        base_url=resolved.get("base_url", "") or "",
+        api_key_masked=_mask_api_key(resolved.get("api_key")),
+        model_id=resolved.get("model_id", "") or "",
+        is_default=is_default,
+        source=source,
+    )
 
 # ── Agent 配置加载 (直接使用 hermes-agent AIAgent) ──
 from ..agents.agent_config import (
@@ -1993,10 +2070,238 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
             "skills": agent_skills,
             "timers": timers,
             "memories": memories,
+            "llm_config": _resolve_agent_llm_response(agent_id, cfg),
+            "image_gen_config": _resolve_agent_image_gen_response(agent_id, cfg),
         }
 
     # Agent 不存在
     raise HTTPException(status_code=404, detail="Agent不存在")
+
+
+@router.put(
+    "/agents/{agent_id}/llm-config",
+    response_model=ResolvedLLMConfigResponse,
+)
+async def update_agent_llm_config(
+    agent_id: str,
+    body: AgentLLMConfigUpdateRequest,
+) -> ResolvedLLMConfigResponse:
+    """更新 agent 的运行时 LLM 配置（加密存储）。use_default=true 清除覆盖。"""
+    cfg = _require_agent_profile(agent_id)
+
+    if body.use_default:
+        _override_store.clear_llm_override(agent_id)
+    else:
+        update: Dict[str, Any] = {}
+        if body.provider is not None:
+            update["provider"] = body.provider
+        if body.base_url is not None:
+            update["base_url"] = body.base_url
+        if body.api_key:
+            update["api_key"] = body.api_key
+        if body.model is not None:
+            update["model"] = body.model
+        if update:
+            existing = _override_store.get_llm_override(agent_id) or {}
+            existing.update(update)
+            _override_store.update_llm_override(agent_id, existing)
+        else:
+            _override_store.clear_llm_override(agent_id)
+
+    logger.info("Updated agent LLM config: agent=%s use_default=%s", agent_id, body.use_default)
+    return _resolve_agent_llm_response(agent_id, cfg)
+
+
+@router.put(
+    "/agents/{agent_id}/image-gen-config",
+    response_model=ResolvedImageGenConfigResponse,
+)
+async def update_agent_image_gen_config(
+    agent_id: str,
+    body: AgentImageGenConfigUpdateRequest,
+) -> ResolvedImageGenConfigResponse:
+    """更新 agent 的运行时生图配置（加密存储）。use_default=true 清除覆盖。"""
+    cfg = _require_agent_profile(agent_id)
+
+    if body.use_default:
+        _override_store.clear_image_gen_override(agent_id)
+    else:
+        update: Dict[str, Any] = {}
+        if body.provider is not None:
+            update["provider"] = body.provider
+        if body.base_url is not None:
+            update["base_url"] = body.base_url
+        if body.api_key:
+            update["api_key"] = body.api_key
+        if body.model_id is not None:
+            update["model_id"] = body.model_id
+        if update:
+            existing = _override_store.get_image_gen_override(agent_id) or {}
+            existing.update(update)
+            _override_store.update_image_gen_override(agent_id, existing)
+        else:
+            _override_store.clear_image_gen_override(agent_id)
+
+    logger.info("Updated agent image-gen config: agent=%s use_default=%s", agent_id, body.use_default)
+    return _resolve_agent_image_gen_response(agent_id, cfg)
+
+
+async def _test_llm_connectivity(
+    provider: str,
+    base_url: str,
+    api_key: str,
+    model: str,
+    timeout_sec: float = 5.0,
+) -> AgentModelConfigTestResponse:
+    """调一次最小 chat 验证 LLM 连通性。返回 success / latency / error。"""
+    import httpx
+    import time
+
+    start = time.perf_counter()
+    try:
+        if provider == "anthropic":
+            url = base_url.rstrip("/") + "/v1/messages"
+            payload = {
+                "model": model,
+                "max_tokens": 1,
+                "messages": [{"role": "user", "content": "ping"}],
+            }
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            }
+        else:
+            url = base_url.rstrip("/") + "/chat/completions"
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+            }
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+
+        async with httpx.AsyncClient(timeout=timeout_sec) as client:
+            r = await client.post(url, json=payload, headers=headers)
+        latency = (time.perf_counter() - start) * 1000
+        if r.status_code in (200, 201):
+            return AgentModelConfigTestResponse(success=True, latency_ms=round(latency, 1))
+        snippet = r.text[:300] if r.text else ""
+        return AgentModelConfigTestResponse(
+            success=False,
+            latency_ms=round(latency, 1),
+            error=f"HTTP {r.status_code}: {snippet}",
+        )
+    except Exception as e:
+        latency = (time.perf_counter() - start) * 1000
+        return AgentModelConfigTestResponse(
+            success=False,
+            latency_ms=round(latency, 1),
+            error=str(e)[:300],
+        )
+
+
+async def _test_image_gen_connectivity(
+    provider: str,
+    base_url: str,
+    api_key: str,
+    model_id: str,
+    timeout_sec: float = 5.0,
+) -> AgentModelConfigTestResponse:
+    """调一次最小请求验证生图连通性。"""
+    import httpx
+    import time
+
+    start = time.perf_counter()
+    try:
+        url = base_url.rstrip("/") + "/models"
+        headers = {"Authorization": f"Bearer {api_key}"}
+        async with httpx.AsyncClient(timeout=timeout_sec) as client:
+            r = await client.get(url, headers=headers)
+        latency = (time.perf_counter() - start) * 1000
+        if r.status_code in (200, 201):
+            return AgentModelConfigTestResponse(success=True, latency_ms=round(latency, 1))
+        snippet = r.text[:300] if r.text else ""
+        return AgentModelConfigTestResponse(
+            success=False,
+            latency_ms=round(latency, 1),
+            error=f"HTTP {r.status_code}: {snippet}",
+        )
+    except Exception as e:
+        latency = (time.perf_counter() - start) * 1000
+        return AgentModelConfigTestResponse(
+            success=False,
+            latency_ms=round(latency, 1),
+            error=str(e)[:300],
+        )
+
+
+@router.post(
+    "/agents/{agent_id}/llm-config/test",
+    response_model=AgentModelConfigTestResponse,
+)
+async def test_agent_llm_config(
+    agent_id: str,
+    body: AgentLLMConfigUpdateRequest,
+) -> AgentModelConfigTestResponse:
+    """测试 agent LLM 配置连通性（不持久化）。"""
+    from ..core.config import settings
+
+    cfg = _require_agent_profile(agent_id)
+    yaml_llm = cfg.llm or {}
+    runtime_llm = _override_store.get_llm_override(agent_id) or {}
+    test_overrides = {**yaml_llm, **runtime_llm}
+    if body.provider is not None:
+        test_overrides["provider"] = body.provider
+    if body.base_url is not None:
+        test_overrides["base_url"] = body.base_url
+    if body.api_key:
+        test_overrides["api_key"] = body.api_key
+    if body.model is not None:
+        test_overrides["model"] = body.model
+
+    resolved = settings.llm.resolve_for_agent(test_overrides)
+    return await _test_llm_connectivity(
+        provider=resolved.get("provider", ""),
+        base_url=resolved.get("base_url", "") or "",
+        api_key=resolved.get("api_key", "") or "",
+        model=resolved.get("model_id", "") or "gpt-4-turbo-preview",
+    )
+
+
+@router.post(
+    "/agents/{agent_id}/image-gen-config/test",
+    response_model=AgentModelConfigTestResponse,
+)
+async def test_agent_image_gen_config(
+    agent_id: str,
+    body: AgentImageGenConfigUpdateRequest,
+) -> AgentModelConfigTestResponse:
+    """测试 agent 生图配置连通性（不持久化）。"""
+    from ..core.config import settings
+
+    cfg = _require_agent_profile(agent_id)
+    yaml_img = cfg.image_gen or {}
+    runtime_img = _override_store.get_image_gen_override(agent_id) or {}
+    test_overrides = {**yaml_img, **runtime_img}
+    if body.provider is not None:
+        test_overrides["provider"] = body.provider
+    if body.base_url is not None:
+        test_overrides["base_url"] = body.base_url
+    if body.api_key:
+        test_overrides["api_key"] = body.api_key
+    if body.model_id is not None:
+        test_overrides["model_id"] = body.model_id
+
+    resolved = settings.image_gen.resolve_for_agent(test_overrides)
+    return await _test_image_gen_connectivity(
+        provider=resolved.get("provider", ""),
+        base_url=resolved.get("base_url", "") or "",
+        api_key=resolved.get("api_key", "") or "",
+        model_id=resolved.get("model_id", "") or "gpt-image-2",
+    )
 
 
 @router.put("/agents/{agent_id}", response_model=AgentUpdateResponse)

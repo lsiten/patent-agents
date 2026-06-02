@@ -50,5 +50,29 @@
     "skills_disabled": [],
     "skills_added": [],
     "timers": []
+  },
+  "agent.x": {
+    "config_overrides": {},
+    "tools_disabled": [],
+    "tools_added": [],
+    "skills_disabled": [],
+    "skills_added": [],
+    "timers": [],
+    "llm_override": {
+      "api_key": "enc:gAAAAABqHvBseFqNAsEGSlpCkFbm25yHHDNYNTXtLm8MHpm8oJw3hkEe4Tt38Zt-jJgZSQHDybHfgh7bcKRWfXACdt93HhznZg==",
+      "base_url": "https://runtime.example/v1",
+      "model": "gpt-4o"
+    },
+    "image_gen_override": {
+      "model_id": "dall-e-2"
+    }
+  },
+  "patent.writer.v1": {
+    "config_overrides": {},
+    "tools_disabled": [],
+    "tools_added": [],
+    "skills_disabled": [],
+    "skills_added": [],
+    "timers": []
   }
 }

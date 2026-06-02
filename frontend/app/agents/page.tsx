@@ -26,6 +26,7 @@ import {
   Upload,
   Wand2,
   Info,
+  Cpu,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -37,6 +38,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { agentApi, hermesApi } from '@/lib/api';
 import { CodeBlock } from '@/components/ui/CodeBlock';
+import AgentModelConfigPanel from '@/components/agent/AgentModelConfigPanel';
 import RelatedDetailModal from '@/components/RelatedDetailModal';
 import HermesToolChatModal from '@/components/HermesToolChatModal';
 import HermesSkillChatModal from '@/components/HermesSkillChatModal';
@@ -149,6 +151,7 @@ export default function AgentsPage() {
   const [skills, setSkills] = useState<Record<string, AgentSkill[]>>({});
   const [timers, setTimers] = useState<Record<string, AgentTimer[]>>({});
   const [memories, setMemories] = useState<Record<string, AgentMemory[]>>({});
+  const [modelConfigs, setModelConfigs] = useState<Record<string, { llm: any; image_gen: any }>>({});
   const [editingConfig, setEditingConfig] = useState(false);
   const [editForm, setEditForm] = useState<Partial<AgentConfig>>({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -242,6 +245,13 @@ export default function AgentsPage() {
       setSkills((currentSkillsByAgent) => ({ ...currentSkillsByAgent, [agentId]: detail.skills }));
       setTimers((currentTimersByAgent) => ({ ...currentTimersByAgent, [agentId]: detail.timers }));
       setMemories((currentMemoriesByAgent) => ({ ...currentMemoriesByAgent, [agentId]: detail.memories }));
+      setModelConfigs((prev) => ({
+        ...prev,
+        [agentId]: {
+          llm: (detail as any).llm_config ?? null,
+          image_gen: (detail as any).image_gen_config ?? null,
+        },
+      }));
       setError(null);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '获取Agent详情失败');
@@ -901,6 +911,10 @@ export default function AgentsPage() {
                 <TabsTrigger value="config">
                   <Settings className="w-4 h-4 mr-2" />
                   配置
+                </TabsTrigger>
+                <TabsTrigger value="model-config">
+                  <Cpu className="w-4 h-4 mr-2" />
+                  模型配置
                 </TabsTrigger>
               </TabsList>
 
@@ -1644,6 +1658,48 @@ export default function AgentsPage() {
                     </div>
                   </div>
                 </Card>
+              </TabsContent>
+
+              {/* Model Config Tab */}
+              <TabsContent value="model-config">
+                <div className="space-y-4">
+                  <p className="text-body-sm text-slate">
+                    为该 Agent 单独配置文字 LLM 和生图供应商。未配置时回退到全局默认值。
+                    API key 会以加密形式存储。
+                  </p>
+                  {selectedAgent && (
+                    <>
+                      <AgentModelConfigPanel
+                        agentId={selectedAgent}
+                        kind="llm"
+                        initial={modelConfigs[selectedAgent]?.llm ?? null}
+                        onSaved={(resolved) => {
+                          setModelConfigs((prev) => ({
+                            ...prev,
+                            [selectedAgent]: {
+                              ...(prev[selectedAgent] || { image_gen: null }),
+                              llm: resolved,
+                            },
+                          }));
+                        }}
+                      />
+                      <AgentModelConfigPanel
+                        agentId={selectedAgent}
+                        kind="image_gen"
+                        initial={modelConfigs[selectedAgent]?.image_gen ?? null}
+                        onSaved={(resolved) => {
+                          setModelConfigs((prev) => ({
+                            ...prev,
+                            [selectedAgent]: {
+                              ...(prev[selectedAgent] || { llm: null }),
+                              image_gen: resolved,
+                            },
+                          }));
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
               </TabsContent>
             </Tabs>
           </div>

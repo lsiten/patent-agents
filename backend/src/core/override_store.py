@@ -168,6 +168,82 @@ class AgentOverrideStore:
             return True
         return False
 
+    # ============ LLM / ImageGen Overrides (per-agent 加密覆盖) ============
+
+    _LLM_OVERRIDE_KEY = "llm_override"
+    _IMAGE_GEN_OVERRIDE_KEY = "image_gen_override"
+
+    def get_agent(self, agent_id: str) -> Dict[str, Any]:
+        """暴露原始 entry dict，方便测试和内部使用"""
+        return self._overrides.get(agent_id, {})
+
+    def get_llm_override(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """获取 agent 的 LLM 运行时覆盖（已解密 api_key）。未设置返回 None。"""
+        from .secret_cipher import decrypt_value
+
+        entry = self._overrides.get(agent_id, {})
+        raw = entry.get(self._LLM_OVERRIDE_KEY)
+        if not raw:
+            return None
+        result = dict(raw)
+        if "api_key" in result and result["api_key"]:
+            result["api_key"] = decrypt_value(result["api_key"])
+        return result
+
+    def update_llm_override(self, agent_id: str, llm_config: Dict[str, Any]) -> None:
+        """
+        更新 agent 的 LLM 运行时覆盖。api_key 加密后存盘。
+        其他字段（provider / base_url / model）明文存。
+        """
+        from .secret_cipher import encrypt_value
+
+        entry = self._ensure_agent(agent_id)
+        stored = dict(llm_config)
+        if stored.get("api_key"):
+            stored["api_key"] = encrypt_value(stored["api_key"])
+        entry[self._LLM_OVERRIDE_KEY] = stored
+        self.save()
+
+    def clear_llm_override(self, agent_id: str) -> None:
+        """清除 agent 的 LLM 覆盖（回到 yaml / system-config / 全局）"""
+        entry = self._overrides.get(agent_id)
+        if not entry or self._LLM_OVERRIDE_KEY not in entry:
+            return
+        del entry[self._LLM_OVERRIDE_KEY]
+        self.save()
+
+    def get_image_gen_override(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """获取 agent 的生图运行时覆盖（已解密 api_key）。未设置返回 None。"""
+        from .secret_cipher import decrypt_value
+
+        entry = self._overrides.get(agent_id, {})
+        raw = entry.get(self._IMAGE_GEN_OVERRIDE_KEY)
+        if not raw:
+            return None
+        result = dict(raw)
+        if "api_key" in result and result["api_key"]:
+            result["api_key"] = decrypt_value(result["api_key"])
+        return result
+
+    def update_image_gen_override(self, agent_id: str, img_config: Dict[str, Any]) -> None:
+        """更新 agent 的生图运行时覆盖。api_key 加密后存盘。"""
+        from .secret_cipher import encrypt_value
+
+        entry = self._ensure_agent(agent_id)
+        stored = dict(img_config)
+        if stored.get("api_key"):
+            stored["api_key"] = encrypt_value(stored["api_key"])
+        entry[self._IMAGE_GEN_OVERRIDE_KEY] = stored
+        self.save()
+
+    def clear_image_gen_override(self, agent_id: str) -> None:
+        """清除 agent 的生图覆盖"""
+        entry = self._overrides.get(agent_id)
+        if not entry or self._IMAGE_GEN_OVERRIDE_KEY not in entry:
+            return
+        del entry[self._IMAGE_GEN_OVERRIDE_KEY]
+        self.save()
+
     # ============ Timer Overrides ============
 
     def get_timers(self, agent_id: str) -> List[Dict[str, Any]]:

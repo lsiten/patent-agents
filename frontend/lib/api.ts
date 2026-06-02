@@ -2,7 +2,7 @@
  * API Client for Patent Multi-Agent System
  */
 
-import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory, OrgNode, DirEntry, BrowseDirResponse, FileContentResponse, SystemConfigResponse, SystemConfigUpdateRequest, EnvInfoResponse } from '@/types';
+import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory, OrgNode, DirEntry, BrowseDirResponse, FileContentResponse, SystemConfigResponse, SystemConfigUpdateRequest, EnvInfoResponse, ResolvedLLMConfig, ResolvedImageGenConfig, AgentLLMConfigUpdate, AgentImageGenConfigUpdate, AgentModelConfigTestResponse } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
@@ -476,6 +476,42 @@ export const agentApi = {
     request(`/agents/${encodeURIComponent(agent_id)}`, {
       method: 'PUT',
       body: JSON.stringify({ timers }),
+    }),
+
+  // Per-agent LLM config
+  getLLMConfig: async (agent_id: string): Promise<ResolvedLLMConfig | null> => {
+    const detail = await agentApi.get(agent_id) as any;
+    return detail?.llm_config ?? null;
+  },
+
+  updateLLMConfig: (agent_id: string, body: AgentLLMConfigUpdate) =>
+    request<ResolvedLLMConfig>(`/agents/${encodeURIComponent(agent_id)}/llm-config`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  testLLMConfig: (agent_id: string, body: AgentLLMConfigUpdate) =>
+    request<AgentModelConfigTestResponse>(`/agents/${encodeURIComponent(agent_id)}/llm-config/test`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  // Per-agent ImageGen config
+  getImageGenConfig: async (agent_id: string): Promise<ResolvedImageGenConfig | null> => {
+    const detail = await agentApi.get(agent_id) as any;
+    return detail?.image_gen_config ?? null;
+  },
+
+  updateImageGenConfig: (agent_id: string, body: AgentImageGenConfigUpdate) =>
+    request<ResolvedImageGenConfig>(`/agents/${encodeURIComponent(agent_id)}/image-gen-config`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  testImageGenConfig: (agent_id: string, body: AgentImageGenConfigUpdate) =>
+    request<AgentModelConfigTestResponse>(`/agents/${encodeURIComponent(agent_id)}/image-gen-config/test`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 };
 
