@@ -45,7 +45,8 @@ export function DispatchPanel({ activities, workflowTaskId, isActive }: Dispatch
   const [expanded, setExpanded] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  if (activities.length === 0 && !isActive) return null;
+  // Show panel when: (a) there are activities OR (b) streaming is active OR (c) a workflow is linked
+  if (activities.length === 0 && !isActive && !workflowTaskId) return null;
 
   const runningCount = activities.filter((a) => a.status === 'running').length;
   const completedCount = activities.filter((a) => a.status === 'completed').length;

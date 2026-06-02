@@ -5,7 +5,7 @@ import asyncio
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, status
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, status, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 
@@ -43,6 +43,7 @@ from .schemas import (
     CreateConversationRequest,
     ConversationChatRequest,
     CreateWorkflowFromConversationRequest,
+    FileUploadResponse,
 )
 from ..models.domain import PatentTask
 from ..models.enums import WorkflowState
@@ -2886,6 +2887,146 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
         event_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _parse_disclosure_file(file: UploadFile) -> Dict[str, Any]:
+    """
+    解析上传的交底书/技术资料文件（txt / docx），返回提取的文本与元数据。
+    """
+    filename = (file.filename or "uploaded").strip()
+    suffix = os.path.splitext(filename)[1].lower()
+
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="上传文件为空")
+
+    max_bytes = 10 * 1024 * 1024  # 10MB
+    if len(raw_bytes) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件过大（{len(raw_bytes) // 1024} KB），上限 {max_bytes // 1024 // 1024} MB",
+        )
+
+    extracted_text = ""
+    metadata: Dict[str, Any] = {"filename": filename, "size": len(raw_bytes)}
+
+    try:
+        if suffix == ".txt" or file.content_type == "text/plain":
+            try:
+                extracted_text = raw_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                extracted_text = raw_bytes.decode("gb18030", errors="replace")
+            metadata["format"] = "txt"
+        elif suffix == ".docx":
+            try:
+                from docx import Document  # python-docx
+            except ImportError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail="服务器未安装 python-docx，无法解析 docx 文件",
+                ) from e
+
+            import io
+            doc = Document(io.BytesIO(raw_bytes))
+            paragraphs = [p.text for p in doc.paragraphs if p.text and p.text.strip()]
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        cell_text = cell.text.strip()
+                        if cell_text:
+                            paragraphs.append(cell_text)
+            extracted_text = "\n".join(paragraphs).strip()
+            metadata["format"] = "docx"
+            metadata["paragraph_count"] = len(paragraphs)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的文件类型: {suffix or file.content_type}，仅支持 .txt 和 .docx",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("文件解析失败: {}", e)
+        raise HTTPException(status_code=500, detail=f"文件解析失败: {str(e)}")
+
+    if not extracted_text.strip():
+        raise HTTPException(status_code=400, detail="未能从文件中提取出任何文本内容")
+
+    return {
+        "filename": filename,
+        "file_type": suffix.lstrip(".") or "txt",
+        "file_size": len(raw_bytes),
+        "extracted_text": extracted_text.strip(),
+        "metadata": metadata,
+    }
+
+
+@router.post("/conversations/{conv_id}/upload", response_model=FileUploadResponse)
+async def upload_disclosure_file(
+    conv_id: str,
+    file: UploadFile = File(..., description="交底书或技术资料，支持 .txt / .docx"),
+):
+    """
+    上传交底书/技术资料文件到对话中。
+    解析后的文本会自动作为用户消息追加到对话历史，并可由后续聊天请求提供给 agent。
+    """
+    parsed = await _parse_disclosure_file(file)
+
+    async with conversations_lock:
+        conv = conversations_store.get(conv_id)
+    if not conv:
+        try:
+            stored = await _get_persist_store().load("conversations", conv_id)
+        except Exception:
+            stored = None
+        if stored:
+            async with conversations_lock:
+                conversations_store[conv_id] = stored
+            conv = stored
+        else:
+            raise HTTPException(status_code=404, detail="对话不存在")
+
+    if conv.get("linked_workflow_id"):
+        raise HTTPException(status_code=400, detail="该对话已关联工作流，请使用工作流上传接口")
+
+    now = datetime.now().isoformat()
+    message_id = str(uuid.uuid4())
+    user_msg = {
+        "id": message_id,
+        "role": "user",
+        "content": parsed["extracted_text"],
+        "timestamp": now,
+        "type": "file",
+        "metadata": {
+            "filename": parsed["filename"],
+            "file_type": parsed["file_type"],
+            "file_size": parsed["file_size"],
+            **(parsed.get("metadata") or {}),
+        },
+    }
+
+    async with conversations_lock:
+        c = conversations_store.get(conv_id)
+        if c:
+            c["messages"].append(user_msg)
+            c["updated_at"] = now
+            user_msgs = [m for m in c["messages"] if m["role"] == "user"]
+            if c["title"] == "新的对话" and len(user_msgs) == 1:
+                title = parsed["filename"][:50]
+                c["title"] = title + ("..." if len(parsed["filename"]) > 50 else "")
+
+    await _persist_conversation(conv_id)
+
+    return FileUploadResponse(
+        conversation_id=conv_id,
+        filename=parsed["filename"],
+        file_type=parsed["file_type"],
+        file_size=parsed["file_size"],
+        extracted_text=parsed["extracted_text"],
+        message_id=message_id,
+        char_count=len(parsed["extracted_text"]),
+        metadata=parsed.get("metadata"),
     )
 
 

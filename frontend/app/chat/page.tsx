@@ -4,7 +4,7 @@ import { Suspense, useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Send, Bot, User, Sparkles, FileText, Loader2, Plus, Trash2,
-  MessageSquare, ChevronRight, AlertCircle, CheckCircle2, Clock
+  MessageSquare, ChevronRight, AlertCircle, CheckCircle2, Clock, Paperclip, Upload, X
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -50,6 +50,8 @@ function ChatPageContent() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingConv, setIsLoadingConv] = useState(false);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -72,6 +74,7 @@ function ChatPageContent() {
   const sendingRef = useRef(false);
   const skipNextConversationLoadRef = useRef<string | null>(null);
   const conversationLoadSeqRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -177,8 +180,8 @@ function ChatPageContent() {
     setWorkflowState(null);
     setRecommendStartWorkflow(false);
     setSuggestedTitle(null);
+    setDispatchActivities([]);
     router.replace(`/chat?conv_id=${encodeURIComponent(convId)}`);
-    // Sidebar auto-hides on mobile
     setShowSidebar(false);
   };
 
@@ -206,14 +209,31 @@ function ChatPageContent() {
   // Send message
   const handleSend = async () => {
     const content = input.trim();
-    if (!content || isLoading || sendingRef.current) return;
+    if ((!content && !pendingFile) || isLoading || isUploadingFile || sendingRef.current) return;
     sendingRef.current = true;
 
+    let fileUpload: { messageId: string; metadata: Record<string, unknown> } | null = null;
+    if (pendingFile) {
+      try {
+        fileUpload = await uploadPendingFile();
+      } catch {
+        sendingRef.current = false;
+        return;
+      }
+    }
+
+    if (!content) {
+      sendingRef.current = false;
+      return;
+    }
+
     const userMsg: ChatMessage = {
-      id: `local-user-${Date.now()}`,
+      id: fileUpload?.messageId ?? `local-user-${Date.now()}`,
       role: 'user',
       content,
       timestamp: new Date().toISOString(),
+      type: fileUpload ? 'file' : 'text',
+      metadata: fileUpload?.metadata,
     };
 
     setMessages((prev) => [...prev, userMsg]);
@@ -350,6 +370,78 @@ function ChatPageContent() {
       setError(err instanceof Error ? err.message : '发送消息失败');
       sendingRef.current = false;
       setIsLoading(false);
+    }
+  };
+
+  const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    const allowed = ['.txt', '.docx'];
+    const lower = file.name.toLowerCase();
+    if (!allowed.some((ext) => lower.endsWith(ext))) {
+      addToast({ type: 'error', title: '文件类型不支持', message: '仅支持 .txt 和 .docx 文件' });
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      addToast({ type: 'error', title: '文件过大', message: '文件大小不能超过 10MB' });
+      return;
+    }
+
+    setPendingFile(file);
+  };
+
+  const uploadPendingFile = async (): Promise<{
+    messageId: string;
+    metadata: Record<string, unknown>;
+    charCount: number;
+  } | null> => {
+    const file = pendingFile;
+    if (!file) return null;
+
+    setIsUploadingFile(true);
+    setError(null);
+    try {
+      let convId = activeConvId;
+      if (!convId) {
+        const created = await conversationApi.create({
+          user_id: 'default_user',
+          title: file.name.slice(0, 80),
+        });
+        convId = created.id;
+        setActiveConvId(convId);
+        skipNextConversationLoadRef.current = convId;
+        router.replace(`/chat?conv_id=${encodeURIComponent(convId)}`);
+        void loadConversations();
+      }
+
+      const result = await conversationApi.uploadDisclosure(convId, file);
+
+      addToast({
+        type: 'success',
+        title: '文件已解析',
+        message: `${result.filename} · ${result.char_count} 字符`,
+      });
+      setPendingFile(null);
+      return {
+        messageId: result.message_id,
+        metadata: {
+          filename: result.filename,
+          file_type: result.file_type,
+          file_size: result.file_size,
+          ...(result.metadata || {}),
+        },
+        charCount: result.char_count,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '文件上传失败';
+      setError(message);
+      addToast({ type: 'error', title: '上传失败', message });
+      throw err;
+    } finally {
+      setIsUploadingFile(false);
     }
   };
 
@@ -594,23 +686,52 @@ function ChatPageContent() {
                   )}
 
                   <div className={clsx('max-w-xl', msg.role === 'user' ? 'order-1' : 'order-1')}>
-                    <div
-                      className={clsx(
-                        'p-3.5 rounded-xl text-sm leading-relaxed whitespace-pre-wrap',
-                        msg.role === 'user'
-                          ? 'bg-brand-green text-ink rounded-br-md'
-                          : 'bg-canvas border border-hairline rounded-bl-md'
-                      )}
-                    >
-                      {msg.content}
-                      {msg.role === 'assistant' && (msg.tool_calls?.length || msg.skill_uses?.length) ? (
-                        <ToolCallCard
-                          toolCalls={msg.tool_calls}
-                          skillUses={msg.skill_uses}
-                          isStreaming={msg.isStreaming}
-                        />
-                      ) : null}
-                    </div>
+                    {msg.type === 'file' && !msg.content ? (
+                      <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-hairline bg-canvas text-sm text-ink">
+                        <FileText className="w-4 h-4 text-slate-600 flex-shrink-0" />
+                        <span className="font-medium truncate max-w-[240px]">
+                          {(msg.metadata?.filename as string) || '上传文件'}
+                        </span>
+                        <span className="text-xs text-slate/70 flex-shrink-0">
+                          {((msg.metadata?.file_size as number) || 0) > 0
+                            ? `${Math.round(((msg.metadata?.file_size as number) || 0) / 1024)} KB`
+                            : ''}
+                        </span>
+                      </div>
+                    ) : (
+                      <div
+                        className={clsx(
+                          'rounded-xl text-sm leading-relaxed',
+                          msg.role === 'user'
+                            ? 'bg-brand-green text-ink rounded-br-md'
+                            : 'bg-canvas border border-hairline rounded-bl-md'
+                        )}
+                      >
+                        {msg.type === 'file' && (
+                          <div className="flex items-center gap-2 px-3.5 pt-2.5 pb-1.5 text-xs border-b border-ink/15">
+                            <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="font-medium truncate">
+                              {(msg.metadata?.filename as string) || '上传文件'}
+                            </span>
+                            <span className="flex-shrink-0 opacity-80">
+                              {((msg.metadata?.file_size as number) || 0) > 0
+                                ? `${Math.round(((msg.metadata?.file_size as number) || 0) / 1024)} KB`
+                                : ''}
+                            </span>
+                          </div>
+                        )}
+                        <div className="px-3.5 py-2.5 whitespace-pre-wrap">
+                          {msg.content}
+                          {msg.role === 'assistant' && (msg.tool_calls?.length || msg.skill_uses?.length) ? (
+                            <ToolCallCard
+                              toolCalls={msg.tool_calls}
+                              skillUses={msg.skill_uses}
+                              isStreaming={msg.isStreaming}
+                            />
+                          ) : null}
+                        </div>
+                      </div>
+                    )}
                     <p className="text-[11px] text-slate/60 mt-1 px-1">
                       {new Date(msg.timestamp).toLocaleTimeString('zh-CN', {
                         hour: '2-digit',
@@ -692,7 +813,48 @@ function ChatPageContent() {
         {/* Input Area */}
         <div className="border-t border-hairline bg-canvas px-4 py-3">
           <div className="max-w-4xl mx-auto">
+            {pendingFile && (
+              <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-hairline bg-canvas text-sm">
+                <FileText className="w-4 h-4 text-slate-600 flex-shrink-0" />
+                <span className="font-medium truncate max-w-[280px]">
+                  {pendingFile.name}
+                </span>
+                <span className="text-xs text-slate/70 flex-shrink-0">
+                  {pendingFile.size >= 1024 * 1024
+                    ? `${(pendingFile.size / 1024 / 1024).toFixed(1)} MB`
+                    : `${Math.round(pendingFile.size / 1024)} KB`}
+                </span>
+                <span className="text-xs text-slate/50 ml-1">点击发送后上传</span>
+                <button
+                  type="button"
+                  onClick={() => setPendingFile(null)}
+                  disabled={isUploadingFile}
+                  className="ml-auto p-0.5 rounded hover:bg-slate-100 text-slate-500 disabled:opacity-50"
+                  title="移除文件"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
             <div className="flex gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".txt,.docx"
+                onChange={handleFileSelected}
+                className="hidden"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="md"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!!pendingFile || isUploadingFile || isLoading || isLoadingConv || isStartingWorkflow}
+                className="self-end"
+                title="选择交底书（.txt / .docx）"
+              >
+                <Paperclip className="w-4 h-4" />
+              </Button>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -702,21 +864,25 @@ function ChatPageContent() {
                     handleSend();
                   }
                 }}
-                placeholder={activeConvId ? '继续补充技术细节...' : '描述您的发明创造...'}
+                placeholder={activeConvId ? '继续补充技术细节...（可点击 📎 选择交底书 .txt / .docx）' : '描述您的发明创造...（可点击 📎 选择交底书 .txt / .docx）'}
                 className="flex-1 resize-none rounded-lg border border-hairline bg-white px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green focus:border-brand-green placeholder:text-slate/60"
                 rows={2}
-                disabled={isLoading || isLoadingConv || isStartingWorkflow}
+                disabled={isLoading || isLoadingConv || isStartingWorkflow || isUploadingFile}
               />
               <Button
                 onClick={handleSend}
-                disabled={!input.trim() || isLoading || isLoadingConv}
+                disabled={(!input.trim() && !pendingFile) || isLoading || isLoadingConv || isUploadingFile}
                 className="self-end"
               >
-                {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {isLoading || isUploadingFile ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
               </Button>
             </div>
             <p className="text-xs text-slate/50 mt-1.5 text-center">
-              Enter 发送 · Shift+Enter 换行
+              Enter 发送 · Shift+Enter 换行 · 选择 .txt / .docx 交底书后随消息一起发送
             </p>
           </div>
         </div>

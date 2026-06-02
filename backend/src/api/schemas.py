@@ -388,6 +388,18 @@ class CreateWorkflowFromConversationRequest(BaseModel):
     """从对话创建工作流请求"""
     user_id: str = "default_user"
 
+
+class FileUploadResponse(BaseModel):
+    """对话场景下的文件上传响应（解析交底书/技术资料）"""
+    conversation_id: str
+    filename: str
+    file_type: str
+    file_size: int
+    extracted_text: str
+    message_id: str
+    char_count: int
+    metadata: Optional[Dict[str, Any]] = None
+
 # ==================== 系统状态 ====================
 
 class SystemStatusResponse(BaseModel):

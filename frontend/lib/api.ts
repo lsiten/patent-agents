@@ -705,6 +705,47 @@ export const conversationApi = {
       body: JSON.stringify(data),
     }),
 
+  /**
+   * 上传交底书/技术资料文件到对话中。
+   * 后端会自动解析文件内容并作为用户消息追加到对话历史。
+   */
+  uploadDisclosure: async (conv_id: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const url = `${API_BASE_URL}/conversations/${encodeURIComponent(conv_id)}/upload`;
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let message = `Upload failed: ${response.status} ${response.statusText}`;
+      try {
+        const errorBody = await response.json();
+        if (isRecord(errorBody)) {
+          const detail = errorBody.detail || errorBody.error || errorBody.message;
+          if (typeof detail === 'string') {
+            message = detail;
+          }
+        }
+      } catch {
+      }
+      throw new Error(message);
+    }
+
+    return (await response.json()) as {
+      conversation_id: string;
+      filename: string;
+      file_type: string;
+      file_size: number;
+      extracted_text: string;
+      message_id: string;
+      char_count: number;
+      metadata?: Record<string, unknown>;
+    };
+  },
+
   createWorkflow: (conv_id: string) =>
     request<{ task_id: string; status: string; redirect_url: string }>(
       `/conversations/${encodeURIComponent(conv_id)}/create-workflow`,
