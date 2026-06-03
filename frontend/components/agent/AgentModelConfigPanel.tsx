@@ -84,7 +84,7 @@ export default function AgentModelConfigPanel(props: Props) {
   const [revealedKey, setRevealedKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; latency_ms: number; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ success: boolean; latency_ms: number; error?: string | null } | null>(null);
 
   const lastInitialKeyRef = useRef<string>('');
 
@@ -104,14 +104,17 @@ export default function AgentModelConfigPanel(props: Props) {
 
   useEffect(() => {
     if (!initial) return;
-    const key = `${initial.provider}|${initial.base_url}|${initial.model ?? initial.model_id}|${initial.is_default}`;
+    const resolvedModel = isLLM
+      ? (initial as ResolvedLLMConfig).model
+      : (initial as ResolvedImageGenConfig).model_id;
+    const key = `${initial.provider}|${initial.base_url}|${resolvedModel}|${initial.is_default}`;
     if (key === lastInitialKeyRef.current) return;
     lastInitialKeyRef.current = key;
     setDraft({
       provider: initial.provider,
       baseUrl: initial.base_url,
       apiKey: '',
-      model: isLLM ? (initial as ResolvedLLMConfig).model : (initial as ResolvedImageGenConfig).model_id,
+      model: resolvedModel,
       useDefault: initial.is_default,
     });
   }, [initial, isLLM]);

@@ -3478,6 +3478,25 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
     return {"task_id": task_id, "status": "started", "conversation_id": conv_id}
 
 
+@router.patch("/conversations/{conv_id}", response_model=dict)
+async def update_conversation(conv_id: str, body: dict):
+    """更新对话会话属性（如标题）"""
+    async with conversations_lock:
+        conv = conversations_store.get(conv_id)
+        if not conv:
+            stored = await _get_persist_store().load("conversations", conv_id)
+            if stored:
+                conversations_store[conv_id] = stored
+                conv = conversations_store[conv_id]
+        if not conv:
+            raise HTTPException(status_code=404, detail="对话不存在")
+        if "title" in body and isinstance(body["title"], str):
+            conv["title"] = body["title"]
+        conv["updated_at"] = datetime.now().isoformat()
+    await _persist_conversation(conv_id)
+    return {"id": conv_id, "title": conv["title"], "updated_at": conv["updated_at"]}
+
+
 @router.delete("/conversations/{conv_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_conversation(conv_id: str):
     """删除对话会话"""

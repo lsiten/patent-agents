@@ -730,6 +730,12 @@ export const conversationApi = {
   get: (conv_id: string) =>
     request<ConversationDetail>(`/conversations/${encodeURIComponent(conv_id)}`),
 
+  rename: (conv_id: string, title: string) =>
+    request<{ id: string; title: string; updated_at: string }>(`/conversations/${encodeURIComponent(conv_id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    }),
+
   delete: (conv_id: string) =>
     request<void>(`/conversations/${encodeURIComponent(conv_id)}`, {
       method: 'DELETE',
@@ -793,6 +799,7 @@ export const conversationApi = {
 
   /**
    * 流式聊天 — SSE 接收 agent 的工具调用、技能使用、内容输出
+   * 内置超时 + 自动重试 (最多 3 次) 增强连接可靠性
    */
   chatStream: (
     conv_id: string,
@@ -805,95 +812,167 @@ export const conversationApi = {
       onContent?: (data: { content: string; has_recommendation: boolean }) => void;
       onDone?: (data: { message: ChatMessage; has_recommendation: boolean; conversation_id: string }) => void;
       onError?: (error: string) => void;
+      onStatusChange?: (status: 'connecting' | 'connected' | 'disconnected') => void;
     },
+    options?: { timeout?: number; maxRetries?: number; stallTimeout?: number },
   ): { abort: () => void } => {
     const controller = new AbortController();
+    const timeout = options?.timeout ?? 30000;
+    const maxRetries = options?.maxRetries ?? 3;
+    const stallTimeout = options?.stallTimeout ?? 60000;
+
+    // Timeout timer — fires once if initial fetch takes too long
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+    // Stall timer — resets on each data chunk, errors if nothing arrives within window
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
 
     (async () => {
-      try {
-        const response = await fetch(
-          `${API_BASE_URL}/conversations/${encodeURIComponent(conv_id)}/chat/stream`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-            signal: controller.signal,
-          }
-        );
+      let attempt = 0;
+      while (attempt <= maxRetries) {
+        if (controller.signal.aborted) return;
 
-        if (!response.ok) {
-          const errBody = await response.text();
-          callbacks.onError?.(errBody || `HTTP ${response.status}`);
-          return;
+        if (attempt > 0) {
+          callbacks.onStatusChange?.('connecting');
+          // Exponential backoff: 1s, 2s, 4s
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
 
-        const reader = response.body?.getReader();
-        if (!reader) {
-          callbacks.onError?.('No response body');
-          return;
-        }
+        attempt++;
 
-        const decoder = new TextDecoder();
-        let buffer = '';
+        try {
+          callbacks.onStatusChange?.('connecting');
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          let eventType = '';
-          let eventData = '';
-
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              eventType = line.slice(7).trim();
-            } else if (line.startsWith('data: ')) {
-              eventData = line.slice(6);
-            } else if (line === '' && eventType && eventData) {
-              try {
-                const parsed = JSON.parse(eventData);
-                switch (eventType) {
-                  case 'thinking':
-                    callbacks.onThinking?.(parsed);
-                    break;
-                  case 'skill_use':
-                    callbacks.onSkillUse?.(parsed);
-                    break;
-                  case 'tool_call_start':
-                    callbacks.onToolCallStart?.(parsed);
-                    break;
-                  case 'tool_call_end':
-                    callbacks.onToolCallEnd?.(parsed);
-                    break;
-                  case 'content':
-                    callbacks.onContent?.(parsed);
-                    break;
-                  case 'done':
-                    callbacks.onDone?.(parsed);
-                    break;
-                  case 'error':
-                    callbacks.onError?.(parsed.error || 'Unknown error');
-                    break;
-                }
-              } catch {
-                // ignore parse errors
+          const response = await Promise.race([
+            fetch(
+              `${API_BASE_URL}/conversations/${encodeURIComponent(conv_id)}/chat/stream`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+                signal: controller.signal,
               }
-              eventType = '';
-              eventData = '';
+            ),
+            new Promise<Response>((_, reject) => {
+              timeoutTimer = setTimeout(() => {
+                reject(new Error('Request timeout'));
+              }, timeout);
+            }),
+          ]);
+
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          timeoutTimer = null;
+
+          if (!response.ok) {
+            const errBody = await response.text();
+            if (attempt <= maxRetries) {
+              continue;
+            }
+            callbacks.onError?.(errBody || `HTTP ${response.status}`);
+            return;
+          }
+
+          callbacks.onStatusChange?.('connected');
+
+          // Reset stall timer on each data chunk
+          const resetStallTimer = () => {
+            if (stallTimer) clearTimeout(stallTimer);
+            stallTimer = setTimeout(() => {
+              controller.abort();
+              callbacks.onError?.('Stream stalled — no data received');
+            }, stallTimeout);
+          };
+
+          const reader = response.body?.getReader();
+          if (!reader) {
+            callbacks.onError?.('No response body');
+            callbacks.onStatusChange?.('disconnected');
+            return;
+          }
+
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          // Start stall timer before first chunk
+          resetStallTimer();
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            resetStallTimer();
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            let eventType = '';
+            let eventData = '';
+
+            for (const line of lines) {
+              if (line.startsWith('event: ')) {
+                eventType = line.slice(7).trim();
+              } else if (line.startsWith('data: ')) {
+                eventData = line.slice(6);
+              } else if (line === '' && eventType && eventData) {
+                try {
+                  const parsed = JSON.parse(eventData);
+                  switch (eventType) {
+                    case 'thinking':
+                      callbacks.onThinking?.(parsed);
+                      break;
+                    case 'skill_use':
+                      callbacks.onSkillUse?.(parsed);
+                      break;
+                    case 'tool_call_start':
+                      callbacks.onToolCallStart?.(parsed);
+                      break;
+                    case 'tool_call_end':
+                      callbacks.onToolCallEnd?.(parsed);
+                      break;
+                    case 'content':
+                      callbacks.onContent?.(parsed);
+                      break;
+                    case 'done':
+                      callbacks.onDone?.(parsed);
+                      break;
+                    case 'error':
+                      callbacks.onError?.(parsed.error || 'Unknown error');
+                      break;
+                  }
+                } catch {
+                  // ignore parse errors
+                }
+                eventType = '';
+                eventData = '';
+              }
             }
           }
-        }
-      } catch (err) {
-        if ((err as Error).name !== 'AbortError') {
+
+          // Stream completed successfully — exit retry loop
+          return;
+        } catch (err) {
+          if (controller.signal.aborted) return;
+
+          if (attempt <= maxRetries) {
+            continue;
+          }
+
           callbacks.onError?.(err instanceof Error ? err.message : 'Stream failed');
+          callbacks.onStatusChange?.('disconnected');
+          return;
+        } finally {
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          if (stallTimer) clearTimeout(stallTimer);
         }
       }
     })();
 
-    return { abort: () => controller.abort() };
+    return {
+      abort: () => {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        controller.abort();
+      },
+    };
   },
 };
 

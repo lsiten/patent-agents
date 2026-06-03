@@ -8,10 +8,11 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   error?: string;
   icon?: ReactNode;
+  mono?: boolean;
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, icon, className, id, ...props }, ref) => {
+  ({ label, error, icon, mono, className, id, ...props }, ref) => {
     const inputId = id || label?.toLowerCase().replace(/\s+/g, '-');
 
     return (
@@ -43,6 +44,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
                   ? 'border-red-500 focus:border-red-500 focus:ring-red-500/30'
                   : 'border-hairline-strong hover:border-stone',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
+                mono && 'font-mono',
                 className
               )
             )}

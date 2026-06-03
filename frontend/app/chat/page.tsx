@@ -1,10 +1,10 @@
 'use client';
 
-import { Suspense, useState, useRef, useEffect, useCallback } from 'react';
+import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Send, Bot, User, Sparkles, FileText, Loader2, Plus, Trash2,
-  MessageSquare, ChevronRight, AlertCircle, CheckCircle2, Clock, Paperclip, Upload, X
+  MessageSquare, ChevronRight, AlertCircle, CheckCircle2, Clock, Paperclip, Upload, X, Copy, Search
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -14,6 +14,9 @@ import { useToast } from '@/components/ui/Toast';
 import { ToolCallCard } from '@/components/chat/ToolCallCard';
 import { type DispatchActivity } from '@/components/chat/DispatchPanel';
 import { WorkflowProgressStrip } from '@/components/chat/WorkflowProgressStrip';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 import { clsx } from 'clsx';
 import { conversationApi, workflowApi } from '@/lib/api';
 import type { ConversationSummary } from '@/lib/api';
@@ -51,11 +54,17 @@ function ChatPageContent() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingConv, setIsLoadingConv] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'disconnected'>('idle');
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editTitleValue, setEditTitleValue] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Workflow state
   const [workflowTaskId, setWorkflowTaskId] = useState<string | null>(null);
@@ -76,14 +85,85 @@ function ChatPageContent() {
   const skipNextConversationLoadRef = useRef<string | null>(null);
   const conversationLoadSeqRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const filteredMessages = useMemo(() => {
+    if (!searchQuery.trim()) return messages;
+    const q = searchQuery.toLowerCase();
+    return messages.filter(
+      (m) => m.content && m.content.toLowerCase().includes(q)
+    );
+  }, [messages, searchQuery]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const handleCopy = async (msgId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedId(msgId);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      addToast({ type: 'error', title: '复制失败', message: '无法访问剪贴板' });
+    }
+  };
+
+  const handleStartEditingTitle = () => {
+    const currentTitle = conversations.find((c) => c.id === activeConvId)?.title || '';
+    setEditTitleValue(currentTitle);
+    setEditingTitle(true);
+  };
+
+  const handleSaveTitle = async () => {
+    if (!activeConvId || !editTitleValue.trim()) {
+      setEditingTitle(false);
+      return;
+    }
+    try {
+      const result = await conversationApi.rename(activeConvId, editTitleValue.trim());
+      setConversations((prev) =>
+        prev.map((c) => (c.id === activeConvId ? { ...c, title: result.title } : c))
+      );
+    } catch {
+      addToast({ type: 'error', title: '重命名失败', message: '请稍后重试' });
+    }
+    setEditingTitle(false);
+  };
+
+  const handleKeyDownTitle = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSaveTitle();
+    }
+    if (e.key === 'Escape') {
+      setEditingTitle(false);
+    }
+  };
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    // Small delay to let the UI settle after state changes  (existing)
+    const timer = setTimeout(() => {
+      inputRef.current?.focus();
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [messages.length, activeConvId, isLoading]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+        e.preventDefault();
+        handleNewConversation();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Load conversation list
   const loadConversations = useCallback(async () => {
@@ -133,6 +213,8 @@ function ChatPageContent() {
 
   useEffect(() => {
     void loadConversations();
+    const interval = setInterval(() => { void loadConversations(); }, 30000);
+    return () => clearInterval(interval);
   }, [loadConversations]);
 
   useEffect(() => {
@@ -174,6 +256,7 @@ function ChatPageContent() {
 
   // Create new conversation
   const handleNewConversation = async () => {
+    setConnectionStatus('idle');
     setActiveConvId(null);
     setMessages([createWelcomeMessage()]);
     setWorkflowTaskId(null);
@@ -181,7 +264,7 @@ function ChatPageContent() {
     setRecommendStartWorkflow(false);
     setSuggestedTitle(null);
     setError(null);
-    router.replace('/chat');
+    window.history.replaceState(null, '', '/chat');
   };
 
   // Select conversation
@@ -192,7 +275,9 @@ function ChatPageContent() {
     setRecommendStartWorkflow(false);
     setSuggestedTitle(null);
     setDispatchActivities([]);
-    router.replace(`/chat?conv_id=${encodeURIComponent(convId)}`);
+    setError(null);
+    setInput('');
+    window.history.replaceState(null, '', `/chat?conv_id=${encodeURIComponent(convId)}`);
     setShowSidebar(false);
   };
 
@@ -219,11 +304,12 @@ function ChatPageContent() {
 
   // Send message
   const handleSend = async () => {
-    const content = input.trim();
+    let content = input.trim();
     if ((!content && !pendingFile) || isLoading || isUploadingFile || sendingRef.current) return;
     sendingRef.current = true;
 
-    let fileUpload: { messageId: string; metadata: Record<string, unknown> } | null = null;
+    let fileUpload: { messageId: string; metadata: Record<string, unknown>; convId: string } | null = null;
+    let isAutoAnalysis = false;
     if (pendingFile) {
       try {
         fileUpload = await uploadPendingFile();
@@ -234,23 +320,36 @@ function ChatPageContent() {
     }
 
     if (!content) {
-      sendingRef.current = false;
-      return;
+      // File-only upload: auto-trigger AI analysis instead of waiting for text input
+      if (fileUpload) {
+        content = '请分析我上传的技术交底文件，并开始专利申请讨论';
+        isAutoAnalysis = true;
+        // Show a brief auto-analysis hint in the message area before streaming starts
+        addToast({ type: 'info', title: '正在分析文件', message: 'AI 正在解读您上传的交底书...' });
+      } else {
+        sendingRef.current = false;
+        return;
+      }
     }
 
-    const userMsg: ChatMessage = {
-      id: fileUpload?.messageId ?? `local-user-${Date.now()}`,
-      role: 'user',
-      content,
-      timestamp: new Date().toISOString(),
-      type: fileUpload ? 'file' : 'text',
-      metadata: fileUpload?.metadata,
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
+    // Skip adding a user message for auto-analysis — the file upload already stored it
+    if (isAutoAnalysis) {
+      // The streaming assistant message will be added below; no duplicate user message needed
+    } else {
+      const userMsg: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content,
+        timestamp: new Date().toISOString(),
+        type: fileUpload ? 'file' : 'text',
+        metadata: fileUpload?.metadata,
+      };
+      setMessages((prev) => [...prev, userMsg]);
+    }
     setInput('');
     setIsLoading(true);
     setError(null);
+    setConnectionStatus('connecting');
 
     try {
       let convId = activeConvId;
@@ -264,7 +363,7 @@ function ChatPageContent() {
         convId = created.id;
         setActiveConvId(convId);
         skipNextConversationLoadRef.current = convId;
-        router.replace(`/chat?conv_id=${encodeURIComponent(convId)}`);
+        window.history.replaceState(null, '', `/chat?conv_id=${encodeURIComponent(convId)}`);
         void loadConversations();
       }
 
@@ -349,7 +448,7 @@ function ChatPageContent() {
         onContent: (data) => {
           setMessages((prev) => prev.map((m) =>
             m.id === streamMsgId
-              ? { ...m, content: data.content, isStreaming: false }
+              ? { ...m, content: data.content, isStreaming: true }
               : m
           ));
           if (data.has_recommendation) {
@@ -357,6 +456,7 @@ function ChatPageContent() {
           }
         },
         onDone: (data) => {
+          setConnectionStatus('idle');
           // Replace streaming message with final persisted message
           setMessages((prev) => prev.map((m) =>
             m.id === streamMsgId
@@ -371,14 +471,17 @@ function ChatPageContent() {
           void loadConversations();
         },
         onError: (errorMsg) => {
-          setError(errorMsg);
+          setConnectionStatus('idle');
+          addToast({ type: 'error', title: '请求失败', message: errorMsg });
           setMessages((prev) => prev.filter((m) => m.id !== streamMsgId));
           setIsLoading(false);
           sendingRef.current = false;
         },
+        onStatusChange: (status) => setConnectionStatus(status),
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '发送消息失败');
+      const msg = err instanceof Error ? err.message : '发送消息失败';
+      addToast({ type: 'error', title: '发送失败', message: msg });
       sendingRef.current = false;
       setIsLoading(false);
     }
@@ -408,6 +511,7 @@ function ChatPageContent() {
     messageId: string;
     metadata: Record<string, unknown>;
     charCount: number;
+    convId: string;
   } | null> => {
     const file = pendingFile;
     if (!file) return null;
@@ -424,7 +528,7 @@ function ChatPageContent() {
         convId = created.id;
         setActiveConvId(convId);
         skipNextConversationLoadRef.current = convId;
-        router.replace(`/chat?conv_id=${encodeURIComponent(convId)}`);
+        window.history.replaceState(null, '', `/chat?conv_id=${encodeURIComponent(convId)}`);
         void loadConversations();
       }
 
@@ -445,10 +549,10 @@ function ChatPageContent() {
           ...(result.metadata || {}),
         },
         charCount: result.char_count,
+        convId,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : '文件上传失败';
-      setError(message);
       addToast({ type: 'error', title: '上传失败', message });
       throw err;
     } finally {
@@ -616,9 +720,25 @@ function ChatPageContent() {
         <div className="border-b border-hairline bg-canvas px-6 py-3">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-lg font-semibold text-ink">
-                {activeConvId ? (conversations.find((c) => c.id === activeConvId)?.title || '专利对话') : '新对话'}
-              </h1>
+              {editingTitle ? (
+                <input
+                  type="text"
+                  value={editTitleValue}
+                  onChange={(e) => setEditTitleValue(e.target.value)}
+                  onBlur={handleSaveTitle}
+                  onKeyDown={handleKeyDownTitle}
+                  autoFocus
+                  className="text-lg font-semibold text-ink bg-canvas border border-hairline rounded px-2 py-1 w-full focus:outline-none focus:border-accent"
+                />
+              ) : (
+                <h1
+                  className="text-lg font-semibold text-ink cursor-text"
+                  onClick={handleStartEditingTitle}
+                  title="点击重命名"
+                >
+                  {activeConvId ? (conversations.find((c) => c.id === activeConvId)?.title || '专利对话') : '新对话'}
+                </h1>
+              )}
               <p className="text-sm text-slate">
                 {workflowTaskId
                   ? '专利申请流程已启动'
@@ -628,6 +748,56 @@ function ChatPageContent() {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {connectionStatus !== 'idle' && (
+                <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
+                  connectionStatus === 'connected'
+                    ? 'bg-green-50 text-green-700'
+                    : 'bg-amber-50 text-amber-700'
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    connectionStatus === 'connected'
+                      ? 'bg-green-500'
+                      : connectionStatus === 'connecting'
+                      ? 'bg-amber-500 animate-pulse'
+                      : 'bg-red-500'
+                  }`} />
+                  {connectionStatus === 'connecting' ? '连接中' : connectionStatus === 'connected' ? '已连接' : '已断开'}
+                </span>
+              )}
+              {activeConvId && (
+                <>
+                  {showSearch ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        ref={searchInputRef}
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            setShowSearch(false);
+                            setSearchQuery('');
+                          }
+                        }}
+                        placeholder="搜索消息..."
+                        autoFocus
+                        className="w-48 text-sm border border-hairline rounded px-2 py-1.5 bg-white focus:outline-none focus:border-accent"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => { setShowSearch(false); setSearchQuery(''); }}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button variant="ghost" size="sm" onClick={() => setShowSearch(true)} title="搜索消息">
+                      <Search className="w-4 h-4" />
+                    </Button>
+                  )}
+                </>
+              )}
               {workflowTaskId && (
                 <Button
                   size="sm"
@@ -654,107 +824,166 @@ function ChatPageContent() {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-4xl mx-auto px-4 py-6 space-y-5">
-            {error && (
-              <Card className="p-4 border border-red-200 bg-red-50">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-500" />
-                  <p className="text-sm text-red-700">{error}</p>
-                </div>
-              </Card>
-            )}
 
             {isLoadingConv ? (
               <div className="flex justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-brand-green-dark" />
               </div>
+            ) : !activeConvId ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <MessageSquare className="w-12 h-12 text-slate/30 mb-4" />
+                <h2 className="text-lg font-semibold text-ink mb-2">开始新的专利对话</h2>
+                <p className="text-sm text-slate max-w-md mb-6">
+                  描述您的发明创造，AI 专利代理人将帮助您梳理技术方案、评估专利价值，并生成专业的专利申请文件。
+                </p>
+                <Button onClick={handleNewConversation} size="lg">
+                  <Plus className="w-4 h-4 mr-1.5" />
+                  新建对话
+                </Button>
+              </div>
+            ) : (searchQuery ? filteredMessages : messages).length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <Bot className="w-10 h-10 text-slate/30 mb-3" />
+                <p className="text-sm text-slate">{searchQuery ? '未找到匹配的消息' : '对话为空，发送第一条消息开始'}</p>
+              </div>
             ) : (
-              messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={clsx(
-                    'flex gap-3',
-                    msg.role === 'user' ? 'justify-end' : 'justify-start'
-                  )}
-                >
-                  {msg.role === 'assistant' && (
-                    <div className="flex-shrink-0 mt-1">
-                      <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
-                        <Bot className="w-4.5 h-4.5 text-ink" />
-                      </div>
-                    </div>
-                  )}
+              (searchQuery ? filteredMessages : messages).reduce<React.ReactNode[]>((acc: React.ReactNode[], msg: ChatMessage, idx: number) => {
+                const items = searchQuery ? filteredMessages : messages;
+                const prevMsg = idx > 0 ? items[idx - 1] : null;
+                const msgDate = new Date(msg.timestamp);
+                const dateStr = msgDate.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+                const prevDateStr = prevMsg
+                  ? new Date(prevMsg.timestamp).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
+                  : null;
 
-                  <div className={clsx('max-w-xl', msg.role === 'user' ? 'order-1' : 'order-1')}>
-                    {msg.type === 'file' && !msg.content ? (
-                      <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-hairline bg-canvas text-sm text-ink">
-                        <FileText className="w-4 h-4 text-slate-600 flex-shrink-0" />
-                        <span className="font-medium truncate max-w-[240px]">
-                          {(msg.metadata?.filename as string) || '上传文件'}
-                        </span>
-                        <span className="text-xs text-slate/70 flex-shrink-0">
-                          {((msg.metadata?.file_size as number) || 0) > 0
-                            ? `${Math.round(((msg.metadata?.file_size as number) || 0) / 1024)} KB`
-                            : ''}
-                        </span>
-                      </div>
-                    ) : (
-                      <div
-                        className={clsx(
-                          'rounded-xl text-sm leading-relaxed',
-                          msg.role === 'user'
-                            ? 'bg-brand-green text-ink rounded-br-md'
-                            : 'bg-canvas border border-hairline rounded-bl-md'
-                        )}
-                      >
-                        {msg.type === 'file' && (
-                          <div className="flex items-center gap-2 px-3.5 pt-2.5 pb-1.5 text-xs border-b border-ink/15">
-                            <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                            <span className="font-medium truncate">
-                              {(msg.metadata?.filename as string) || '上传文件'}
-                            </span>
-                            <span className="flex-shrink-0 opacity-80">
-                              {((msg.metadata?.file_size as number) || 0) > 0
-                                ? `${Math.round(((msg.metadata?.file_size as number) || 0) / 1024)} KB`
-                                : ''}
-                            </span>
-                          </div>
-                        )}
-                        <div className="px-3.5 py-2.5 whitespace-pre-wrap">
-                          {msg.isStreaming && !msg.content ? (
-                            <div className="flex items-center gap-2 text-slate">
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              <span>思考中...</span>
-                            </div>
-                          ) : (
-                            msg.content
-                          )}
-                          {msg.role === 'assistant' && (msg.tool_calls?.length || msg.skill_uses?.length) ? (
-                            <ToolCallCard
-                              toolCalls={msg.tool_calls}
-                              skillUses={msg.skill_uses}
-                              isStreaming={msg.isStreaming}
-                            />
-                          ) : null}
+                // Insert date separator when date changes (always show for first message)
+                if (!prevMsg || dateStr !== prevDateStr) {
+                  const label = dateStr === new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
+                    ? '今天'
+                    : (() => {
+                        const y = new Date(); y.setDate(y.getDate() - 1);
+                        if (dateStr === y.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })) return '昨天';
+                        return dateStr;
+                      })();
+                  acc.push(
+                    <div key={`date-${dateStr}`} className="flex justify-center py-1">
+                      <span className="text-[11px] text-slate/50 bg-hairline-soft px-2.5 py-0.5 rounded-full">{label}</span>
+                    </div>
+                  );
+                }
+
+                acc.push(
+                  <div
+                    key={msg.id}
+                    className={clsx(
+                      'flex gap-3',
+                      msg.role === 'user' ? 'justify-end' : 'justify-start'
+                    )}
+                  >
+                    {msg.role === 'assistant' && (
+                      <div className="flex-shrink-0 mt-1">
+                        <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
+                          <Bot className="w-4.5 h-4.5 text-ink" />
                         </div>
                       </div>
                     )}
-                    <p className="text-[11px] text-slate/60 mt-1 px-1">
-                      {new Date(msg.timestamp).toLocaleTimeString('zh-CN', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </p>
-                  </div>
 
-                  {msg.role === 'user' && (
-                    <div className="flex-shrink-0 mt-1">
-                      <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center">
-                        <User className="w-4.5 h-4.5 text-slate-600" />
-                      </div>
+                    <div className={clsx('max-w-xl', msg.role === 'user' ? 'order-1' : 'order-1')}>
+                      {msg.type === 'file' && !msg.content ? (
+                        <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-hairline bg-canvas text-sm text-ink">
+                          <FileText className="w-4 h-4 text-slate-600 flex-shrink-0" />
+                          <span className="font-medium truncate max-w-[240px]">
+                            {(msg.metadata?.filename as string) || '上传文件'}
+                          </span>
+                          <span className="text-xs text-slate/70 flex-shrink-0">
+                            {((msg.metadata?.file_size as number) || 0) > 0
+                              ? `${Math.round(((msg.metadata?.file_size as number) || 0) / 1024)} KB`
+                              : ''}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="relative group">
+                          <div
+                            className={clsx(
+                              'rounded-xl text-sm leading-relaxed',
+                              msg.role === 'user'
+                                ? 'bg-brand-green text-ink rounded-br-md'
+                                : 'bg-canvas border border-hairline rounded-bl-md'
+                            )}
+                          >
+                            {msg.type === 'file' && (
+                              <div className="flex items-center gap-2 px-3.5 pt-2.5 pb-1.5 text-xs border-b border-ink/15">
+                                <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                                <span className="font-medium truncate">
+                                  {(msg.metadata?.filename as string) || '上传文件'}
+                                </span>
+                                <span className="flex-shrink-0 opacity-80">
+                                  {((msg.metadata?.file_size as number) || 0) > 0
+                                    ? `${Math.round(((msg.metadata?.file_size as number) || 0) / 1024)} KB`
+                                    : ''}
+                                </span>
+                              </div>
+                            )}
+                            <div className={clsx('px-3.5 py-2.5', msg.role === 'user' ? 'whitespace-pre-wrap' : 'prose prose-sm max-w-none')}>
+                              {msg.isStreaming && !msg.content ? (
+                                <div className="flex items-center gap-1 text-slate">
+                                  <span>思考中</span>
+                                  <span className="thinking-dot">.</span>
+                                  <span className="thinking-dot">.</span>
+                                  <span className="thinking-dot">.</span>
+                                </div>
+                              ) : msg.role === 'user' ? (
+                                msg.content
+                              ) : (
+                                <div className={msg.isStreaming ? 'streaming-text streaming-cursor' : 'streaming-text'}>
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                                    {msg.content}
+                                  </ReactMarkdown>
+                                </div>
+                              )}
+                              {msg.role === 'assistant' && (msg.tool_calls?.length || msg.skill_uses?.length) ? (
+                                <ToolCallCard
+                                  toolCalls={msg.tool_calls}
+                                  skillUses={msg.skill_uses}
+                                  isStreaming={msg.isStreaming}
+                                />
+                              ) : null}
+                            </div>
+                          </div>
+                          {msg.role === 'assistant' && !msg.isStreaming && msg.content && (
+                            <button
+                              onClick={() => handleCopy(msg.id, msg.content)}
+                              className="absolute -top-2 right-2 p-1 rounded-md bg-white border border-hairline shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-slate-50"
+                              title="复制消息"
+                            >
+                              {copiedId === msg.id ? (
+                                <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5 text-slate-500" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      <p className="text-[11px] text-slate/60 mt-1 px-1">
+                        {new Date(msg.timestamp).toLocaleTimeString('zh-CN', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </p>
                     </div>
-                  )}
-                </div>
-              ))
+
+                    {msg.role === 'user' && (
+                      <div className="flex-shrink-0 mt-1">
+                        <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center">
+                          <User className="w-4.5 h-4.5 text-slate-600" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+                return acc;
+              }, [])
             )}
 
             <div ref={messagesEndRef} />
@@ -846,8 +1075,13 @@ function ChatPageContent() {
                 <Paperclip className="w-4 h-4" />
               </Button>
               <textarea
+                ref={inputRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  e.target.style.height = 'auto';
+                  e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
@@ -855,20 +1089,18 @@ function ChatPageContent() {
                   }
                 }}
                 placeholder={activeConvId ? '继续补充技术细节...（可点击 📎 选择交底书 .txt / .docx）' : '描述您的发明创造...（可点击 📎 选择交底书 .txt / .docx）'}
-                className="flex-1 resize-none rounded-lg border border-hairline bg-white px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green focus:border-brand-green placeholder:text-slate/60"
-                rows={2}
+                className="flex-1 overflow-y-auto rounded-lg border border-hairline bg-white px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green focus:border-brand-green placeholder:text-slate/60"
+                rows={1}
+                autoFocus
                 disabled={isLoading || isLoadingConv || isStartingWorkflow || isUploadingFile}
               />
               <Button
                 onClick={handleSend}
                 disabled={(!input.trim() && !pendingFile) || isLoading || isLoadingConv || isUploadingFile}
+                isLoading={isLoading || isUploadingFile}
                 className="self-end"
               >
-                {isLoading || isUploadingFile ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Send className="w-4 h-4" />
-                )}
+                {!(isLoading || isUploadingFile) && <Send className="w-4 h-4" />}
               </Button>
             </div>
             <p className="text-xs text-slate/50 mt-1.5 text-center">

@@ -48,7 +48,8 @@
 ## 约束条件
 - 创新点描述要具体、可验证，避免空泛表述
 - 技术特征要全面，不要遗漏任何可能有专利价值的细节
-- 信息缺口要明确，给出具体的补充指引
+- **信息缺口处理优先级：先用工具（ipc_classifier/tech_feature_extractor/scenario_miner）分析推断 → 再结合专业知识补充 → 最后确实无法确定的才列入information_gaps**
+- **工具调用结果中已经包含的信息，不要重复列为信息缺口让用户补充**
 - 所有分析必须基于提供的技术描述，不要臆造
 - 如果技术描述不足以做出判断，要诚实指出
 
@@ -93,8 +94,10 @@
     {
       "gap": "信息缺口描述",
       "importance": "high | medium | low",
+      "source": "tool_infer_failed | knowledge_insufficient | genuinely_missing",
       "suggestion": "补充建议"
     }
   ],
+  "analysis_confidence_note": "基于工具调用结果和专业知识的综合分析，哪些已确认、哪些待确认",
   "overall_assessment": "需求分析总体评价"
 }
