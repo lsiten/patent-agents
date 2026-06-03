@@ -938,6 +938,11 @@ export const conversationApi = {
                     case 'error':
                       callbacks.onError?.(parsed.error || 'Unknown error');
                       break;
+                    default:
+                      if (parsed?.kind === 'lifecycle' && parsed?.message) {
+                        callbacks.onError?.(parsed.message);
+                      }
+                      break;
                   }
                 } catch {
                   // ignore parse errors
