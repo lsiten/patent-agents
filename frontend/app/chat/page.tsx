@@ -926,11 +926,11 @@ function ChatPageContent() {
                             )}
                             <div className={clsx('px-3.5 py-2.5', msg.role === 'user' ? 'whitespace-pre-wrap' : 'prose prose-sm max-w-none')}>
                               {msg.isStreaming && !msg.content ? (
-                                <div className="flex items-center gap-1 text-slate">
+                                <div className="flex items-center gap-1.5 text-slate">
                                   <span>思考中</span>
-                                  <span className="thinking-dot">.</span>
-                                  <span className="thinking-dot">.</span>
-                                  <span className="thinking-dot">.</span>
+                                  <span className="thinking-dot" />
+                                  <span className="thinking-dot" />
+                                  <span className="thinking-dot" />
                                 </div>
                               ) : msg.role === 'user' ? (
                                 msg.content
