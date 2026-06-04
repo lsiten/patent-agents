@@ -53,6 +53,7 @@ async function request<T>(
 export interface CreateTaskRequest {
   tech_description: string;
   patent_type_preference?: 'invention' | 'utility' | 'design';
+  target_country?: string;
   user_id?: string;
 }
 
@@ -810,7 +811,8 @@ export const conversationApi = {
       onToolCallStart?: (data: { name: string; parameters: Record<string, unknown> }) => void;
       onToolCallEnd?: (data: { name: string; parameters: Record<string, unknown>; result: unknown; success: boolean; error?: string }) => void;
       onContent?: (data: { content: string; has_recommendation: boolean }) => void;
-      onDone?: (data: { message: ChatMessage; has_recommendation: boolean; conversation_id: string }) => void;
+      onConfirmation?: (data: { question: string; options: string[] }) => void;
+      onDone?: (data: { message: ChatMessage; has_recommendation: boolean; needs_confirmation?: boolean; conversation_id: string }) => void;
       onError?: (error: string) => void;
       onStatusChange?: (status: 'connecting' | 'connected' | 'disconnected') => void;
     },
@@ -931,6 +933,9 @@ export const conversationApi = {
                       break;
                     case 'content':
                       callbacks.onContent?.(parsed);
+                      break;
+                    case 'confirmation':
+                      callbacks.onConfirmation?.(parsed);
                       break;
                     case 'done':
                       callbacks.onDone?.(parsed);

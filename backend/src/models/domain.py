@@ -13,6 +13,7 @@ class PatentTask(BaseModel):
     user_id: str
     tech_description: str
     patent_type_preference: Optional[PatentType] = None
+    target_country: str = "中国"
     current_state: WorkflowState = WorkflowState.INITIAL
     iteration_count: int = 0
     max_iterations: int = 3

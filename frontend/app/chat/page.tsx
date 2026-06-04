@@ -90,6 +90,13 @@ function ChatPageContent() {
   // Dispatch activities (CEO → specialist calls)
   const [dispatchActivities, setDispatchActivities] = useState<DispatchActivity[]>([]);
 
+  // Pending confirmation from agent
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    question: string;
+    options: string[];
+    convId: string;
+  } | null>(null);
+
   const { addToast } = useToast();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -252,6 +259,8 @@ function ChatPageContent() {
   useEffect(() => {
     if (convIdFromParam) {
       setActiveConvId(convIdFromParam);
+      setConnectionStatus('idle');
+      setIsLoading(false);
 
       if (skipNextConversationLoadRef.current === convIdFromParam) {
         skipNextConversationLoadRef.current = null;
@@ -265,6 +274,8 @@ function ChatPageContent() {
     skipNextConversationLoadRef.current = null;
     conversationLoadSeqRef.current += 1;
     setActiveConvId(null);
+    setConnectionStatus('idle');
+    setIsLoading(false);
     setMessages([createWelcomeMessage()]);
     setIsLoadingConv(false);
     setWorkflowTaskId(null);
@@ -289,6 +300,7 @@ function ChatPageContent() {
   // Create new conversation
   const handleNewConversation = async () => {
     setConnectionStatus('idle');
+    setIsLoading(false);
     setActiveConvId(null);
     setMessages([createWelcomeMessage()]);
     setWorkflowTaskId(null);
@@ -302,6 +314,8 @@ function ChatPageContent() {
   // Select conversation
   const handleSelectConversation = (convId: string) => {
     setActiveConvId(convId);
+    setConnectionStatus('idle');
+    setIsLoading(false);
     setWorkflowTaskId(null);
     setWorkflowState(null);
     setRecommendStartWorkflow(false);
@@ -335,9 +349,11 @@ function ChatPageContent() {
   };
 
   // Send message
-  const handleSend = async () => {
-    let content = input.trim();
+  const handleSend = async (overrideContent?: string) => {
+    let content = (overrideContent ?? input).trim();
     if ((!content && !pendingFile) || isLoading || isUploadingFile || sendingRef.current) return;
+    // Clear pending confirmation on any send action
+    setPendingConfirmation(null);
     sendingRef.current = true;
 
     let fileUpload: { messageId: string; metadata: Record<string, unknown>; convId: string } | null = null;
@@ -384,6 +400,16 @@ function ChatPageContent() {
 
     try {
       let convId = activeConvId;
+
+      // If activeConvId is stale after file upload (React closure doesn't update),
+      // use the convId returned by uploadPendingFile instead
+      if (!convId && fileUpload?.convId) {
+        convId = fileUpload.convId;
+        setActiveConvId(convId);
+        skipNextConversationLoadRef.current = convId;
+        window.history.replaceState(null, '', `/chat?conv_id=${encodeURIComponent(convId)}`);
+        void loadConversations();
+      }
 
       // If no active conversation, create one
       if (!convId) {
@@ -486,6 +512,13 @@ function ChatPageContent() {
             setRecommendStartWorkflow(true);
           }
         },
+        onConfirmation: (data) => {
+          setPendingConfirmation({
+            question: data.question,
+            options: data.options,
+            convId: convId as string,
+          });
+        },
         onDone: (data) => {
           setConnectionStatus('idle');
           // Replace streaming message with final persisted message
@@ -520,15 +553,22 @@ function ChatPageContent() {
     }
   };
 
+  const handleConfirmationAnswer = async (answer: string) => {
+    const currentConvId = pendingConfirmation?.convId;
+    setPendingConfirmation(null);
+    if (!currentConvId) return;
+    await handleSend(answer);
+  };
+
   const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
 
-    const allowed = ['.txt', '.docx'];
+    const allowed = ['.txt', '.docx', '.pdf'];
     const lower = file.name.toLowerCase();
     if (!allowed.some((ext) => lower.endsWith(ext))) {
-      appendSystemMessage('文件类型不支持：仅支持 .txt 和 .docx 文件', 'error');
+      appendSystemMessage('文件类型不支持：仅支持 .txt、.docx 和 .pdf 文件', 'error');
       return;
     }
 
@@ -610,7 +650,7 @@ function ChatPageContent() {
       const processMsg: ChatMessage = {
         id: `workflow-${Date.now()}`,
         role: 'assistant',
-        content: `专利申请流程已启动！
+        content: `专利申请流程已创建！
 
 任务编号：${result.task_id}
 
@@ -620,7 +660,7 @@ function ChatPageContent() {
 3. 专利撰写 — 生成申请文件
 4. 质量审查 — 合规性审查
 
-您可以[查看工作流进度](/workflow/${result.task_id})，也可以继续在这里补充细节。`,
+点击上方「开始流程」按钮即可启动。`,
         timestamp: new Date().toISOString(),
       };
 
@@ -847,7 +887,7 @@ function ChatPageContent() {
           </div>
         </div>
 
-        {/* Workflow Progress + CEO Dispatch (merged) */}
+        {/* Unified CEO Dispatch Panel (stage roadmap + dispatch activities) */}
         <WorkflowProgressStrip
           taskId={workflowTaskId}
           currentState={workflowState}
@@ -1085,6 +1125,42 @@ function ChatPageContent() {
           </div>
         )}
 
+        {/* Confirmation Panel — hidden when start-workflow banner is shown */}
+        {pendingConfirmation && !recommendStartWorkflow && (
+          <div className="border-t border-hairline bg-amber-50 px-4 py-3">
+            <div className="max-w-4xl mx-auto">
+              <div className="rounded-lg border border-amber-200 bg-white px-4 py-3 shadow-sm">
+                <p className="text-sm font-medium text-amber-900 mb-2">
+                  {pendingConfirmation.question}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {pendingConfirmation.options.length > 0 ? (
+                    pendingConfirmation.options.map((opt, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => handleConfirmationAnswer(opt)}
+                        className="px-3 py-1.5 text-sm rounded-md border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 hover:border-amber-400 transition-colors"
+                      >
+                        {opt}
+                      </button>
+                    ))
+                  ) : (
+                    <p className="text-sm text-slate/60">请在输入框中回答</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPendingConfirmation(null)}
+                    className="px-3 py-1.5 text-sm rounded-md text-slate/60 hover:text-slate-800 hover:bg-slate-100 transition-colors ml-auto"
+                  >
+                    跳过
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Input Area */}
         <div className="border-t border-hairline bg-canvas px-4 py-3">
           <div className="max-w-4xl mx-auto">
@@ -1154,7 +1230,7 @@ function ChatPageContent() {
               />
               <Button
                 data-testid="chat-send-button"
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 disabled={(!input.trim() && !pendingFile) || isLoading || isLoadingConv || isUploadingFile}
                 isLoading={isLoading || isUploadingFile}
                 className="self-end"

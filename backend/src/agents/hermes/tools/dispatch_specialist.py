@@ -16,11 +16,29 @@ Dispatch Specialist Tool — CEO Agent 动态调度专业 Agent
 import asyncio
 import json
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
 
 logger = logging.getLogger(__name__)
+
+# ============ 父级对话上下文（线程安全） ============
+# dispatch_specialist 创建的 sub-agent 需要访问父级（CEO）的对话上下文。
+# 使用 threading.local() 确保每个线程有独立的上下文副本，避免并发请求间的竞态条件。
+# routes.py 在调用 CEO agent 前 set_parent_context()，dispatch_specialist 内部自动读取并注入。
+
+_thread_local = threading.local()
+
+
+def set_parent_context(context: str) -> None:
+    """设置当前线程的父级对话上下文（routes.py 在调用 CEO 前调用）"""
+    _thread_local.parent_context = context
+
+
+def get_parent_context() -> str:
+    """获取当前线程的父级对话上下文"""
+    return getattr(_thread_local, "parent_context", "")
 
 # 可调度的专业 Agent 列表
 SPECIALIST_AGENTS = {
@@ -144,10 +162,17 @@ class DispatchSpecialistTool(HermesTool):
         profile_id = specialist["profile_id"]
         phase = specialist["phase"]
 
-        # 构建完整 prompt
-        full_prompt = task
+        # 注入父级对话上下文（routes.py 通过 set_parent_context 设置）
+        parent_ctx = get_parent_context()
+        context_parts = []
         if context:
-            full_prompt = f"{task}\n\n【上下文信息】\n{context}"
+            context_parts.append(f"【上下文信息】\n{context}")
+        if parent_ctx:
+            context_parts.append(f"【用户对话历史】\n{parent_ctx}")
+
+        full_prompt = task
+        if context_parts:
+            full_prompt = f"{task}\n\n" + "\n\n".join(context_parts)
 
         logger.info(
             f"[dispatch_specialist] CEO → {specialist['name']} ({profile_id}): {task[:80]}..."
