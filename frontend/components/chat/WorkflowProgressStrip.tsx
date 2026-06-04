@@ -14,6 +14,7 @@ import {
   ChevronDown,
   ChevronUp,
   Play,
+  Lightbulb,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { workflowApi } from '@/lib/api';
@@ -34,6 +35,12 @@ const STAGES: Array<{
   icon: React.ComponentType<{ className?: string }>;
   matchStates: string[];
 }> = [
+  {
+    id: 'brainstorm',
+    label: '头脑风暴',
+    icon: Lightbulb,
+    matchStates: ['brainstorming'],
+  },
   {
     id: 'requirement',
     label: '需求分析',
@@ -113,6 +120,22 @@ export function WorkflowProgressStrip({
   const [latestState, setLatestState] = useState<string | null>(currentState);
   const [dispatchExpanded, setDispatchExpanded] = useState(true);
   const [dispatchItemExpanded, setDispatchItemExpanded] = useState<string | null>(null);
+  const [phaseActivities, setPhaseActivities] = useState<DispatchActivity[]>([]);
+
+  const PHASE_TO_AGENT: Record<string, string> = {
+    brainstorm: 'brainstorm_partner',
+    requirement: 'requirement_analyst',
+    retrieval: 'retrieval_analyst',
+    writing: 'patent_writer',
+    review: 'quality_reviewer',
+  };
+  const STATE_TO_AGENT: Record<string, string> = {
+    brainstorming: 'brainstorm_partner',
+    requirement_analysis: 'requirement_analyst',
+    retrieval_analysis: 'retrieval_analyst',
+    patent_writing: 'patent_writer',
+    quality_review: 'quality_reviewer',
+  };
 
   useEffect(() => {
     if (!taskId) return;
@@ -124,6 +147,44 @@ export function WorkflowProgressStrip({
         if (cancelled) return;
         setPhaseHistory(workflow.phase_history || []);
         setLatestState(workflow.current_state);
+
+        const history = workflow.phase_history || [];
+        const activities: DispatchActivity[] = history.map((phase, i) => {
+          const agentId = PHASE_TO_AGENT[phase.phase] || phase.phase;
+          return {
+            id: `phase-${phase.phase}`,
+            agentId,
+            agentName: agentId,
+            task: phase.phase === 'brainstorm' ? '技术方案头脑风暴讨论'
+              : phase.phase === 'requirement' ? '专利需求分析与创新点提取'
+              : phase.phase === 'retrieval' ? '现有技术多源检索与对比'
+              : phase.phase === 'writing' ? '专利文件撰写与术语规范'
+              : phase.phase === 'review' ? '形式与实质双重质量审查'
+              : phase.phase,
+            status: phase.success ? 'completed' : 'failed',
+            startedAt: '',
+            completedAt: new Date().toISOString(),
+            result: phase.issues?.length ? phase.issues.join('; ') : undefined,
+          };
+        });
+        const currentAgentId = STATE_TO_AGENT[workflow.current_state];
+        if (currentAgentId && !activities.some(a => a.agentId === currentAgentId)) {
+          activities.push({
+            id: `phase-${workflow.current_state}-active`,
+            agentId: currentAgentId,
+            agentName: currentAgentId,
+            task: workflow.current_state === 'brainstorming' ? '技术方案头脑风暴讨论'
+              : workflow.current_state === 'requirement_analysis' ? '专利需求分析与创新点提取'
+              : workflow.current_state === 'retrieval_analysis' ? '现有技术多源检索与对比'
+              : workflow.current_state === 'patent_writing' ? '专利文件撰写与术语规范'
+              : workflow.current_state === 'quality_review' ? '形式与实质双重质量审查'
+              : workflow.current_state,
+            status: 'running',
+            startedAt: new Date().toISOString(),
+          });
+        }
+        setPhaseActivities(activities);
+
         // Stop polling once workflow reaches a terminal state
         const terminalStates = ['completed', 'failed', 'cancelled'];
         if (terminalStates.includes(workflow.current_state)) {
@@ -144,7 +205,9 @@ export function WorkflowProgressStrip({
 
   const [starting, setStarting] = useState(false);
 
-  const showDispatch = dispatchActivities.length > 0 || isStreaming;
+  const allActivities = [...phaseActivities, ...dispatchActivities];
+
+  const showDispatch = allActivities.length > 0 || isStreaming || !!taskId;
 
   // Hide the panel entirely if nothing to show
   if (!taskId && !showDispatch) return null;
@@ -166,9 +229,9 @@ export function WorkflowProgressStrip({
     }
   };
 
-  const runningCount = dispatchActivities.filter((a) => a.status === 'running').length;
-  const completedCount = dispatchActivities.filter((a) => a.status === 'completed').length;
-  const failedCount = dispatchActivities.filter((a) => a.status === 'failed').length;
+  const runningCount = allActivities.filter((a) => a.status === 'running').length;
+  const completedCount = allActivities.filter((a) => a.status === 'completed').length;
+  const failedCount = allActivities.filter((a) => a.status === 'failed').length;
 
   return (
     <div className="border-b border-hairline bg-canvas/60">
@@ -176,45 +239,6 @@ export function WorkflowProgressStrip({
       {showDispatch && (
         <div className="px-6 py-2">
           <div className="max-w-4xl mx-auto">
-            {/* Stage roadmap — embedded at the top when a workflow is active */}
-            {taskId && (
-              <div className="flex items-center gap-1 mb-3 pb-3 border-b border-hairline/60">
-                {STAGES.map((stage, idx) => {
-                  const isCompleted = idx < activeIndex ||
-                    STAGES.slice(0, idx).every((s) =>
-                      s.matchStates.some((m) => completedSet.has(m))
-                    );
-                  const isActive = idx === activeIndex && !isTerminal && !isInitial;
-                  const Icon = stage.icon;
-
-                  return (
-                    <div key={stage.id} className="flex items-center flex-1 min-w-0">
-                      <div
-                        className={clsx(
-                          'flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors w-full',
-                          isCompleted && 'bg-green-50 text-green-700',
-                          isActive && 'bg-blue-50 text-blue-700 ring-1 ring-blue-200',
-                          !isCompleted && !isActive && 'bg-canvas text-slate-500 border border-hairline'
-                        )}
-                      >
-                        {isCompleted ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
-                        ) : isActive ? (
-                          <Loader2 className="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
-                        ) : (
-                          <Icon className="w-3.5 h-3.5 flex-shrink-0" />
-                        )}
-                        <span className="truncate">{stage.label}</span>
-                      </div>
-                      {idx < STAGES.length - 1 && (
-                        <ChevronRight className="w-3 h-3 mx-0.5 text-slate-300 flex-shrink-0" />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
             {/* Header: CEO 调度 title + workflow status + counters + collapse button */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -251,7 +275,7 @@ export function WorkflowProgressStrip({
                 )}
                 {!isTerminal && !isInitial && !starting && (
                   <>
-                    {dispatchActivities.length === 0 && isStreaming && (
+                    {allActivities.length === 0 && isStreaming && (
                       <span className="inline-flex items-center gap-1 text-[11px] text-blue-600">
                         <Loader2 className="w-3 h-3 animate-spin" />
                         分析中
@@ -318,10 +342,46 @@ export function WorkflowProgressStrip({
               </div>
             </div>
 
+            {/* Stage roadmap — below the CEO header when a workflow is active */}
+            {taskId && (
+              <div className="flex items-center gap-1 mt-3 pt-3 border-t border-hairline/60">
+                {STAGES.map((stage, idx) => {
+                  const isCompleted = idx < activeIndex;
+                  const isActive = idx === activeIndex && !isTerminal && !isInitial;
+                  const Icon = stage.icon;
+
+                  return (
+                    <div key={stage.id} className="flex items-center flex-1 min-w-0">
+                      <div
+                        className={clsx(
+                          'flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors w-full',
+                          isCompleted && 'bg-green-50 text-green-700',
+                          isActive && 'bg-blue-50 text-blue-700 ring-1 ring-blue-200',
+                          !isCompleted && !isActive && 'bg-canvas text-slate-500 border border-hairline'
+                        )}
+                      >
+                        {isCompleted ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                        ) : isActive ? (
+                          <Loader2 className="w-3.5 h-3.5 flex-shrink-0 animate-spin" />
+                        ) : (
+                          <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+                        )}
+                        <span className="truncate">{stage.label}</span>
+                      </div>
+                      {idx < STAGES.length - 1 && (
+                        <ChevronRight className="w-3 h-3 mx-0.5 text-slate-300 flex-shrink-0" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Compact pills (collapsed) */}
-            {!dispatchExpanded && dispatchActivities.length > 0 && (
+            {!dispatchExpanded && allActivities.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-1.5">
-                {dispatchActivities.map((activity) => {
+                {allActivities.map((activity) => {
                   const agent = getAgentInfo(activity.agentId);
                   return (
                     <button
@@ -351,13 +411,13 @@ export function WorkflowProgressStrip({
             {/* Expanded detail list */}
             {dispatchExpanded && (
               <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto">
-                {dispatchActivities.length === 0 && isStreaming && (
+                {allActivities.length === 0 && isStreaming && (
                   <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate border border-dashed border-hairline rounded-lg bg-canvas/50">
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
                     <span>等待 CEO 分析任务…</span>
                   </div>
                 )}
-                {dispatchActivities.map((activity) => {
+                {allActivities.map((activity) => {
                   const agent = getAgentInfo(activity.agentId);
                   const isItemExpanded = dispatchItemExpanded === activity.id;
                   return (
