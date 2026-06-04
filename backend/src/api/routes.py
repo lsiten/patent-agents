@@ -4475,6 +4475,17 @@ async def export_workflow_patent_docx(task_id: str):
     async with workflow_lock:
         context = workflow_engine.get_workflow(task_id)
     if not context:
+        # 兜底：如果工作流已不在内存中，尝试从磁盘直接提供已生成的DOCX文件
+        export_dir = os.path.join(os.path.dirname(__file__), "..", "..", "exports", task_id, "final")
+        if os.path.isdir(export_dir):
+            docx_files = [f for f in os.listdir(export_dir) if f.endswith(".docx")]
+            if docx_files:
+                filepath = os.path.join(export_dir, docx_files[0])
+                return FileResponse(
+                    path=filepath,
+                    filename=f"patent_{task_id}.docx",
+                    media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
         raise HTTPException(status_code=404, detail="工作流不存在")
 
     patent_draft = context.patent_draft
