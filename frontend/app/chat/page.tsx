@@ -4,11 +4,9 @@ import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'rea
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Send, Bot, User, Sparkles, FileText, Loader2, Plus, Trash2,
-  MessageSquare, ChevronRight, AlertCircle, CheckCircle2, Clock, Paperclip, Upload, X, Copy, Search
+  MessageSquare, ChevronRight, AlertCircle, CheckCircle2, Clock, Paperclip, X, Copy, Search
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { ToolCallCard } from '@/components/chat/ToolCallCard';
@@ -38,6 +36,20 @@ function createWelcomeMessage(): ChatMessage {
   };
 }
 
+function createLocalChatMessage(
+  role: ChatMessage['role'],
+  content: string,
+  options?: Pick<ChatMessage, 'type' | 'metadata'>,
+): ChatMessage {
+  return {
+    id: `local-${Date.now()}-${crypto.randomUUID()}`,
+    role,
+    content,
+    timestamp: new Date().toISOString(),
+    ...options,
+  };
+}
+
 function ChatPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -57,7 +69,7 @@ function ChatPageContent() {
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'disconnected'>('idle');
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -95,6 +107,26 @@ function ChatPageContent() {
       (m) => m.content && m.content.toLowerCase().includes(q)
     );
   }, [messages, searchQuery]);
+
+  const appendSystemMessage = useCallback(
+    (content: string, tone: 'info' | 'error' = 'info') => {
+      setMessages((prev) => [
+        ...prev,
+        createLocalChatMessage('system', content, { metadata: { tone } }),
+      ]);
+    },
+    []
+  );
+
+  const appendFileMessage = useCallback(
+    (content: string, metadata: Record<string, unknown>) => {
+      setMessages((prev) => [
+        ...prev,
+        createLocalChatMessage('user', content, { type: 'file', metadata }),
+      ]);
+    },
+    []
+  );
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -324,8 +356,7 @@ function ChatPageContent() {
       if (fileUpload) {
         content = '请分析我上传的技术交底文件，并开始专利申请讨论';
         isAutoAnalysis = true;
-        // Show a brief auto-analysis hint in the message area before streaming starts
-        addToast({ type: 'info', title: '正在分析文件', message: 'AI 正在解读您上传的交底书...' });
+        appendSystemMessage('正在分析文件：AI 正在解读您上传的交底书...');
       } else {
         sendingRef.current = false;
         return;
@@ -472,8 +503,10 @@ function ChatPageContent() {
         },
         onError: (errorMsg) => {
           setConnectionStatus('idle');
-          addToast({ type: 'error', title: '请求失败', message: errorMsg });
-          setMessages((prev) => prev.filter((m) => m.id !== streamMsgId));
+          setMessages((prev) => [
+            ...prev.filter((m) => m.id !== streamMsgId),
+            createLocalChatMessage('system', `请求失败：${errorMsg}`, { metadata: { tone: 'error' } }),
+          ]);
           setIsLoading(false);
           sendingRef.current = false;
         },
@@ -481,7 +514,7 @@ function ChatPageContent() {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '发送消息失败';
-      addToast({ type: 'error', title: '发送失败', message: msg });
+      appendSystemMessage(`发送失败：${msg}`, 'error');
       sendingRef.current = false;
       setIsLoading(false);
     }
@@ -495,12 +528,12 @@ function ChatPageContent() {
     const allowed = ['.txt', '.docx'];
     const lower = file.name.toLowerCase();
     if (!allowed.some((ext) => lower.endsWith(ext))) {
-      addToast({ type: 'error', title: '文件类型不支持', message: '仅支持 .txt 和 .docx 文件' });
+      appendSystemMessage('文件类型不支持：仅支持 .txt 和 .docx 文件', 'error');
       return;
     }
 
     if (file.size > 10 * 1024 * 1024) {
-      addToast({ type: 'error', title: '文件过大', message: '文件大小不能超过 10MB' });
+      appendSystemMessage('文件过大：文件大小不能超过 10MB', 'error');
       return;
     }
 
@@ -534,10 +567,12 @@ function ChatPageContent() {
 
       const result = await conversationApi.uploadDisclosure(convId, file);
 
-      addToast({
-        type: 'success',
-        title: '文件已解析',
-        message: `${result.filename} · ${result.char_count} 字符`,
+      appendFileMessage(`文件已解析：${result.filename} · ${result.char_count} 字符`, {
+        filename: result.filename,
+        file_type: result.file_type,
+        file_size: result.file_size,
+        char_count: result.char_count,
+        ...(result.metadata || {}),
       });
       setPendingFile(null);
       return {
@@ -553,7 +588,7 @@ function ChatPageContent() {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : '文件上传失败';
-      addToast({ type: 'error', title: '上传失败', message });
+      appendSystemMessage(`上传失败：${message}`, 'error');
       throw err;
     } finally {
       setIsUploadingFile(false);
@@ -829,7 +864,7 @@ function ChatPageContent() {
               <div className="flex justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-brand-green-dark" />
               </div>
-            ) : !activeConvId ? (
+            ) : !activeConvId && messages.length === 1 && messages[0]?.id === 'welcome' ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <MessageSquare className="w-12 h-12 text-slate/30 mb-4" />
                 <h2 className="text-lg font-semibold text-ink mb-2">开始新的专利对话</h2>
@@ -872,9 +907,30 @@ function ChatPageContent() {
                   );
                 }
 
+                if (msg.role === 'system') {
+                  const isError = msg.metadata?.tone === 'error';
+                  acc.push(
+                    <div key={msg.id} className="flex justify-center" data-testid="chat-system-message">
+                      <div
+                        className={clsx(
+                          'flex max-w-xl items-center gap-2 rounded-lg border px-3 py-2 text-xs',
+                          isError
+                            ? 'border-red-100 bg-red-50 text-red-500'
+                            : 'border-hairline bg-hairline-soft text-slate'
+                        )}
+                      >
+                        <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                        <span>{msg.content}</span>
+                      </div>
+                    </div>
+                  );
+                  return acc;
+                }
+
                 acc.push(
                   <div
                     key={msg.id}
+                    data-testid={msg.type === 'file' ? 'chat-file-message' : `chat-message-${msg.role}`}
                     className={clsx(
                       'flex gap-3',
                       msg.role === 'user' ? 'justify-end' : 'justify-start'
@@ -1057,6 +1113,7 @@ function ChatPageContent() {
             )}
             <div className="flex gap-2">
               <input
+                data-testid="chat-file-input"
                 ref={fileInputRef}
                 type="file"
                 accept=".txt,.docx"
@@ -1075,6 +1132,7 @@ function ChatPageContent() {
                 <Paperclip className="w-4 h-4" />
               </Button>
               <textarea
+                data-testid="chat-input"
                 ref={inputRef}
                 value={input}
                 onChange={(e) => {
@@ -1095,6 +1153,7 @@ function ChatPageContent() {
                 disabled={isLoading || isLoadingConv || isStartingWorkflow || isUploadingFile}
               />
               <Button
+                data-testid="chat-send-button"
                 onClick={handleSend}
                 disabled={(!input.trim() && !pendingFile) || isLoading || isLoadingConv || isUploadingFile}
                 isLoading={isLoading || isUploadingFile}
