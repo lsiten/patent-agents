@@ -76,6 +76,10 @@ coverage.xml
 .omo/*
 !.omo/.gitkeep
 
+# === Local Runtime / Worktrees ===
+.runtime/
+.local-ignore/
+
 # === Playwright MCP debug artifacts ===
 .playwright-mcp/
 

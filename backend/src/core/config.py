@@ -9,20 +9,29 @@ from dotenv import load_dotenv
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
-# 显式加载 .env 文件到 os.environ，确保嵌套模型也能读取环境变量
-_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
-if os.path.isfile(_env_path):
-    load_dotenv(_env_path)
+_backend_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+_selected_env_file = os.getenv("PATENT_AGENTS_ENV_FILE")
 
-if os.getenv("ENVIRONMENT") == "testing":
-    _test_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env.testing")
-    if os.path.isfile(_test_env_path):
-        load_dotenv(_test_env_path, override=True)
+# 显式加载 .env 文件到 os.environ，确保嵌套模型也能读取环境变量。
+if _selected_env_file:
+    _selected_env_path = os.path.abspath(_selected_env_file)
+    if not os.path.isfile(_selected_env_path):
+        raise RuntimeError(f"PATENT_AGENTS_ENV_FILE does not exist: {_selected_env_path}")
+    load_dotenv(_selected_env_path, override=True)
+else:
+    _env_path = os.path.join(_backend_root, ".env")
+    if os.path.isfile(_env_path):
+        load_dotenv(_env_path)
 
-if os.getenv("ENVIRONMENT") == "production":
-    _prod_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env.production")
-    if os.path.isfile(_prod_env_path):
-        load_dotenv(_prod_env_path, override=True)
+    if os.getenv("ENVIRONMENT") == "testing":
+        _test_env_path = os.path.join(_backend_root, ".env.testing")
+        if os.path.isfile(_test_env_path):
+            load_dotenv(_test_env_path, override=True)
+
+    if os.getenv("ENVIRONMENT") == "production":
+        _prod_env_path = os.path.join(_backend_root, ".env.production")
+        if os.path.isfile(_prod_env_path):
+            load_dotenv(_prod_env_path, override=True)
 
 
 class Environment(str, Enum):
