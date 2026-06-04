@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { ToolCallCard } from '@/components/chat/ToolCallCard';
+import { AgentActivityLog } from '@/components/chat/AgentActivityLog';
 import { type DispatchActivity } from '@/components/chat/DispatchPanel';
 import { WorkflowProgressStrip } from '@/components/chat/WorkflowProgressStrip';
 import ReactMarkdown from 'react-markdown';
@@ -434,29 +435,80 @@ function ChatPageContent() {
         isStreaming: true,
         tool_calls: [],
         skill_uses: [],
+        agent_events: [],
       };
       setMessages((prev) => [...prev, streamMsg]);
 
       // Use streaming API
       conversationApi.chatStream(convId, { content }, {
-        onThinking: () => {
-          setMessages((prev) => prev.map((m) =>
-            m.id === streamMsgId ? { ...m, content: m.content || '正在思考...' } : m
-          ));
+        onThinking: (_data) => {
+          setMessages((prev) => {
+            const now = new Date().toISOString();
+            return prev.map((m) =>
+              m.id === streamMsgId
+                ? {
+                    ...m,
+                    content: m.content || '正在思考...',
+                    agent_events: [
+                      ...(m.agent_events || []),
+                      {
+                        type: 'thinking' as const,
+                        agent_name: 'patent.ceo.v1',
+                        timestamp: now,
+                        message: '思考中...',
+                        data: _data as Record<string, unknown>,
+                      },
+                    ],
+                  }
+                : m
+            );
+          });
         },
         onSkillUse: (data) => {
-          setMessages((prev) => prev.map((m) =>
-            m.id === streamMsgId
-              ? { ...m, skill_uses: [...(m.skill_uses || []), data] }
-              : m
-          ));
+          setMessages((prev) => {
+            const now = new Date().toISOString();
+            return prev.map((m) =>
+              m.id === streamMsgId
+                ? {
+                    ...m,
+                    skill_uses: [...(m.skill_uses || []), data],
+                    agent_events: [
+                      ...(m.agent_events || []),
+                      {
+                        type: 'skill_use' as const,
+                        agent_name: 'patent.ceo.v1',
+                        timestamp: now,
+                        message: `技能: ${data.name}`,
+                        data: data as Record<string, unknown>,
+                      },
+                    ],
+                  }
+                : m
+            );
+          });
         },
         onToolCallStart: (data) => {
-          setMessages((prev) => prev.map((m) =>
-            m.id === streamMsgId
-              ? { ...m, tool_calls: [...(m.tool_calls || []), { ...data, result: null, success: true }] }
-              : m
-          ));
+          setMessages((prev) => {
+            const now = new Date().toISOString();
+            return prev.map((m) =>
+              m.id === streamMsgId
+                ? {
+                    ...m,
+                    tool_calls: [...(m.tool_calls || []), { ...data, result: null, success: true }],
+                    agent_events: [
+                      ...(m.agent_events || []),
+                      {
+                        type: 'tool_call_start' as const,
+                        agent_name: 'patent.ceo.v1',
+                        timestamp: now,
+                        message: `调用工具: ${data.name}`,
+                        data: data as Record<string, unknown>,
+                      },
+                    ],
+                  }
+                : m
+            );
+          });
           // Track dispatch_specialist calls in panel
           if (data.name === 'dispatch_specialist') {
             const params = data.parameters as Record<string, string>;
@@ -476,15 +528,31 @@ function ChatPageContent() {
           }
         },
         onToolCallEnd: (data) => {
-          setMessages((prev) => prev.map((m) => {
-            if (m.id !== streamMsgId) return m;
-            const updatedCalls = (m.tool_calls || []).map((tc) =>
-              tc.name === data.name && tc.result === null
-                ? { ...tc, result: data.result, success: data.success, error: data.error }
-                : tc
-            );
-            return { ...m, tool_calls: updatedCalls };
-          }));
+          setMessages((prev) => {
+            const now = new Date().toISOString();
+            return prev.map((m) => {
+              if (m.id !== streamMsgId) return m;
+              const updatedCalls = (m.tool_calls || []).map((tc) =>
+                tc.name === data.name && tc.result === null
+                  ? { ...tc, result: data.result, success: data.success, error: data.error }
+                  : tc
+              );
+              return {
+                ...m,
+                tool_calls: updatedCalls,
+                agent_events: [
+                  ...(m.agent_events || []),
+                  {
+                    type: 'tool_call_end' as const,
+                    agent_name: 'patent.ceo.v1',
+                    timestamp: now,
+                    message: `工具完成: ${data.name}`,
+                    data: data as Record<string, unknown>,
+                  },
+                ],
+              };
+            });
+          });
           // Update dispatch activity status
           if (data.name === 'dispatch_specialist') {
             setDispatchActivities((prev) => {
@@ -517,6 +585,28 @@ function ChatPageContent() {
             question: data.question,
             options: data.options,
             convId: convId as string,
+          });
+        },
+        onStatus: (data) => {
+          setMessages((prev) => {
+            const now = new Date().toISOString();
+            return prev.map((m) =>
+              m.id === streamMsgId
+                ? {
+                    ...m,
+                    agent_events: [
+                      ...(m.agent_events || []),
+                      {
+                        type: 'status' as const,
+                        agent_name: data.agent || 'patent.ceo.v1',
+                        timestamp: now,
+                        message: data.message || data.status || '',
+                        data: data as Record<string, unknown>,
+                      },
+                    ],
+                  }
+                : m
+            );
           });
         },
         onDone: (data) => {
@@ -1060,6 +1150,9 @@ function ChatPageContent() {
                             </button>
                           )}
                         </div>
+                      )}
+                      {msg.role === 'assistant' && msg.agent_events && msg.agent_events.length > 0 && (
+                        <AgentActivityLog events={msg.agent_events} className="-mx-1 mt-2" />
                       )}
                       <p className="text-[11px] text-slate/60 mt-1 px-1">
                         {new Date(msg.timestamp).toLocaleTimeString('zh-CN', {

@@ -220,6 +220,14 @@ export interface SkillUseInfo {
   reasoning: string;
 }
 
+export interface AgentEvent {
+  type: 'thinking' | 'tool_call_start' | 'tool_call_end' | 'skill_use' | 'status' | 'dispatch';
+  agent_name: string;
+  timestamp: string;
+  message: string;
+  data: Record<string, unknown>;
+}
+
 export interface ChatMessage {
   id: string;
   task_id?: string;
@@ -231,6 +239,7 @@ export interface ChatMessage {
   metadata?: Record<string, unknown>;
   tool_calls?: ToolCallInfo[];
   skill_uses?: SkillUseInfo[];
+  agent_events?: AgentEvent[];
   isStreaming?: boolean;
 }
 

@@ -387,6 +387,15 @@ class ToolCallInfo(BaseModel):
     duration_ms: Optional[float] = None
 
 
+class AgentEventInfo(BaseModel):
+    """Agent事件记录（用于持久化和回放）"""
+    type: str  # thinking | tool_call_start | tool_call_end | skill_use | status | dispatch
+    agent_name: str
+    timestamp: str
+    message: str = ""
+    data: Dict[str, Any] = {}
+
+
 class ConversationMessage(BaseModel):
     """对话消息"""
     id: str
@@ -396,6 +405,7 @@ class ConversationMessage(BaseModel):
     type: str = "text"
     metadata: Optional[Dict[str, Any]] = None
     tool_calls: Optional[List[ToolCallInfo]] = None
+    agent_events: Optional[List[AgentEventInfo]] = None
 
 
 class ConversationDetail(BaseModel):

@@ -815,6 +815,7 @@ export const conversationApi = {
       onDone?: (data: { message: ChatMessage; has_recommendation: boolean; needs_confirmation?: boolean; conversation_id: string }) => void;
       onError?: (error: string) => void;
       onStatusChange?: (status: 'connecting' | 'connected' | 'disconnected') => void;
+      onStatus?: (data: { agent: string; status: string; message: string; iteration?: number }) => void;
     },
     options?: { timeout?: number; maxRetries?: number; stallTimeout?: number },
   ): { abort: () => void } => {
@@ -933,6 +934,9 @@ export const conversationApi = {
                       break;
                     case 'content':
                       callbacks.onContent?.(parsed);
+                      break;
+                    case 'status':
+                      callbacks.onStatus?.(parsed);
                       break;
                     case 'confirmation':
                       callbacks.onConfirmation?.(parsed);

@@ -334,7 +334,7 @@ async def _persist_conversation(conv_id: str) -> None:
     try:
         await _get_persist_store().save("conversations", conv_id, conv)
     except Exception as e:
-        logger.warning(f"保存对话 {conv_id} 到数据库失败: {e}")
+        logger.exception(f"保存对话 {conv_id} 到数据库失败: {e}")
 
 
 async def _persist_workflow(task_id: str) -> None:
@@ -3087,9 +3087,13 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
 """
         tool_calls_data = []
         events: list = []
+        agent_events: list = []
         events_lock = threading.Lock()
         final_content = ""
         result_holder = {"result": None, "error": None, "done": False}
+
+        def _now_iso() -> str:
+            return datetime.now().isoformat()
 
         def on_thinking(data):
             text = str(data).strip() if data else ""
@@ -3098,9 +3102,17 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
             if text.startswith("{") or text.startswith("["):
                 return
             with events_lock:
+                trimmed = text[:300]
                 events.append({
                     "type": "thinking",
-                    "data": {"agent": "patent.ceo.v1", "message": text[:300]}
+                    "data": {"agent": "patent.ceo.v1", "message": trimmed}
+                })
+                agent_events.append({
+                    "type": "thinking",
+                    "agent_name": "patent.ceo.v1",
+                    "timestamp": _now_iso(),
+                    "message": trimmed,
+                    "data": {},
                 })
 
         def on_tool_start(call_id, name, args):
@@ -3117,6 +3129,13 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                     "type": "tool_call_start",
                     "data": {"name": name, "parameters": params}
                 })
+                agent_events.append({
+                    "type": "tool_call_start",
+                    "agent_name": "patent.ceo.v1",
+                    "timestamp": _now_iso(),
+                    "message": f"调用工具: {name}",
+                    "data": {"name": name, "parameters": params},
+                })
 
         def on_tool_complete(call_id, name, args, result):
             with events_lock:
@@ -3130,12 +3149,26 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                     "type": "tool_call_end",
                     "data": {"name": name, "result": result_str, "success": True}
                 })
+                agent_events.append({
+                    "type": "tool_call_end",
+                    "agent_name": "patent.ceo.v1",
+                    "timestamp": _now_iso(),
+                    "message": f"工具完成: {name}",
+                    "data": {"name": name, "result": result_str, "success": True},
+                })
 
         def on_status(kind, msg):
             with events_lock:
                 events.append({
                     "type": "status",
                     "data": {"kind": kind, "message": msg}
+                })
+                agent_events.append({
+                    "type": "status",
+                    "agent_name": "patent.ceo.v1",
+                    "timestamp": _now_iso(),
+                    "message": msg,
+                    "data": {"kind": kind, "message": msg},
                 })
 
         callbacks = {
@@ -3218,6 +3251,7 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                     "type": "text",
                     "metadata": {"recommend_create_patent": has_recommendation} if has_recommendation else None,
                     "tool_calls": tool_calls_data if tool_calls_data else None,
+                    "agent_events": agent_events if agent_events else None,
                 }
 
                 async with conversations_lock:
@@ -3513,7 +3547,7 @@ async def delete_conversation(conv_id: str):
             raise HTTPException(status_code=404, detail="对话不存在")
         del conversations_store[conv_id]
     store = _get_persist_store()
-    await store.delete("conversation", conv_id)
+    await store.delete("conversations", conv_id)
 
 
 @router.get("/conversations/{conv_id}/workflow-status", response_model=dict)
