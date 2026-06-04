@@ -152,7 +152,7 @@ export function WorkflowProgressStrip({
         const activities: DispatchActivity[] = history.map((phase, i) => {
           const agentId = PHASE_TO_AGENT[phase.phase] || phase.phase;
           return {
-            id: `phase-${phase.phase}`,
+            id: `phase-${phase.phase}-${i}`,
             agentId,
             agentName: agentId,
             task: phase.phase === 'brainstorm' ? '技术方案头脑风暴讨论'
@@ -205,7 +205,11 @@ export function WorkflowProgressStrip({
 
   const [starting, setStarting] = useState(false);
 
-  const allActivities = [...phaseActivities, ...dispatchActivities];
+  // Merge phase_history activities + CEO dispatch activities, deduplicating by agentId.
+  // Prefer dispatch activities (richer data) when both exist for the same agent.
+  const dispatchAgentIds = new Set(dispatchActivities.map((a) => a.agentId));
+  const uniquePhaseActivities = phaseActivities.filter((a) => !dispatchAgentIds.has(a.agentId));
+  const allActivities = [...uniquePhaseActivities, ...dispatchActivities];
 
   const showDispatch = allActivities.length > 0 || isStreaming || !!taskId;
 
