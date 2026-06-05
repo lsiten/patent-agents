@@ -236,117 +236,159 @@ export default function WorkflowPage() {
   const [isPaused, setIsPaused] = useState(false);
   const [agentLogs, setAgentLogs] = useState<AgentLogEntry[]>([]);
 
-  // SSE连接：监听agent级别实时事件
+  // SSE连接：监听agent级别实时事件，自动重连（指数退避）
   useEffect(() => {
     const baseUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1').replace(/\/+$/, '');
-    const es = new EventSource(`${baseUrl}/workflows/${taskId}/stream`);
+    const SSE_MAX_RETRIES = 8;
+    const SSE_INITIAL_DELAY = 1000;
+    const SSE_MAX_DELAY = 30000;
 
+    let es: EventSource | null = null;
+    let retryCount = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
     let logIdCounter = 0;
+
     const createLogId = () => `log_${Date.now()}_${logIdCounter++}`;
 
     const addLog = (entry: Omit<AgentLogEntry, 'id'>) => {
       setAgentLogs((prev) => [...prev, { ...entry, id: createLogId() }]);
     };
 
-    es.addEventListener('agent.thinking', (e) => {
-      try {
-        const parsed = JSON.parse(e.data);
-        const data = parsed.data || parsed;
-        const thought = data.thought || data.message || parsed.message || '';
-        // 过滤无意义的 thinking（JSON 片段、太短）
-        if (!thought || thought.length < 5) return;
-        if (/^[{\["]/.test(thought.trim()) && thought.length < 100) return;
-        addLog({
-          timestamp: parsed.timestamp || new Date().toISOString(),
-          agent_name: data.agent_name || parsed.agent || 'Agent',
-          type: 'thinking',
-          message: thought,
-        });
-      } catch {}
-    });
-
-    es.addEventListener('agent.tool_call_start', (e) => {
-      try {
-        const parsed = JSON.parse(e.data);
-        const data = parsed.data || parsed;
-        addLog({
-          timestamp: parsed.timestamp || new Date().toISOString(),
-          agent_name: data.agent_name || parsed.agent || 'Agent',
-          type: 'tool_start',
-          tool_name: data.tool_name || '',
-          tool_params: data.parameters || {},
-        });
-      } catch {}
-    });
-
-    es.addEventListener('agent.tool_call_end', (e) => {
-      try {
-        const parsed = JSON.parse(e.data);
-        const data = parsed.data || parsed;
-        addLog({
-          timestamp: parsed.timestamp || new Date().toISOString(),
-          agent_name: data.agent_name || parsed.agent || 'Agent',
-          type: 'tool_end',
-          tool_name: data.tool_name || '',
-          tool_result: data.result || '',
-          tool_success: data.success !== false,
-        });
-      } catch {}
-    });
-
-    es.addEventListener('agent.dispatch', (e) => {
-      try {
-        const parsed = JSON.parse(e.data);
-        const data = parsed.data || parsed;
-        addLog({
-          timestamp: parsed.timestamp || new Date().toISOString(),
-          agent_name: data.from_agent || parsed.agent || 'CEO Agent',
-          type: 'dispatch',
-          dispatch_to: data.to_agent || '',
-          dispatch_task: data.task_description || '',
-        });
-      } catch {}
-    });
-
-    es.addEventListener('agent.content', (e) => {
-      try {
-        const parsed = JSON.parse(e.data);
-        const data = parsed.data || parsed;
-        addLog({
-          timestamp: parsed.timestamp || new Date().toISOString(),
-          agent_name: data.agent_name || parsed.agent || 'Agent',
-          type: 'content',
-          content: data.content || '',
-          phase: data.phase || '',
-        });
-      } catch {}
-    });
-
-    es.addEventListener('workflow.progress_updated', (e) => {
-      try {
-        const parsed = JSON.parse(e.data);
-        const data = parsed.data || parsed;
-        addLog({
-          timestamp: parsed.timestamp || new Date().toISOString(),
-          agent_name: data.agent_name || parsed.agent || 'Workflow Engine',
-          type: 'progress',
-          message: data.message || parsed.message || `阶段 ${data.state} ${data.progress}%`,
-          phase: data.state || '',
-        });
-      } catch {}
-    });
-
-    es.addEventListener('done', () => {
-      es.close();
-    });
-
-    es.onerror = () => {
-      // SSE断连后自动由轮询恢复状态
-      es.close();
+    const clearEventSource = () => {
+      if (es) {
+        es.close();
+        es = null;
+      }
     };
 
+    function connect() {
+      if (closed) return;
+      clearEventSource();
+
+      es = new EventSource(`${baseUrl}/workflows/${taskId}/stream`);
+
+      const onThinking = (e: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          const data = parsed.data || parsed;
+          const thought = data.thought || data.message || parsed.message || '';
+          if (!thought || thought.length < 5) return;
+          if (/^[{\["]/.test(thought.trim()) && thought.length < 100) return;
+          addLog({
+            timestamp: parsed.timestamp || new Date().toISOString(),
+            agent_name: data.agent_name || parsed.agent || 'Agent',
+            type: 'thinking',
+            message: thought,
+          });
+        } catch {}
+      };
+
+      const onToolCallStart = (e: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          const data = parsed.data || parsed;
+          addLog({
+            timestamp: parsed.timestamp || new Date().toISOString(),
+            agent_name: data.agent_name || parsed.agent || 'Agent',
+            type: 'tool_start',
+            tool_name: data.tool_name || '',
+            tool_params: data.parameters || {},
+          });
+        } catch {}
+      };
+
+      const onToolCallEnd = (e: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          const data = parsed.data || parsed;
+          addLog({
+            timestamp: parsed.timestamp || new Date().toISOString(),
+            agent_name: data.agent_name || parsed.agent || 'Agent',
+            type: 'tool_end',
+            tool_name: data.tool_name || '',
+            tool_result: data.result || '',
+            tool_success: data.success !== false,
+          });
+        } catch {}
+      };
+
+      const onDispatch = (e: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          const data = parsed.data || parsed;
+          addLog({
+            timestamp: parsed.timestamp || new Date().toISOString(),
+            agent_name: data.from_agent || parsed.agent || 'CEO Agent',
+            type: 'dispatch',
+            dispatch_to: data.to_agent || '',
+            dispatch_task: data.task_description || '',
+          });
+        } catch {}
+      };
+
+      const onContent = (e: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          const data = parsed.data || parsed;
+          addLog({
+            timestamp: parsed.timestamp || new Date().toISOString(),
+            agent_name: data.agent_name || parsed.agent || 'Agent',
+            type: 'content',
+            content: data.content || '',
+            phase: data.phase || '',
+          });
+        } catch {}
+      };
+
+      const onProgress = (e: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          const data = parsed.data || parsed;
+          addLog({
+            timestamp: parsed.timestamp || new Date().toISOString(),
+            agent_name: data.agent_name || parsed.agent || 'Workflow Engine',
+            type: 'progress',
+            message: data.message || parsed.message || `阶段 ${data.state} ${data.progress}%`,
+            phase: data.state || '',
+          });
+        } catch {}
+      };
+
+      const onDone = () => {
+        closed = true;
+        clearEventSource();
+      };
+
+      es.addEventListener('agent.thinking', onThinking);
+      es.addEventListener('agent.tool_call_start', onToolCallStart);
+      es.addEventListener('agent.tool_call_end', onToolCallEnd);
+      es.addEventListener('agent.dispatch', onDispatch);
+      es.addEventListener('agent.content', onContent);
+      es.addEventListener('workflow.progress_updated', onProgress);
+      es.addEventListener('done', onDone);
+
+      es.onerror = () => {
+        if (closed) return;
+        retryCount++;
+        if (retryCount > SSE_MAX_RETRIES) {
+          clearEventSource();
+          return;
+        }
+        const delay = Math.min(SSE_INITIAL_DELAY * Math.pow(2, retryCount - 1), SSE_MAX_DELAY);
+        clearEventSource();
+        // 重连前清空日志，避免后端重放事件导致重复
+        setAgentLogs([]);
+        retryTimer = setTimeout(connect, delay);
+      };
+    }
+
+    connect();
+
     return () => {
-      es.close();
+      closed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      clearEventSource();
     };
   }, [taskId]);
 

@@ -1,0 +1,65 @@
+uid=3_0 RootWebArea "专利智脑 - AI 驱动的专利申请多智能体系统" url="http://localhost:3000/chat?conv_id=3902da52-54cd-44fa-8938-7b303326a6cc"
+  uid=3_1 banner
+    uid=3_2 link "专利智脑" url="http://localhost:3000/"
+      uid=3_3 StaticText "专利智脑"
+    uid=3_4 navigation
+      uid=3_5 link "对话" url="http://localhost:3000/chat"
+        uid=3_6 StaticText "对话"
+      uid=3_7 link "专利管理" url="http://localhost:3000/patents"
+        uid=3_8 StaticText "专利管理"
+      uid=3_9 link "Agent管理" url="http://localhost:3000/agents"
+        uid=3_10 StaticText "Agent管理"
+      uid=3_11 link "组织架构" url="http://localhost:3000/organization"
+        uid=3_12 StaticText "组织架构"
+      uid=3_13 link "系统配置" url="http://localhost:3000/system-config"
+        uid=3_14 StaticText "系统配置"
+    uid=3_15 button "开始申请"
+  uid=3_16 main
+    uid=3_17 complementary
+      uid=3_18 button "新建对话"
+      uid=3_19 button "请分析我上传的技术交底文件，并开始专利申请讨论 2 条消息 · 23:06"
+        uid=3_20 button
+      uid=3_21 button "请分析我上传的技术交底文件，并开始专利申请讨论 3 条消息 · 22:39"
+        uid=3_22 button
+      uid=3_23 button "请分析我上传的技术交底文件，并开始专利申请讨论 1 条消息 · 22:05"
+        uid=3_24 button
+      uid=3_25 button "20260506075628-45-基于Cave折幕视频的处理方法及系统-茅-逐字稿文本-1.txt 2 条消息 · 22:05"
+        uid=3_26 button
+      uid=3_27 button "继续 8 条消息 · 6月3日"
+        uid=3_28 button
+      uid=3_29 button "patent_f2c5b7b2-950a-4ac0-9b0e-73fa0a1c3f40 (1).docx 2 条消息 · 6月3日"
+        uid=3_30 button
+      uid=3_31 button "继续 3 条消息 · 6月3日"
+        uid=3_32 button
+      uid=3_33 button "patent_ecc2b325-665f-4fd7-8599-c4940693ca7f.docx 2 条消息 · 6月3日"
+        uid=3_34 button
+      uid=3_35 button "网络访问行为的识别方法及系统.docx 4 条消息 · 6月2日"
+        uid=3_36 button
+      uid=3_37 button "请你依据这个交底内容写本发明的权利要求书 3 条消息 · 6月2日"
+        uid=3_38 button
+      uid=3_39 button "任(00:00:00): 看有没有交点？ 任(00:00:37): 它类似于防火墙。它本来的名称叫基于防火墙的网络访问控制方法。是类似于防狼型的，比如说可能有 3 条消息 · 6月2日"
+        uid=3_40 button
+    uid=3_41 heading "请分析我上传的技术交底文件，并开始专利申请讨论" description="点击重命名" level="1"
+    uid=3_42 StaticText "与 AI 专利代理人沟通，完善技术方案"
+    uid=3_43 button "搜索消息"
+    uid=3_44 StaticText "今天"
+    uid=3_45 StaticText "你好！我是专利智脑的创意助手。请告诉我你的技术构思，我们可以一起探讨它的专利价值。"
+    uid=3_46 button "复制消息"
+    uid=3_47 StaticText "22:38"
+    uid=3_48 StaticText "请分析我上传的技术交底文件，并开始专利申请讨论"
+    uid=3_49 StaticText "22:38"
+    uid=3_50 StaticText "我目前看不到你上传文件的正文内容，所以还不能实质分析技术方案。我们先进入专利申请的头脑风暴阶段：你可以粘贴技术交底书正文，或先提供“技术领域、要解决的问题、核心技术手段、技术效果”四项摘要。"
+    uid=3_51 StaticText "请确认："
+    uid=3_52 StaticText "是否可以直接粘贴技术交底文件正文或主要章节？"
+    uid=3_53 StaticText "如果不方便提供全文，是否先用一段核心技术摘要启动讨论？"
+    uid=3_54 StaticText "调用了 "
+    uid=3_55 StaticText "1"
+    uid=3_56 StaticText " 个工具"
+    uid=3_57 button "🔧 dispatch_specialist"
+    uid=3_58 button "复制消息"
+    uid=3_59 StaticText "22:39"
+    uid=3_60 button "选择交底书（.txt / .docx）"
+    uid=3_61 textbox "继续补充技术细节...（可点击 📎 选择交底书 .txt / .docx）" focusable focused multiline
+    uid=3_62 button disableable disabled
+    uid=3_63 StaticText "Enter 发送 · Shift+Enter 换行 · 选择 .txt / .docx 交底书后随消息一起发送"
+  uid=3_64 alert atomic live="assertive" relevant="additions text"

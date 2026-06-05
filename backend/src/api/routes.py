@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from typing import Any, Dict, List, Optional
 import asyncio
 import uuid
@@ -333,7 +334,7 @@ async def _persist_conversation(conv_id: str) -> None:
     try:
         await _get_persist_store().save("conversations", conv_id, conv)
     except Exception as e:
-        logger.warning(f"保存对话 {conv_id} 到数据库失败: {e}")
+        logger.exception(f"保存对话 {conv_id} 到数据库失败: {e}")
 
 
 async def _persist_workflow(task_id: str) -> None:
@@ -406,6 +407,7 @@ async def restore_stores_from_db() -> None:
                         task_id=key,
                         user_id=value.get("user_id", "unknown"),
                         description="",  # 从持久化数据恢复
+                        target_country=value.get("target_country", "中国"),
                     )
                     # 恢复标题
                     ctx.title = value.get("title", "未命名专利")
@@ -475,6 +477,7 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
             "patent_draft": pat_norm,
             "review_report": rev_norm,
         },
+        target_country=context.target_country,
     )
 
 
@@ -817,6 +820,7 @@ async def create_workflow_session(request: WorkflowStartRequest):
                 if request.patent_type_preference is not None
                 else None
             ),
+            target_country=request.target_country,
         )
         task_events[task_id] = []
         _append_workflow_event(
@@ -1342,6 +1346,7 @@ async def create_task(request: CreateTaskRequest, background_tasks: BackgroundTa
         user_id=request.user_id,
         tech_description=request.tech_description,
         patent_type_preference=request.patent_type_preference,
+        target_country=request.target_country,
         current_state=WorkflowState.INITIAL,
         created_at=datetime.now(),
         updated_at=datetime.now(),
@@ -1358,9 +1363,6 @@ async def create_task(request: CreateTaskRequest, background_tasks: BackgroundTa
     await _persist_events(task_id)
 
     logger.info(f"创建新任务: {task_id}")
-
-    # 后台执行工作流
-    background_tasks.add_task(_execute_workflow, task_id)
 
     return task
 
@@ -1379,6 +1381,7 @@ async def _execute_workflow(task_id: str):
                 user_id=task.user_id,
                 description=task.tech_description,
                 patent_type_preference=task.patent_type_preference,
+                target_country=task.target_country,
             )
 
         # 2. 事件回调：将 agent 事件写入 task_events 供 SSE stream 读取
@@ -3024,8 +3027,16 @@ async def chat_in_conversation(conv_id: str, request: ConversationChatRequest):
 
     try:
         agent = _get_brainstorm_agent()
-        history_text = "\n".join([
-            f"{m['role'].upper()}: {m['content']}"
+
+        def _fmt_msg(m: dict) -> str:
+            role = m["role"].upper()
+            if m.get("type") == "file":
+                fname = m.get("metadata", {}).get("filename", "文件")
+                return f"{role} [上传文件: {fname}]:\n---文件内容开始---\n{m['content']}\n---文件内容结束---"
+            return f"{role}: {m['content']}"
+
+        history_text = "\n\n".join([
+            _fmt_msg(m)
             for m in conv["messages"][-10:]
         ])
 
@@ -3153,10 +3164,26 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
         import asyncio
         import threading
 
-        history_text = "\n".join([
-            f"{m['role'].upper()}: {m['content']}"
+        def _format_msg(m: dict) -> str:
+            """格式化单条消息：文件类消息用清晰标签包裹，普通消息保持简单"""
+            role = m["role"].upper()
+            if m.get("type") == "file":
+                fname = m.get("metadata", {}).get("filename", "文件")
+                return f"{role} [上传文件: {fname}]:\n---文件内容开始---\n{m['content']}\n---文件内容结束---"
+            return f"{role}: {m['content']}"
+
+        history_text = "\n\n".join([
+            _format_msg(m)
             for m in conv["messages"][-10:]
         ])
+
+        # 构建完整对话历史供 dispatch_specialist 注入子 agent
+        full_history_text = "\n\n".join([
+            _format_msg(m)
+            for m in conv["messages"]
+        ])
+        from src.agents.hermes.tools.dispatch_specialist import set_parent_context
+        set_parent_context(full_history_text)
 
         prompt = f"""对话历史:
 {history_text}
@@ -3168,12 +3195,20 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
 - 需要分析时调用工具（ipc_classifier/risk_analyzer/task_planner/patent_search/tech_feature_extractor），不要自己编造
 - 提1-2个关键追问推进讨论
 - 收集够信息后加标记 [CREATE_PATENT_RECOMMENDATION]
+- 当需要用户做关键确认时（如是否已公开、专利类型选择等），在回复末尾加上确认标记：
+  [CONFIRM: 问题|选项1|选项2|选项3]
+  例如：[CONFIRM: 该方案是否已经公开？|尚未公开|已经公开|部分公开]
+  不要问可以自由回答的开放性问题，提供明确的选项让用户选择
 """
         tool_calls_data = []
         events: list = []
+        agent_events: list = []
         events_lock = threading.Lock()
         final_content = ""
         result_holder = {"result": None, "error": None, "done": False}
+
+        def _now_iso() -> str:
+            return datetime.now().isoformat()
 
         def on_thinking(data):
             text = str(data).strip() if data else ""
@@ -3182,9 +3217,17 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
             if text.startswith("{") or text.startswith("["):
                 return
             with events_lock:
+                trimmed = text[:300]
                 events.append({
                     "type": "thinking",
-                    "data": {"agent": "patent.ceo.v1", "message": text[:300]}
+                    "data": {"agent": "patent.ceo.v1", "message": trimmed}
+                })
+                agent_events.append({
+                    "type": "thinking",
+                    "agent_name": "patent.ceo.v1",
+                    "timestamp": _now_iso(),
+                    "message": trimmed,
+                    "data": {},
                 })
 
         def on_tool_start(call_id, name, args):
@@ -3201,6 +3244,13 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                     "type": "tool_call_start",
                     "data": {"name": name, "parameters": params}
                 })
+                agent_events.append({
+                    "type": "tool_call_start",
+                    "agent_name": "patent.ceo.v1",
+                    "timestamp": _now_iso(),
+                    "message": f"调用工具: {name}",
+                    "data": {"name": name, "parameters": params},
+                })
 
         def on_tool_complete(call_id, name, args, result):
             with events_lock:
@@ -3214,12 +3264,26 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                     "type": "tool_call_end",
                     "data": {"name": name, "result": result_str, "success": True}
                 })
+                agent_events.append({
+                    "type": "tool_call_end",
+                    "agent_name": "patent.ceo.v1",
+                    "timestamp": _now_iso(),
+                    "message": f"工具完成: {name}",
+                    "data": {"name": name, "result": result_str, "success": True},
+                })
 
         def on_status(kind, msg):
             with events_lock:
                 events.append({
                     "type": "status",
                     "data": {"kind": kind, "message": msg}
+                })
+                agent_events.append({
+                    "type": "status",
+                    "agent_name": "patent.ceo.v1",
+                    "timestamp": _now_iso(),
+                    "message": msg,
+                    "data": {"kind": kind, "message": msg},
                 })
 
         callbacks = {
@@ -3272,8 +3336,26 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                 has_recommendation = "[CREATE_PATENT_RECOMMENDATION]" in final_content
                 clean_content = final_content.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
 
+                # Parse [CONFIRM: question|opt1|opt2] markers for user confirmation
+                confirmation_data = None
+                confirm_pattern = r'\[CONFIRM:\s*(.*?)\]'
+                confirm_match = re.search(confirm_pattern, clean_content)
+                if confirm_match:
+                    marker_content = confirm_match.group(1)
+                    parts = [p.strip() for p in marker_content.split('|')]
+                    question = parts[0]
+                    options = parts[1:] if len(parts) > 1 else []
+                    if question:
+                        confirmation_data = {"question": question, "options": options}
+                        # Remove marker from displayed content
+                        clean_content = re.sub(confirm_pattern, '', clean_content).strip()
+
                 # 发送 content 事件
                 yield f"event: content\ndata: {_json.dumps({'content': clean_content, 'has_recommendation': has_recommendation}, ensure_ascii=False)}\n\n"
+
+                # If confirmation needed, emit confirmation event
+                if confirmation_data:
+                    yield f"event: confirmation\ndata: {_json.dumps(confirmation_data, ensure_ascii=False)}\n\n"
 
                 # 构建 assistant 消息并持久化
                 assistant_msg = {
@@ -3284,6 +3366,7 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                     "type": "text",
                     "metadata": {"recommend_create_patent": has_recommendation} if has_recommendation else None,
                     "tool_calls": tool_calls_data if tool_calls_data else None,
+                    "agent_events": agent_events if agent_events else None,
                 }
 
                 async with conversations_lock:
@@ -3298,7 +3381,7 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
 
                 await _persist_conversation(conv_id)
 
-                yield f"event: done\ndata: {_json.dumps({'message': assistant_msg, 'has_recommendation': has_recommendation, 'conversation_id': conv_id}, ensure_ascii=False)}\n\n"
+                yield f"event: done\ndata: {_json.dumps({'message': assistant_msg, 'has_recommendation': has_recommendation, 'needs_confirmation': confirmation_data is not None, 'conversation_id': conv_id}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             yield f"event: error\ndata: {_json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
@@ -3359,10 +3442,32 @@ async def _parse_disclosure_file(file: UploadFile) -> Dict[str, Any]:
             extracted_text = "\n".join(paragraphs).strip()
             metadata["format"] = "docx"
             metadata["paragraph_count"] = len(paragraphs)
+        elif suffix == ".pdf":
+            try:
+                import fitz  # PyMuPDF
+            except ImportError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail="服务器未安装 PyMuPDF，无法解析 pdf 文件",
+                ) from e
+
+            import io
+            doc = fitz.open(stream=raw_bytes, filetype="pdf")
+            try:
+                pages = []
+                for page_num in range(len(doc)):
+                    text = doc[page_num].get_text().strip()
+                    if text:
+                        pages.append(text)
+                extracted_text = "\n\n".join(pages).strip()
+                metadata["format"] = "pdf"
+                metadata["page_count"] = len(pages)
+            finally:
+                doc.close()
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"不支持的文件类型: {suffix or file.content_type}，仅支持 .txt 和 .docx",
+                detail=f"不支持的文件类型: {suffix or file.content_type}，仅支持 .txt、.docx 和 .pdf",
             )
     except HTTPException:
         raise
@@ -3385,7 +3490,7 @@ async def _parse_disclosure_file(file: UploadFile) -> Dict[str, Any]:
 @router.post("/conversations/{conv_id}/upload", response_model=FileUploadResponse)
 async def upload_disclosure_file(
     conv_id: str,
-    file: UploadFile = File(..., description="交底书或技术资料，支持 .txt / .docx"),
+    file: UploadFile = File(..., description="交底书或技术资料，支持 .txt / .docx / .pdf"),
 ):
     """
     上传交底书/技术资料文件到对话中。
@@ -3483,6 +3588,7 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             task_id=str(uuid.uuid4()),
             user_id=request.user_id,
             description=tech_description,
+            target_country=request.target_country,
         )
         task_id = context.task_id
         task_events[task_id] = []
@@ -3490,6 +3596,7 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             task_id=task_id,
             user_id=request.user_id,
             tech_description=tech_description,
+            target_country=request.target_country,
             current_state=WorkflowState.INITIAL,
             created_at=datetime.now(),
             updated_at=datetime.now(),
@@ -3505,7 +3612,7 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             data={"state": context.current_phase.value},
         )
 
-    # 关联对话到工作流
+    # 关联对话到工作流，并写入创建消息
     async with conversations_lock:
         conv = conversations_store.get(conv_id)
         if conv:
@@ -3513,85 +3620,20 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             conv["status"] = "workflow_linked"
             conv["updated_at"] = datetime.now().isoformat()
 
+            workflow_msg = {
+                "id": f"workflow-created-{task_id}",
+                "role": "assistant",
+                "content": f"专利申请流程已创建！\n\n任务编号：{task_id}\n\n多智能体系统将依次执行：\n1. 需求分析 — 结构化您的技术需求\n2. 检索分析 — 现有技术检索与专利性评估\n3. 专利撰写 — 生成申请文件\n4. 质量审查 — 合规性审查\n\n点击上方「开始流程」按钮即可启动。",
+                "timestamp": datetime.now().isoformat(),
+                "type": "text",
+                "metadata": {"type": "workflow_created", "task_id": task_id},
+            }
+            conv["messages"].append(workflow_msg)
+
     await _persist_events(task_id)
     await _persist_conversation(conv_id)
 
-    # 自动启动工作流（后台执行）
-    async def auto_start_workflow():
-        """自动启动工作流的后台任务"""
-        def _workflow_event_callback(agent_name: str, event_type: str, message: str, data: Dict[str, Any]):
-            """直接将agent事件写入task_events"""
-            task_events.setdefault(task_id, []).append(
-                WorkflowEventResponse(
-                    task_id=task_id,
-                    timestamp=datetime.now(),
-                    agent=agent_name,
-                    message=message,
-                    event_type=event_type,
-                    data=data,
-                )
-            )
-
-        async def phase_callback(phase, result):
-            async with workflow_lock:
-                _append_workflow_event(
-                    task_id=task_id,
-                    agent=phase.value,
-                    message=f"阶段 {phase.value} 已完成",
-                    event_type="workflow.phase.completed",
-                    data={
-                        "phase": phase.value,
-                        "success": result.success,
-                        "duration_seconds": result.duration_seconds,
-                        "issues": result.issues,
-                    },
-                )
-            await _persist_events(task_id)
-
-        try:
-            await workflow_engine.execute_full_workflow(
-                context,
-                phase_callback=phase_callback,
-                event_callback=_workflow_event_callback,
-            )
-            async with workflow_lock:
-                _append_workflow_event(
-                    task_id=task_id,
-                    agent="workflow_engine",
-                    message="专利申请流程已完成",
-                    event_type="workflow.completed",
-                    data={"state": context.current_phase.value},
-                )
-            await _persist_events(task_id)
-            await _persist_workflow(task_id)
-        except Exception as e:
-            logger.error(f"工作流自动执行失败: {e}")
-            async with workflow_lock:
-                _append_workflow_event(
-                    task_id=task_id,
-                    agent="workflow_engine",
-                    message=str(e),
-                    event_type="workflow.failed",
-                )
-            await _persist_events(task_id)
-            await _persist_workflow(task_id)
-            # 将失败信息写入对话，让 CEO 与用户沟通
-            async with conversations_lock:
-                c = conversations_store.get(conv_id)
-                if c:
-                    c["messages"].append({
-                        "id": str(uuid.uuid4()),
-                        "role": "assistant",
-                        "content": f"⚠️ 专利申请流程遇到问题：{str(e)}\n\n请补充更多技术细节后重试，或联系我协助解决。",
-                        "timestamp": datetime.now().isoformat(),
-                        "type": "text",
-                        "metadata": {"type": "workflow_error", "error": str(e)},
-                    })
-            await _persist_conversation(conv_id)
-
-    background_tasks.add_task(auto_start_workflow)
-
-    return {"task_id": task_id, "status": "started", "conversation_id": conv_id}
+    return {"task_id": task_id, "status": "created", "conversation_id": conv_id}
 
 
 @router.patch("/conversations/{conv_id}", response_model=dict)
@@ -3621,7 +3663,7 @@ async def delete_conversation(conv_id: str):
             raise HTTPException(status_code=404, detail="对话不存在")
         del conversations_store[conv_id]
     store = _get_persist_store()
-    await store.delete("conversation", conv_id)
+    await store.delete("conversations", conv_id)
 
 
 @router.get("/conversations/{conv_id}/workflow-status", response_model=dict)
@@ -4583,6 +4625,17 @@ async def export_workflow_patent_docx(task_id: str):
     async with workflow_lock:
         context = workflow_engine.get_workflow(task_id)
     if not context:
+        # 兜底：如果工作流已不在内存中，尝试从磁盘直接提供已生成的DOCX文件
+        export_dir = os.path.join(os.path.dirname(__file__), "..", "..", "exports", task_id, "final")
+        if os.path.isdir(export_dir):
+            docx_files = [f for f in os.listdir(export_dir) if f.endswith(".docx")]
+            if docx_files:
+                filepath = os.path.join(export_dir, docx_files[0])
+                return FileResponse(
+                    path=filepath,
+                    filename=f"patent_{task_id}.docx",
+                    media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
         raise HTTPException(status_code=404, detail="工作流不存在")
 
     patent_draft = context.patent_draft

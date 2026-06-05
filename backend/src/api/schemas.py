@@ -11,6 +11,7 @@ class CreateTaskRequest(BaseModel):
     """创建专利申请任务请求"""
     tech_description: str = Field(..., min_length=50, description="技术发明描述")
     patent_type_preference: Optional[PatentType] = Field(None, description="偏好的专利类型")
+    target_country: str = Field("中国", description="目标申请国家/法域（默认中国，可指定美国、欧洲等）")
     user_id: str = Field(..., description="用户ID")
     title: Optional[str] = Field(None, description="发明标题")
     reference_urls: List[str] = Field(default_factory=list, description="参考资料URL")
@@ -35,6 +36,7 @@ class WorkflowStartRequest(BaseModel):
     tech_description: str = Field(..., min_length=20, description="技术发明描述")
     user_id: str = Field(default="default_user", description="用户ID")
     patent_type_preference: Optional[PatentType] = Field(None, description="偏好的专利类型")
+    target_country: str = Field("中国", description="目标申请国家/法域（默认中国，可指定美国、欧洲等）")
     task_id: Optional[str] = Field(None, description="可选：已有头脑风暴任务ID")
 
 
@@ -99,6 +101,7 @@ class WorkflowResponse(BaseModel):
     message_count: int
     phase_history: List[WorkflowPhaseResultResponse]
     outputs: Dict[str, Dict[str, Any]]
+    target_country: str = "中国"
 
 
 class WorkflowListResponse(BaseModel):
@@ -384,6 +387,15 @@ class ToolCallInfo(BaseModel):
     duration_ms: Optional[float] = None
 
 
+class AgentEventInfo(BaseModel):
+    """Agent事件记录（用于持久化和回放）"""
+    type: str  # thinking | tool_call_start | tool_call_end | skill_use | status | dispatch
+    agent_name: str
+    timestamp: str
+    message: str = ""
+    data: Dict[str, Any] = {}
+
+
 class ConversationMessage(BaseModel):
     """对话消息"""
     id: str
@@ -393,6 +405,7 @@ class ConversationMessage(BaseModel):
     type: str = "text"
     metadata: Optional[Dict[str, Any]] = None
     tool_calls: Optional[List[ToolCallInfo]] = None
+    agent_events: Optional[List[AgentEventInfo]] = None
 
 
 class ConversationDetail(BaseModel):
@@ -434,6 +447,7 @@ class ConversationChatRequest(BaseModel):
 class CreateWorkflowFromConversationRequest(BaseModel):
     """从对话创建工作流请求"""
     user_id: str = "default_user"
+    target_country: str = "中国"
 
 
 class FileUploadResponse(BaseModel):
