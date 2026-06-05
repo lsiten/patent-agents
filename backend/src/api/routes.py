@@ -2819,6 +2819,101 @@ def _get_brainstorm_agent():
     )
 
 
+async def _handle_linked_workflow_conversation_chat(
+    conv_id: str,
+    conv: dict,
+    content: str,
+) -> ConversationChatResponse:
+    """Route a linked conversation message into its workflow and mirror it in chat."""
+    task_id = conv.get("linked_workflow_id")
+    if not task_id:
+        raise HTTPException(status_code=400, detail="对话未关联工作流")
+
+    context = workflow_engine.get_workflow(task_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="关联工作流不存在")
+
+    now = datetime.now().isoformat()
+    user_msg = {
+        "id": str(uuid.uuid4()),
+        "role": "user",
+        "content": content,
+        "timestamp": now,
+        "type": "text",
+        "metadata": {"linked_workflow_id": task_id},
+    }
+
+    try:
+        workflow_response = await workflow_engine.add_chat_message(
+            task_id=task_id,
+            role="user",
+            content=content,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+    response_content = str(workflow_response.get("content") or "补充信息已同步到关联工作流")
+    assistant_msg = {
+        "id": str(uuid.uuid4()),
+        "role": "assistant",
+        "content": response_content,
+        "timestamp": datetime.now().isoformat(),
+        "type": "text",
+        "metadata": {
+            "linked_workflow_id": task_id,
+            "workflow_phase": workflow_response.get("phase"),
+        },
+    }
+
+    async with conversations_lock:
+        current = conversations_store.get(conv_id)
+        if current:
+            current["messages"].append(user_msg)
+            current["messages"].append(assistant_msg)
+            current["updated_at"] = datetime.now().isoformat()
+
+    async with workflow_lock:
+        _append_workflow_event(
+            task_id=task_id,
+            agent="CEO Agent",
+            message=response_content,
+            event_type="chat.message.created",
+            data={
+                "conversation_id": conv_id,
+                "user_content": content,
+                "response": workflow_response,
+            },
+        )
+
+    await _persist_conversation(conv_id)
+    await _persist_events(task_id)
+    await _persist_workflow(task_id)
+
+    return ConversationChatResponse(
+        message=assistant_msg,
+        has_recommendation=False,
+        conversation_id=conv_id,
+    )
+
+
+async def _append_linked_workflow_upload_message(task_id: str, content: str) -> None:
+    context = workflow_engine.get_workflow(task_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="关联工作流不存在")
+
+    context.add_message("user", content, type="file")
+    async with workflow_lock:
+        _append_workflow_event(
+            task_id=task_id,
+            agent="workflow_engine",
+            message="交底文件补充内容已同步到关联工作流",
+            event_type="chat.message.created",
+            data={"role": "user", "content": content, "type": "file"},
+        )
+    await _persist_events(task_id)
+    await _persist_workflow(task_id)
+
+
 @router.post("/conversations", response_model=ConversationDetail, status_code=status.HTTP_201_CREATED)
 async def create_conversation(request: CreateConversationRequest):
     """创建新的头脑风暴对话会话"""
@@ -2914,7 +3009,7 @@ async def chat_in_conversation(conv_id: str, request: ConversationChatRequest):
         else:
             raise HTTPException(status_code=404, detail="对话不存在")
     if conv.get("linked_workflow_id"):
-        raise HTTPException(status_code=400, detail="该对话已关联工作流，请使用工作流聊天接口")
+        return await _handle_linked_workflow_conversation_chat(conv_id, conv, content)
 
     # 添加用户消息
     now = datetime.now().isoformat()
@@ -3014,7 +3109,27 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
         else:
             raise HTTPException(status_code=404, detail="对话不存在")
     if conv.get("linked_workflow_id"):
-        raise HTTPException(status_code=400, detail="该对话已关联工作流，请使用工作流聊天接口")
+        async def linked_workflow_event_generator():
+            import json as _json
+
+            yield "event: thinking\ndata: {\"agent\": \"workflow_engine\", \"message\": \"正在同步补充信息到关联工作流\"}\n\n"
+            try:
+                result = await _handle_linked_workflow_conversation_chat(conv_id, conv, content)
+                payload = result.model_dump(mode="json")
+                content_payload = {
+                    "content": result.message.content,
+                    "has_recommendation": result.has_recommendation,
+                }
+                yield f"event: content\ndata: {_json.dumps(content_payload, ensure_ascii=False)}\n\n"
+                yield f"event: done\ndata: {_json.dumps(payload, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                yield f"event: error\ndata: {_json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(
+            linked_workflow_event_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
 
     # 添加用户消息
     now = datetime.now().isoformat()
@@ -3292,8 +3407,7 @@ async def upload_disclosure_file(
         else:
             raise HTTPException(status_code=404, detail="对话不存在")
 
-    if conv.get("linked_workflow_id"):
-        raise HTTPException(status_code=400, detail="该对话已关联工作流，请使用工作流上传接口")
+    linked_workflow_id = conv.get("linked_workflow_id")
 
     now = datetime.now().isoformat()
     message_id = str(uuid.uuid4())
@@ -3322,6 +3436,8 @@ async def upload_disclosure_file(
                 c["title"] = title + ("..." if len(parsed["filename"]) > 50 else "")
 
     await _persist_conversation(conv_id)
+    if linked_workflow_id:
+        await _append_linked_workflow_upload_message(linked_workflow_id, parsed["extracted_text"])
 
     return FileUploadResponse(
         conversation_id=conv_id,
