@@ -123,3 +123,92 @@ test('stream failure removes placeholder and appends system error message', asyn
   await expect(page.getByText('思考中')).toHaveCount(0);
   await expect(page.getByText('请求失败', { exact: true })).toHaveCount(0);
 });
+
+test('linked workflow conversation keeps chat box usable and streams workflow sync feedback', async ({ page }) => {
+  await page.route(`${API_BASE_PATTERN}/conversations?user_id=default_user`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        total: 1,
+        items: [{
+          id: 'conv-linked',
+          title: 'Linked workflow conversation',
+          created_at: '2026-06-04T00:00:00.000Z',
+          updated_at: '2026-06-04T00:00:00.000Z',
+          message_count: 1,
+          status: 'workflow_linked',
+          linked_workflow_id: 'wf-linked',
+        }],
+      }),
+    });
+  });
+
+  await page.route(`${API_BASE_PATTERN}/conversations/conv-linked`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'conv-linked',
+        title: 'Linked workflow conversation',
+        created_at: '2026-06-04T00:00:00.000Z',
+        updated_at: '2026-06-04T00:00:00.000Z',
+        message_count: 1,
+        status: 'workflow_linked',
+        linked_workflow_id: 'wf-linked',
+        messages: [{
+          id: 'assistant-welcome',
+          role: 'assistant',
+          content: '工作流已启动，可以继续补充技术细节。',
+          timestamp: '2026-06-04T00:00:00.000Z',
+          type: 'text',
+          metadata: null,
+        }],
+      }),
+    });
+  });
+
+  await page.route(`${API_BASE_PATTERN}/workflows/wf-linked`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        task_id: 'wf-linked',
+        user_id: 'default_user',
+        title: 'Linked workflow',
+        current_state: 'patent_writing',
+        created_at: '2026-06-04T00:00:00.000Z',
+        updated_at: '2026-06-04T00:00:00.000Z',
+        iteration_count: 0,
+        message_count: 1,
+        phase_history: [],
+        outputs: {},
+      }),
+    });
+  });
+
+  await page.route(`${API_BASE_PATTERN}/conversations/conv-linked/chat/stream`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: [
+        'event: content',
+        'data: {"content":"补充信息已同步到关联工作流","has_recommendation":false}',
+        '',
+        'event: done',
+        'data: {"message":{"id":"assistant-linked","role":"assistant","content":"补充信息已同步到关联工作流","timestamp":"2026-06-04T00:00:01.000Z"},"has_recommendation":false,"conversation_id":"conv-linked"}',
+        '',
+      ].join('\n'),
+    });
+  });
+
+  await page.goto('/chat?conv_id=conv-linked');
+  await expect(page.getByText('专利申请流程已启动')).toBeVisible();
+
+  await page.getByTestId('chat-input').fill('补充：向外翻折时使用过渡画面补偿空白区域');
+  await expect(page.getByTestId('chat-send-button')).toBeEnabled();
+  await page.getByTestId('chat-send-button').click();
+
+  await expect(page.getByText('补充信息已同步到关联工作流')).toBeVisible();
+  await expect(page.getByText('该对话已关联工作流')).toHaveCount(0);
+});
