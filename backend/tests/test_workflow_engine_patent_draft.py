@@ -267,6 +267,332 @@ async def test_generate_patent_in_sections_preserves_agent_failure(monkeypatch):
     assert draft["abstract"] == ""
 
 
+@pytest.mark.asyncio
+async def test_execute_full_workflow_marks_truncated_writer_stage_failed(monkeypatch):
+    engine = PatentWorkflowEngine()
+    context = engine.create_workflow(
+        task_id="writer-truncated-phase-failure",
+        user_id="test-user",
+        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+    )
+
+    async def fake_publish_progress_event(context, phase, status, result=None):
+        return None
+
+    async def fake_sleep(delay):
+        return None
+
+    async def fake_run_agent_stream(service, profile_id, task_desc, context, agent_name, event_callback=None):
+        if profile_id == "patent.requirement_analyst.v1":
+            return {
+                "text": json.dumps(
+                    {
+                        "tech_field": "沉浸式显示",
+                        "core_principle": "入口预配置屏幕姿态并补偿跨屏画面",
+                        "technical_problem": "折幕空间固定屏幕难以适配不同体验者",
+                        "key_innovative_features": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                "tool_results": [],
+            }
+        if profile_id == "patent.retrieval_analyst.v1":
+            return {
+                "text": json.dumps(
+                    {
+                        "overall_patentability": "unknown",
+                        "writing_recommendations": ["突出入口预配置和跨屏补偿"],
+                        "prior_art_references": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                "tool_results": [],
+            }
+        raise AssertionError("quality reviewer should not run after truncated writer output")
+
+    writer_attempts = 0
+
+    async def fake_run_agent_conversation(profile_id, prompt):
+        nonlocal writer_attempts
+        assert profile_id == "patent.writer.v1"
+        writer_attempts += 1
+        return {
+            "failed": True,
+            "error": "Response truncated due to output length limit",
+            "completed": False,
+        }
+
+    monkeypatch.setattr(engine, "_publish_progress_event", fake_publish_progress_event)
+    monkeypatch.setattr(engine, "_run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(workflow_module.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
+
+    result = await engine.execute_full_workflow(context)
+
+    assert result.current_phase == WorkflowState.FAILED
+    writing_phase = next(p for p in result.phase_history if p.phase.value == "writing")
+    assert writing_phase.success is False
+    assert writing_phase.output["_agent_failed"] is True
+    assert writing_phase.issues == ["Response truncated due to output length limit"]
+    assert writer_attempts == 3
+    assert all(p.phase.value != "review" for p in result.phase_history)
+
+
+@pytest.mark.asyncio
+async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
+    engine = PatentWorkflowEngine()
+    context = engine.create_workflow(
+        task_id="writer-retry-recovers",
+        user_id="test-user",
+        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+    )
+    writer_attempts = 0
+
+    async def fake_publish_progress_event(context, phase, status, result=None):
+        return None
+
+    async def fake_sleep(delay):
+        return None
+
+    async def fake_run_agent_stream(service, profile_id, task_desc, context, agent_name, event_callback=None):
+        if profile_id == "patent.requirement_analyst.v1":
+            return {
+                "text": json.dumps(
+                    {
+                        "tech_field": "沉浸式显示",
+                        "core_principle": "入口预配置屏幕姿态并补偿跨屏画面",
+                        "technical_problem": "折幕空间固定屏幕难以适配不同体验者",
+                        "key_innovative_features": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                "tool_results": [],
+            }
+        if profile_id == "patent.retrieval_analyst.v1":
+            return {
+                "text": json.dumps(
+                    {
+                        "overall_patentability": "unknown",
+                        "writing_recommendations": ["突出入口预配置和跨屏补偿"],
+                        "prior_art_references": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                "tool_results": [],
+            }
+        if profile_id == "patent.quality_reviewer.v1":
+            return {
+                "text": json.dumps(
+                    {
+                        "recommendation": "approve",
+                        "revision_priority": "low",
+                        "review_summary": {"recommendation": "approve", "overall_rating": "good"},
+                        "formal_compliance_review": {"issues": []},
+                        "claims_review": {"issues": []},
+                        "description_review": {"issues": []},
+                        "consistency_review": {"issues": []},
+                        "examination_risks": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                "tool_results": [],
+            }
+        raise AssertionError(f"unexpected profile {profile_id}")
+
+    async def fake_run_agent_conversation(profile_id, prompt):
+        nonlocal writer_attempts
+        assert profile_id == "patent.writer.v1"
+        writer_attempts += 1
+        if writer_attempts == 1:
+            return {
+                "failed": True,
+                "error": "Response truncated due to output length limit",
+                "completed": False,
+            }
+        return {
+            "final_response": "工具调用完成",
+            "messages": [
+                {
+                    "role": "tool",
+                    "name": "claim_drafter",
+                    "content": json.dumps(
+                        {
+                            "tool": "claim_drafter",
+                            "success": True,
+                            "data": {
+                                "independent_claim": "1. 一种Cave折幕视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
+                                "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于虚拟空间模型生成屏幕角度。"],
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+                {
+                    "role": "tool",
+                    "name": "description_writer",
+                    "content": json.dumps(
+                        {
+                            "tool": "description_writer",
+                            "success": True,
+                            "data": {
+                                "section_type": "technical_field",
+                                "content": "本发明涉及沉浸式折幕显示视频处理技术领域。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+                {
+                    "role": "tool",
+                    "name": "description_writer",
+                    "content": json.dumps(
+                        {
+                            "tool": "description_writer",
+                            "success": True,
+                            "data": {
+                                "section_type": "background",
+                                "content": "现有Cave折幕显示空间难以根据入口姿态预配置跨屏画面。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+                {
+                    "role": "tool",
+                    "name": "description_writer",
+                    "content": json.dumps(
+                        {
+                            "tool": "description_writer",
+                            "success": True,
+                            "data": {
+                                "section_type": "summary",
+                                "content": "系统根据入口预配置屏幕姿态重映射跨屏画面。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+                {
+                    "role": "tool",
+                    "name": "description_writer",
+                    "content": json.dumps(
+                        {
+                            "tool": "description_writer",
+                            "success": True,
+                            "data": {
+                                "section_type": "detailed",
+                                "content": "入口终端获取空间配置后，生成折幕姿态参数并对跨屏视频画面进行重映射。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+                {
+                    "role": "tool",
+                    "name": "patent_docx_generator",
+                    "content": json.dumps(
+                        {
+                            "tool": "patent_docx_generator",
+                            "success": True,
+                            "data": {
+                                "file_path": "",
+                                "abstract": "本发明公开一种Cave折幕视频处理方法，可预配置屏幕姿态并重映射跨屏视频画面。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+        }
+
+    class FakeDocxGeneratorTool:
+        async def execute(self, **kwargs):
+            return {"success": True, "file_path": "/tmp/writer-retry-recovers.docx"}
+
+    from src.agents.hermes.tools import patent_docx_generator
+
+    monkeypatch.setattr(engine, "_publish_progress_event", fake_publish_progress_event)
+    monkeypatch.setattr(engine, "_run_agent_stream", fake_run_agent_stream)
+    monkeypatch.setattr(workflow_module.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
+    monkeypatch.setattr(patent_docx_generator, "PatentDocxGeneratorTool", FakeDocxGeneratorTool)
+
+    result = await engine.execute_full_workflow(context)
+
+    assert writer_attempts == 2
+    assert result.current_phase == WorkflowState.COMPLETED
+    writing_phase = next(p for p in result.phase_history if p.phase.value == "writing")
+    assert writing_phase.success is True
+    assert writing_phase.output.get("_agent_failed") is not True
+    assert writing_phase.output["claims"]["independent_claim"].startswith("1. 一种Cave折幕视频处理方法")
+
+
+@pytest.mark.asyncio
+async def test_generate_patent_in_sections_emits_realtime_progress_events(monkeypatch):
+    engine = PatentWorkflowEngine()
+    context = engine.create_workflow(
+        task_id="writer-progress-events",
+        user_id="test-user",
+        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+    )
+    events = []
+
+    async def fake_run_agent_conversation(profile_id, prompt):
+        return {
+            "final_response": "工具调用完成",
+            "messages": [
+                {
+                    "role": "tool",
+                    "name": "claim_drafter",
+                    "content": json.dumps(
+                        {
+                            "tool": "claim_drafter",
+                            "success": True,
+                            "data": {
+                                "independent_claim": "1. 一种Cave折幕空间视频补偿方法。",
+                                "dependent_claims": [],
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+                {
+                    "role": "tool",
+                    "name": "description_writer",
+                    "content": json.dumps(
+                        {
+                            "tool": "description_writer",
+                            "success": True,
+                            "data": {
+                                "section_type": "technical_field",
+                                "content": "本发明涉及沉浸式折幕显示视频处理技术领域。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+        }
+
+    def record_event(agent_name, event_type, content, metadata):
+        events.append((agent_name, event_type, content, metadata))
+
+    monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
+
+    await engine._generate_patent_in_sections(
+        None,
+        "patent.writer.v1",
+        "",
+        context,
+        event_callback=record_event,
+    )
+
+    progress_messages = [content for _, event_type, content, _ in events if event_type == "agent.thinking"]
+    assert any("权利要求书" in message for message in progress_messages)
+    assert any("说明书" in message for message in progress_messages)
+    assert any("支持关系" in message for message in progress_messages)
+
+
 def test_revision_prompt_keeps_source_disclosure_when_draft_is_failed():
     engine = PatentWorkflowEngine()
     context = engine.create_workflow(

@@ -388,6 +388,8 @@ class PatentWorkflowEngine:
                 max_retries = 2
                 last_error = None
                 phase_success = False
+                context_data: Dict[str, Any] = {}
+                agent_text = ""
 
                 for attempt in range(1 + max_retries):
                     try:
@@ -423,7 +425,13 @@ class PatentWorkflowEngine:
                                 event_callback(agent_display_name, "agent.thinking",
                                     "💭 开始分段生成专利文件（权利要求 → 说明书 → 摘要）",
                                     {"agent_name": agent_display_name, "thought": "分段生成专利文件", "step": 1})
-                            context_data = await self._generate_patent_in_sections(service, profile_id, task_desc, context)
+                            context_data = await self._generate_patent_in_sections(
+                                service,
+                                profile_id,
+                                task_desc,
+                                context,
+                                event_callback=event_callback,
+                            )
                             agent_text = json.dumps(context_data, ensure_ascii=False)[:500] if isinstance(context_data, dict) else str(context_data)[:500]
                         else:
                             # 流式调用 Agent（发射 thinking/tool_call 事件）
@@ -446,6 +454,16 @@ class PatentWorkflowEngine:
                             if agent_tool_results:
                                 context_data["tool_results"] = agent_tool_results
 
+
+                        context_data = self._normalize_phase_output(context_field, context_data)
+                        if isinstance(context_data, dict) and context_data.get("_agent_failed") is True:
+                            agent_error = str(
+                                context_data.get("_agent_error") or "Agent execution failed"
+                            )[:500]
+                            last_error = RuntimeError(agent_error)
+                            if attempt >= max_retries:
+                                break
+                            raise last_error
 
                         phase_success = True
                         last_error = None
@@ -475,8 +493,17 @@ class PatentWorkflowEngine:
                     ))
 
                 # 存储结果（适配前端期望的数据格式）
-                context_data = self._normalize_phase_output(context_field, context_data)
                 setattr(context, context_field, context_data)
+
+                agent_failed = (
+                    isinstance(context_data, dict)
+                    and context_data.get("_agent_failed") is True
+                )
+                agent_error = ""
+                if agent_failed:
+                    agent_error = str(
+                        context_data.get("_agent_error") or "Agent execution failed"
+                    )[:500]
 
                 # 持久化阶段结果到对应子目录
                 try:
@@ -487,6 +514,23 @@ class PatentWorkflowEngine:
                     self._logger.info(f"Phase result persisted: {saved_path}")
                 except Exception as e:
                     self._logger.warning(f"Failed to persist phase result: {e}")
+
+                if agent_failed:
+                    context.add_phase_result(PhaseResult(
+                        phase=phase_enum,
+                        success=False,
+                        duration_seconds=0,
+                        output=context_data,
+                        issues=[agent_error] if agent_error else [],
+                    ))
+                    await self._publish_progress_event(context, phase_state, "failed")
+                    context.current_phase = WorkflowState.FAILED
+                    await self._publish_progress_event(context, WorkflowState.FAILED, "failed")
+                    self._logger.error(
+                        f"Workflow phase failed: {agent_id}: {agent_error}",
+                        task_id=context.task_id,
+                    )
+                    return context
 
                 # 记录阶段完成
                 context.add_phase_result(PhaseResult(
@@ -1531,7 +1575,14 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 "task": review_result.get("task", ""),
             }
 
-    async def _generate_patent_in_sections(self, service, profile_id: str, base_task: str, context) -> Dict[str, Any]:
+    async def _generate_patent_in_sections(
+        self,
+        service,
+        profile_id: str,
+        base_task: str,
+        context,
+        event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
         """通过 Agent 工具调用生成专利文件
         
         Agent 会按照 SOUL.md 中定义的工具调用序列：
@@ -1581,25 +1632,37 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 请开始执行工具调用。"""
 
         self._logger.info("Patent writer: starting tool-based generation")
-        
+        if event_callback:
+            for step, message, thought in (
+                (1, "🧾 正在生成权利要求书...", "生成权利要求书"),
+                (2, "📚 正在生成说明书各章节...", "生成说明书"),
+                (3, "🔎 正在检查权利要求与说明书支持关系...", "检查支持关系"),
+            ):
+                event_callback(
+                    "专利撰写 Agent",
+                    "agent.thinking",
+                    message,
+                    {"agent_name": "专利撰写 Agent", "thought": thought, "step": step},
+                )
+
         # 调用 Agent，让其通过工具生成专利内容
-        result = await _run_agent_conversation(profile_id, task_prompt)
+        agent_result = await _run_agent_conversation(profile_id, task_prompt)
         
         # 从 Agent 的工具调用结果中提取数据
         # Agent 会通过 tool callbacks 返回工具执行结果
         final_response = ""
-        if isinstance(result, dict):
-            if result.get("failed") is True or result.get("completed") is False and result.get("error"):
-                return self._normalize_phase_output("patent_draft", result)
-            final_response = result.get("final_response", "") or result.get("content", "") or ""
+        if isinstance(agent_result, dict):
+            if agent_result.get("failed") is True or agent_result.get("completed") is False and agent_result.get("error"):
+                return self._normalize_phase_output("patent_draft", agent_result)
+            final_response = agent_result.get("final_response", "") or agent_result.get("content", "") or ""
             # 检查是否有工具调用结果
-            tool_results = result.get("tool_results", {})
-            messages = result.get("messages", [])
+            tool_results = agent_result.get("tool_results", {})
+            messages = agent_result.get("messages", [])
         else:
-            final_response = str(result) if result else ""
+            final_response = str(agent_result) if agent_result else ""
             tool_results = {}
             messages = []
-        
+
         # 尝试从工具调用历史中提取结构化数据
         claims_data = {}
         description_data = {}
@@ -1692,7 +1755,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 claims_data, description_data, abstract_text = self._parse_patent_from_text(final_response)
         
         # 组装为前端期望的结构化格式（不含 docx，待质量审查通过后生成）
-        result = {
+        patent_result: Dict[str, Any] = {
             "claims": {
                 "independent_claim": claims_data.get("independent_claim", ""),
                 "dependent_claims": claims_data.get("dependent_claims", []),
@@ -1709,12 +1772,12 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             "docx_path": "",
             "full_response": final_response,
         }
-        
-        claims_count = 1 + len(result["claims"]["dependent_claims"]) if result["claims"]["independent_claim"] else 0
-        sections_count = sum(1 for v in result["description"].values() if v)
+
+        claims_count = 1 + len(patent_result["claims"]["dependent_claims"]) if patent_result["claims"]["independent_claim"] else 0
+        sections_count = sum(1 for v in patent_result["description"].values() if v)
         self._logger.info(f"Patent writer: content generated. Claims={claims_count}, Sections={sections_count} (DOCX deferred to post-review)")
-        
-        return result
+
+        return patent_result
     
     def _parse_tool_call_from_text(self, text: str) -> Optional[Dict[str, Any]]:
         """从 Agent 文本输出中解析 <tool_call> 格式的 JSON
