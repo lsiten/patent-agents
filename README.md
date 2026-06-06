@@ -96,7 +96,7 @@ npm run dev
 #### Windows
 
 ```powershell
-# 后端
+# 后端 
 cd backend
 python -m venv venv
 .\venv\Scripts\Activate.ps1
