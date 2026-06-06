@@ -242,17 +242,6 @@ class AgentListResponse(BaseModel):
     total: int
 
 
-class AgentDetailResponse(BaseModel):
-    """Agent 详情响应"""
-    config: AgentConfigResponse
-    tools: List[AgentToolResponse]
-    skills: List[AgentSkillResponse]
-    timers: List[AgentTimerResponse]
-    memories: List[AgentMemoryResponse]
-    llm_config: Optional[ResolvedLLMConfigResponse] = None
-    image_gen_config: Optional[ResolvedImageGenConfigResponse] = None
-
-
 class ResolvedLLMConfigResponse(BaseModel):
     """Agent 最终生效的 LLM 配置（用于前端展示）"""
     provider: str
@@ -271,6 +260,17 @@ class ResolvedImageGenConfigResponse(BaseModel):
     model_id: str
     is_default: bool
     source: str
+
+
+class AgentDetailResponse(BaseModel):
+    """Agent 详情响应"""
+    config: AgentConfigResponse
+    tools: List[AgentToolResponse]
+    skills: List[AgentSkillResponse]
+    timers: List[AgentTimerResponse]
+    memories: List[AgentMemoryResponse]
+    llm_config: Optional[ResolvedLLMConfigResponse] = None
+    image_gen_config: Optional[ResolvedImageGenConfigResponse] = None
 
 
 class AgentLLMConfigUpdateRequest(BaseModel):

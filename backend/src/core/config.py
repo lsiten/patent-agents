@@ -43,7 +43,7 @@ class Environment(str, Enum):
 
 
 # ── 所有已知供应商列表（用于校验等） ──
-TEXT_LLM_PROVIDERS = {"openai", "anthropic"}
+TEXT_LLM_PROVIDERS = {"openai", "anthropic", "spark"}
 IMAGE_GEN_PROVIDERS = {"azure_aoai", "openai"}
 
 
@@ -129,6 +129,15 @@ class LLMSettings(BaseSettings):
     )
     openrouter_model: str = Field(default="openrouter/auto", alias="LLM_OPENROUTER_MODEL")
 
+    # ── 讯飞星火 (Spark) ──
+    spark_api_key: Optional[str] = Field(default=None, alias="LLM_SPARK_API_KEY")
+    spark_api_secret: Optional[str] = Field(default=None, alias="LLM_SPARK_API_SECRET")
+    spark_base_url: str = Field(
+        default="https://spark-api-open.xf-yun.com/v1",
+        alias="LLM_SPARK_BASE_URL",
+    )
+    spark_model: str = Field(default="generalv3.5", alias="LLM_SPARK_MODEL")
+
     # ── API 模式（覆盖自动检测） ──
     api_mode: Optional[str] = Field(
         default=None, alias="LLM_API_MODE",
@@ -153,11 +162,30 @@ class LLMSettings(BaseSettings):
         p = provider or self.active_provider
         if p not in TEXT_LLM_PROVIDERS:
             p = "openai"
-        return {
-            "base_url": getattr(self, f"{p}_base_url", None),
-            "api_key": getattr(self, f"{p}_api_key", None),
-            "model_id": getattr(self, f"{p}_model", None),
-        }
+        
+        # 讯飞星火需要特殊处理：组合 APIKey:APISecret
+        if p == "spark":
+            api_key = getattr(self, f"{p}_api_key", None)
+            api_secret = getattr(self, f"{p}_api_secret", None)
+            # 星火认证格式：Bearer {APIKey}:{APISecret}
+            if api_key and api_secret:
+                combined_key = f"{api_key}:{api_secret}"
+            elif api_key:
+                # 只有 APIKey，尝试直接使用（兼容旧配置）
+                combined_key = api_key
+            else:
+                combined_key = None
+            return {
+                "base_url": getattr(self, f"{p}_base_url", None),
+                "api_key": combined_key,
+                "model_id": getattr(self, f"{p}_model", None),
+            }
+        else:
+            return {
+                "base_url": getattr(self, f"{p}_base_url", None),
+                "api_key": getattr(self, f"{p}_api_key", None),
+                "model_id": getattr(self, f"{p}_model", None),
+            }
 
     def resolve_for_agent(self, overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """

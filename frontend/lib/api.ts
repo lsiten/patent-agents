@@ -810,6 +810,7 @@ export const conversationApi = {
       onSkillUse?: (data: { name: string; description: string; reasoning: string }) => void;
       onToolCallStart?: (data: { name: string; parameters: Record<string, unknown> }) => void;
       onToolCallEnd?: (data: { name: string; parameters: Record<string, unknown>; result: unknown; success: boolean; error?: string }) => void;
+      onStreamDelta?: (data: { content: string }) => void;
       onContent?: (data: { content: string; has_recommendation: boolean }) => void;
       onConfirmation?: (data: { question: string; options: string[] }) => void;
       onDone?: (data: { message: ChatMessage; has_recommendation: boolean; needs_confirmation?: boolean; conversation_id: string }) => void;
@@ -931,6 +932,9 @@ export const conversationApi = {
                       break;
                     case 'tool_call_end':
                       callbacks.onToolCallEnd?.(parsed);
+                      break;
+                    case 'stream_delta':
+                      callbacks.onStreamDelta?.(parsed);
                       break;
                     case 'content':
                       callbacks.onContent?.(parsed);

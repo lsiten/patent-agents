@@ -19,6 +19,7 @@ import type {
 const LLM_PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
+  spark: '讯飞星火',
 };
 
 const IMG_PROVIDER_LABELS: Record<string, string> = {
