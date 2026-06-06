@@ -570,6 +570,13 @@ function ChatPageContent() {
             });
           }
         },
+        onStreamDelta: (data) => {
+          setMessages((prev) => prev.map((m) =>
+            m.id === streamMsgId
+              ? { ...m, content: (m.content || '') + data.content, isStreaming: true }
+              : m
+          ));
+        },
         onContent: (data) => {
           setMessages((prev) => prev.map((m) =>
             m.id === streamMsgId

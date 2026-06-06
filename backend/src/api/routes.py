@@ -1632,6 +1632,7 @@ _CONFIG_ENV_FILE_MAP: Dict[str, str] = {
 _LLM_ENV_MAP: Dict[str, Dict[str, str]] = {
     "openai": {"api_key": "LLM_OPENAI_API_KEY", "base_url": "LLM_OPENAI_BASE_URL", "model_id": "LLM_OPENAI_MODEL"},
     "anthropic": {"api_key": "LLM_ANTHROPIC_API_KEY", "base_url": "LLM_ANTHROPIC_BASE_URL", "model_id": "LLM_ANTHROPIC_MODEL"},
+    "spark": {"api_key": "LLM_SPARK_API_KEY", "base_url": "LLM_SPARK_BASE_URL", "model_id": "LLM_SPARK_MODEL"},
 }
 _IMG_ENV_MAP: Dict[str, Dict[str, str]] = {
     "azure_aoai": {"api_key": "IMAGE_GEN_AZURE_AOAI_API_KEY", "base_url": "IMAGE_GEN_AZURE_AOAI_BASE_URL", "model_id": "IMAGE_GEN_AZURE_AOAI_MODEL_ID"},
@@ -3286,11 +3287,21 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                     "data": {"kind": kind, "message": msg},
                 })
 
+        def on_stream_delta(delta):
+            if not delta:
+                return
+            with events_lock:
+                events.append({
+                    "type": "stream_delta",
+                    "data": {"content": str(delta)}
+                })
+
         callbacks = {
             "thinking": on_thinking,
             "tool_start": on_tool_start,
             "tool_complete": on_tool_complete,
             "status": on_status,
+            "stream_delta": on_stream_delta,
         }
 
         def run_agent():

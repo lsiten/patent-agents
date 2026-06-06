@@ -1,10 +1,9 @@
 """
 依赖注入容器
-使用 dependency-injector 实现服务注册与解析
+使用 injector 实现服务注册与解析（纯Python实现，无需编译）
 """
 from typing import Any, AsyncGenerator, Optional
-from dependency_injector import containers, providers
-from dependency_injector.wiring import Provide, inject
+from injector import Injector, singleton, Binder
 
 from .config import settings
 from .logging import get_logger
@@ -213,122 +212,149 @@ class LLMServiceProvider:
         logger.info("LLM clients cleaned up")
 
 
-# ========== 应用容器 ==========
+# ========== 全局服务实例（简化版） ==========
 
-class ApplicationContainer(containers.DeclarativeContainer):
-    """应用主容器"""
-
-    wiring_config = containers.WiringConfiguration(
-        modules=[
-            "__main__",
-            "src.api.routes",
-            "src.core.middleware",
-            "src.utils",
-            "src.utils.time_utils",
-            "src.utils.text_utils",
-        ],
-        auto_wire=True,
-    )
-
-    # 配置
-    config = providers.Configuration(pydantic_settings=[settings])
-
-    # 日志
-    logger = providers.Singleton(get_logger, name="app")
-
-    # 数据库
-    db_provider = providers.Singleton(
-        DatabaseProvider,
-        database_url=config.db.url,
-    )
-
-    db_session = providers.Resource(
-        db_provider.provided.get_session,
-    )
-
-    # Redis
-    redis_provider = providers.Singleton(
-        RedisProvider,
-        redis_url=config.redis.url,
-    )
-
-    redis_client = providers.Factory(
-        redis_provider.provided.get_client,
-    )
-
-    # LLM 服务
-    llm_service = providers.Singleton(
-        LLMServiceProvider,
-        llm_config=config.llm,
-    )
-
-    # 缓存服务
-    cache_service = providers.Singleton(
-        lambda: create_cache_service(
-            redis_client=container.redis_client(),
-        )
-    )
-
-    # 存储服务
-    storage_service = providers.Singleton(
-        lambda: create_storage_service()
-    )
-
-    # Session factory (lazy — resolved after db_provider.init())
-    session_factory = providers.Singleton(
-        lambda: container.db_provider().async_session_factory
-    )
-
-    # Unit of Work (per-request transaction boundary)
-    unit_of_work = providers.Factory(
-        UnitOfWork,
-        session_factory=session_factory,
-    )
-
-    # Repository (wired via UoW — see unit_of_work.*_repository)
-    # Direct factory wiring for services that need single repos
-    patent_task_repository = providers.Factory(
-        PatentTaskRepository, session=db_provider.provided.get_session.call()
-    )
-    agent_repository = providers.Factory(
-        AgentRepository, session=db_provider.provided.get_session.call()
-    )
-    chat_session_repository = providers.Factory(
-        ChatSessionRepository, session=db_provider.provided.get_session.call()
-    )
-
-    # ── 基础设施单例 ─────────────────────────────────────
-    event_bus = providers.Singleton(get_event_bus)
-    data_source_manager = providers.Singleton(get_data_source_manager)
-    knowledge_base = providers.Singleton(get_knowledge_base)
-
-    # ── 工作流引擎 ───────────────────────────────────────
-    workflow_engine = providers.Singleton(PatentWorkflowEngine)
-
-    # ── 服务层 ───────────────────────────────────────────
-    task_service = providers.Singleton(
-        TaskService,
-        uow_factory=lambda: container.unit_of_work(),
-    )
-    patent_service = providers.Singleton(
-        PatentService,
-        data_source_manager=data_source_manager,
-        knowledge_base=knowledge_base,
-    )
-    workflow_service = providers.Singleton(
-        WorkflowService,
-        workflow_engine=workflow_engine,
-        event_bus=event_bus,
-    )
-    chat_service = providers.Factory(
-        ChatService,
-        uow_factory=lambda: container.unit_of_work(),
-        workflow_service=workflow_service,
-    )
+# 全局单例实例
+_db_provider = None
+_redis_provider = None
+_llm_service = None
+_event_bus = None
+_data_source_manager = None
+_knowledge_base = None
+_workflow_engine = None
+_cache_service = None
+_storage_service = None
 
 
-# 全局容器实例
-container = ApplicationContainer()
+def get_db_provider() -> DatabaseProvider:
+    """获取数据库Provider"""
+    global _db_provider
+    if _db_provider is None:
+        _db_provider = DatabaseProvider(database_url=settings.db.url)
+    return _db_provider
+
+
+def get_redis_provider() -> RedisProvider:
+    """获取RedisProvider"""
+    global _redis_provider
+    if _redis_provider is None:
+        _redis_provider = RedisProvider(redis_url=settings.redis.url)
+    return _redis_provider
+
+
+def get_llm_service() -> LLMServiceProvider:
+    """获取LLM服务"""
+    global _llm_service
+    if _llm_service is None:
+        _llm_service = LLMServiceProvider(llm_config=settings.llm)
+    return _llm_service
+
+
+def get_event_bus_instance() -> Any:
+    """获取事件总线"""
+    global _event_bus
+    if _event_bus is None:
+        _event_bus = get_event_bus()
+    return _event_bus
+
+
+def get_data_source_manager_instance() -> Any:
+    """获取数据源管理器"""
+    global _data_source_manager
+    if _data_source_manager is None:
+        _data_source_manager = get_data_source_manager()
+    return _data_source_manager
+
+
+def get_knowledge_base_instance() -> Any:
+    """获取知识库"""
+    global _knowledge_base
+    if _knowledge_base is None:
+        _knowledge_base = get_knowledge_base()
+    return _knowledge_base
+
+
+def get_workflow_engine() -> PatentWorkflowEngine:
+    """获取工作流引擎"""
+    global _workflow_engine
+    if _workflow_engine is None:
+        _workflow_engine = PatentWorkflowEngine()
+    return _workflow_engine
+
+
+def get_cache_service() -> Any:
+    """获取缓存服务"""
+    global _cache_service
+    if _cache_service is None:
+        _cache_service = create_cache_service(redis_client=get_redis_provider().get_client())
+    return _cache_service
+
+
+def get_storage_service() -> Any:
+    """获取存储服务"""
+    global _storage_service
+    if _storage_service is None:
+        _storage_service = create_storage_service()
+    return _storage_service
+
+
+def get_unit_of_work():
+    """获取工作单元"""
+    db = get_db_provider()
+    if db.async_session_factory is None:
+        # 延迟初始化
+        import asyncio
+        asyncio.run(db.init())
+    return UnitOfWork(session_factory=db.async_session_factory)
+
+
+# ========== 兼容旧API的容器代理 ==========
+
+class ContainerProxy:
+    """兼容 dependency-injector API 的代理类"""
+    
+    def __getattr__(self, name):
+        # 处理 db_provider(), redis_provider() 等调用
+        if name == 'db_provider':
+            return get_db_provider
+        elif name == 'redis_provider':
+            return get_redis_provider
+        elif name == 'redis_client':
+            # 返回一个函数，该函数返回一个返回 redis 客户端的函数
+            def wrapper():
+                redis_provider = get_redis_provider()
+                return lambda: redis_provider.get_client()
+            return wrapper
+        elif name == 'llm_service':
+            return get_llm_service
+        elif name == 'event_bus':
+            return get_event_bus_instance
+        elif name == 'data_source_manager':
+            return get_data_source_manager_instance
+        elif name == 'knowledge_base':
+            return get_knowledge_base_instance
+        elif name == 'workflow_engine':
+            return get_workflow_engine
+        elif name == 'cache_service':
+            return get_cache_service
+        elif name == 'storage_service':
+            return get_storage_service
+        elif name == 'unit_of_work':
+            return get_unit_of_work
+        raise AttributeError(f"Container has no attribute '{name}'")
+
+
+# 创建全局容器代理实例
+container = ContainerProxy()
+
+
+# 兼容旧API的ApplicationContainer类
+class ApplicationContainer:
+    """兼容 dependency-injector 的 ApplicationContainer 类"""
+    wiring_config = None
+    
+    def __init__(self):
+        pass
 
 
 async def init_container() -> None:
@@ -336,7 +362,7 @@ async def init_container() -> None:
     logger.info("Initializing application container")
 
     # 初始化数据库
-    db = container.db_provider()
+    db = get_db_provider()
     await db.init()
 
     from src.models.base import Base as ModelBase
@@ -345,7 +371,7 @@ async def init_container() -> None:
     logger.info("Database tables created / verified")
 
     # 初始化 Redis
-    redis = container.redis_provider()
+    redis = get_redis_provider()
     await redis.init()
 
     logger.info("Application container initialized successfully")
@@ -356,15 +382,15 @@ async def cleanup_container() -> None:
     logger.info("Cleaning up application container")
 
     # 清理 LLM 客户端
-    llm_service = container.llm_service()
+    llm_service = get_llm_service()
     await llm_service.cleanup()
 
     # 清理 Redis
-    redis = container.redis_provider()
+    redis = get_redis_provider()
     await redis.cleanup()
 
     # 清理数据库
-    db = container.db_provider()
+    db = get_db_provider()
     await db.cleanup()
 
     logger.info("Application container cleaned up successfully")
