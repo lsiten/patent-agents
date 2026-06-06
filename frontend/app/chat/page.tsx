@@ -19,7 +19,7 @@ import rehypeHighlight from 'rehype-highlight';
 import { clsx } from 'clsx';
 import { conversationApi, workflowApi } from '@/lib/api';
 import type { ConversationSummary } from '@/lib/api';
-import type { ChatMessage } from '@/types';
+import type { AgentEvent, ChatMessage } from '@/types';
 
 function createWelcomeMessage(): ChatMessage {
   return {
@@ -230,6 +230,10 @@ function ChatPageContent() {
       setMessages(detail.messages.length > 0 ? detail.messages : [createWelcomeMessage()]);
       setWorkflowTaskId(detail.linked_workflow_id ?? null);
       setWorkflowState(detail.status ?? null);
+      if (detail.linked_workflow_id) {
+        setPendingConfirmation(null);
+        setRecommendStartWorkflow(false);
+      }
 
       if (detail.linked_workflow_id) {
         try {
@@ -283,6 +287,7 @@ function ChatPageContent() {
     setWorkflowState(null);
     setRecommendStartWorkflow(false);
     setSuggestedTitle(null);
+    setPendingConfirmation(null);
     setDispatchActivities([]);
     setError(null);
   }, [convIdFromParam, loadConversation]);
@@ -308,6 +313,7 @@ function ChatPageContent() {
     setWorkflowState(null);
     setRecommendStartWorkflow(false);
     setSuggestedTitle(null);
+    setPendingConfirmation(null);
     setError(null);
     window.history.replaceState(null, '', '/chat');
   };
@@ -321,6 +327,7 @@ function ChatPageContent() {
     setWorkflowState(null);
     setRecommendStartWorkflow(false);
     setSuggestedTitle(null);
+    setPendingConfirmation(null);
     setDispatchActivities([]);
     setError(null);
     setInput('');
@@ -427,6 +434,12 @@ function ChatPageContent() {
 
       // Create a streaming assistant message placeholder
       const streamMsgId = `assistant-stream-${Date.now()}`;
+      let localEventSequence = 0;
+      const nextLocalEventFields = (type: AgentEvent['type']) => ({
+        id: `${streamMsgId}-${type}-${localEventSequence + 1}`,
+        sequence: ++localEventSequence,
+        call_id: streamMsgId,
+      });
       const streamMsg: ChatMessage = {
         id: streamMsgId,
         role: 'assistant',
@@ -441,6 +454,17 @@ function ChatPageContent() {
 
       // Use streaming API
       conversationApi.chatStream(convId, { content }, {
+        onAgentActivity: (event: AgentEvent) => {
+          setMessages((prev) => prev.map((m) =>
+            m.id === streamMsgId
+              ? {
+                  ...m,
+                  content: m.content || (event.type === 'thinking' ? event.message : m.content),
+                  agent_events: [...(m.agent_events || []), event],
+                }
+              : m
+          ));
+        },
         onThinking: (_data) => {
           setMessages((prev) => {
             const now = new Date().toISOString();
@@ -452,6 +476,7 @@ function ChatPageContent() {
                     agent_events: [
                       ...(m.agent_events || []),
                       {
+                        ...nextLocalEventFields('thinking'),
                         type: 'thinking' as const,
                         agent_name: 'patent.ceo.v1',
                         timestamp: now,
@@ -475,6 +500,7 @@ function ChatPageContent() {
                     agent_events: [
                       ...(m.agent_events || []),
                       {
+                        ...nextLocalEventFields('skill_use'),
                         type: 'skill_use' as const,
                         agent_name: 'patent.ceo.v1',
                         timestamp: now,
@@ -498,6 +524,7 @@ function ChatPageContent() {
                     agent_events: [
                       ...(m.agent_events || []),
                       {
+                        ...nextLocalEventFields('tool_call_start'),
                         type: 'tool_call_start' as const,
                         agent_name: 'patent.ceo.v1',
                         timestamp: now,
@@ -543,6 +570,7 @@ function ChatPageContent() {
                 agent_events: [
                   ...(m.agent_events || []),
                   {
+                    ...nextLocalEventFields('tool_call_end'),
                     type: 'tool_call_end' as const,
                     agent_name: 'patent.ceo.v1',
                     timestamp: now,
@@ -604,6 +632,7 @@ function ChatPageContent() {
                     agent_events: [
                       ...(m.agent_events || []),
                       {
+                        ...nextLocalEventFields('status'),
                         type: 'status' as const,
                         agent_name: data.agent || 'patent.ceo.v1',
                         timestamp: now,
@@ -743,11 +772,12 @@ function ChatPageContent() {
       setWorkflowTaskId(result.task_id);
       setWorkflowState(result.status);
       setRecommendStartWorkflow(false);
+      setPendingConfirmation(null);
 
       const processMsg: ChatMessage = {
         id: `workflow-${Date.now()}`,
         role: 'assistant',
-        content: `专利申请流程已创建！
+        content: `专利申请流程已创建并自动启动！
 
 任务编号：${result.task_id}
 
@@ -755,9 +785,7 @@ function ChatPageContent() {
 1. 需求分析 — 结构化您的技术需求
 2. 检索分析 — 现有技术检索与专利性评估
 3. 专利撰写 — 生成申请文件
-4. 质量审查 — 合规性审查
-
-点击上方「开始流程」按钮即可启动。`,
+4. 质量审查 — 合规性审查`,
         timestamp: new Date().toISOString(),
       };
 
@@ -1225,8 +1253,7 @@ function ChatPageContent() {
           </div>
         )}
 
-        {/* Confirmation Panel — hidden when start-workflow banner is shown */}
-        {pendingConfirmation && !recommendStartWorkflow && (
+        {pendingConfirmation && !recommendStartWorkflow && !workflowTaskId && (
           <div className="border-t border-hairline bg-amber-50 px-4 py-3">
             <div className="max-w-4xl mx-auto">
               <div className="rounded-lg border border-amber-200 bg-white px-4 py-3 shadow-sm">
@@ -1292,7 +1319,7 @@ function ChatPageContent() {
                 data-testid="chat-file-input"
                 ref={fileInputRef}
                 type="file"
-                accept=".txt,.docx"
+                accept=".txt,.docx,.pdf"
                 onChange={handleFileSelected}
                 className="hidden"
               />
@@ -1303,7 +1330,7 @@ function ChatPageContent() {
                 onClick={() => fileInputRef.current?.click()}
                 disabled={!!pendingFile || isUploadingFile || isLoading || isLoadingConv || isStartingWorkflow}
                 className="self-end"
-                title="选择交底书（.txt / .docx）"
+                title="选择交底书（.txt / .docx / .pdf）"
               >
                 <Paperclip className="w-4 h-4" />
               </Button>
@@ -1322,7 +1349,7 @@ function ChatPageContent() {
                     handleSend();
                   }
                 }}
-                placeholder={activeConvId ? '继续补充技术细节...（可点击 📎 选择交底书 .txt / .docx）' : '描述您的发明创造...（可点击 📎 选择交底书 .txt / .docx）'}
+                placeholder={activeConvId ? '继续补充技术细节...（可点击 📎 选择交底书 .txt / .docx / .pdf）' : '描述您的发明创造...（可点击 📎 选择交底书 .txt / .docx / .pdf）'}
                 className="flex-1 overflow-y-auto rounded-lg border border-hairline bg-white px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green focus:border-brand-green placeholder:text-slate/60"
                 rows={1}
                 autoFocus
@@ -1339,7 +1366,7 @@ function ChatPageContent() {
               </Button>
             </div>
             <p className="text-xs text-slate/50 mt-1.5 text-center">
-              Enter 发送 · Shift+Enter 换行 · 选择 .txt / .docx 交底书后随消息一起发送
+              Enter 发送 · Shift+Enter 换行 · 选择 .txt / .docx / .pdf 交底书后随消息一起发送
             </p>
           </div>
         </div>

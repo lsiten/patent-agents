@@ -41,12 +41,12 @@ test('invalid file type is shown as in-stream system message', async ({ page }) 
   await page.goto('/chat');
 
   await page.getByTestId('chat-file-input').setInputFiles({
-    name: 'invalid.pdf',
-    mimeType: 'application/pdf',
+    name: 'invalid.png',
+    mimeType: 'image/png',
     buffer: Buffer.from('invalid file'),
   });
 
-  await expect(page.getByTestId('chat-system-message')).toContainText('文件类型不支持：仅支持 .txt 和 .docx 文件');
+  await expect(page.getByTestId('chat-system-message')).toContainText('文件类型不支持：仅支持 .txt、.docx 和 .pdf 文件');
   await expect(page.getByText('文件类型不支持', { exact: true })).toHaveCount(0);
 });
 
@@ -211,4 +211,77 @@ test('linked workflow conversation keeps chat box usable and streams workflow sy
 
   await expect(page.getByText('补充信息已同步到关联工作流')).toBeVisible();
   await expect(page.getByText('该对话已关联工作流')).toHaveCount(0);
+});
+
+test('starting workflow hides stale agent confirmation card', async ({ page }) => {
+  await page.route(`${API_BASE_PATTERN}/conversations?user_id=default_user`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ total: 0, items: [] }),
+    });
+  });
+
+  await mockCreateConversation(page, 'conv-start', '智能折叠屏');
+
+  await page.route(`${API_BASE_PATTERN}/conversations/conv-start/chat/stream`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: [
+        'event: confirmation',
+        'data: {"question":"请选择申请类型","options":["发明","实用新型"]}',
+        '',
+        'event: content',
+        'data: {"content":"技术方案已整理完毕","has_recommendation":true}',
+        '',
+        'event: done',
+        'data: {"message":{"id":"assistant-start","role":"assistant","content":"技术方案已整理完毕","timestamp":"2026-06-04T00:00:01.000Z"},"has_recommendation":true,"conversation_id":"conv-start"}',
+        '',
+      ].join('\n'),
+    });
+  });
+
+  await page.route(`${API_BASE_PATTERN}/conversations/conv-start/create-workflow`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        task_id: 'wf-started',
+        status: 'started',
+        redirect_url: '/workflow/wf-started',
+      }),
+    });
+  });
+
+  await page.route(`${API_BASE_PATTERN}/workflows/wf-started`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        task_id: 'wf-started',
+        user_id: 'default_user',
+        title: '智能折叠屏',
+        current_state: 'requirement_analysis',
+        created_at: '2026-06-04T00:00:00.000Z',
+        updated_at: '2026-06-04T00:00:00.000Z',
+        iteration_count: 0,
+        message_count: 1,
+        phase_history: [],
+        outputs: {},
+      }),
+    });
+  });
+
+  await page.goto('/chat');
+  await page.getByTestId('chat-input').fill('智能折叠屏视频处理方案');
+  await page.getByTestId('chat-send-button').click();
+
+  await expect(page.getByText('技术方案已基本清晰，可以启动正式专利申请流程。')).toBeVisible();
+  await expect(page.getByText('请选择申请类型')).toHaveCount(0);
+
+  await page.getByRole('button', { name: '启动专利申请' }).click();
+
+  await expect(page.getByText('专利申请流程已创建并自动启动！')).toBeVisible();
+  await expect(page.getByText('请选择申请类型')).toHaveCount(0);
 });

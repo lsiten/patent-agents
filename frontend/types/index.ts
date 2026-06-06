@@ -221,6 +221,9 @@ export interface SkillUseInfo {
 }
 
 export interface AgentEvent {
+  id: string;
+  sequence: number;
+  call_id: string;
   type: 'thinking' | 'tool_call_start' | 'tool_call_end' | 'skill_use' | 'status' | 'dispatch';
   agent_name: string;
   timestamp: string;

@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 
 from .schemas import (
+    AgentEventInfo,
     ChatMessageRequest,
     CreateTaskRequest,
     TaskResponse,
@@ -53,7 +54,7 @@ from .schemas import (
 )
 from ..models.domain import PatentTask
 from ..models.enums import WorkflowState
-from ..core.workflow_engine import PatentWorkflowEngine, WorkflowContext
+from ..core.workflow_engine import PatentWorkflowEngine, WorkflowContext, WorkflowState as EngineWorkflowState
 from ..knowledge.base import get_knowledge_base
 from ..data_sources.base import get_data_source_manager
 from ..infrastructure.persistence import get_store
@@ -128,6 +129,7 @@ workflow_lock = asyncio.Lock()
 # 对话会话存储
 conversations_store: Dict[str, dict] = {}
 conversations_lock = asyncio.Lock()
+CONVERSATION_STREAM_HEARTBEAT_SECONDS = 15.0
 
 workflow_engine = PatentWorkflowEngine()
 organization_tree_store: OrgNodeResponse | None = None
@@ -228,6 +230,7 @@ from ..core.events import (
     AgentToolCallEndEvent,
     AgentDispatchEvent,
     AgentContentEvent,
+    WorkflowLogEvent,
 )
 
 
@@ -270,6 +273,9 @@ def _on_agent_event(event: BaseEvent):
         message = f"🎯 调度 → {event.to_agent}: {event.task_description[:100]}"
     elif isinstance(event, AgentContentEvent):
         message = f"📄 输出: {event.content[:200]}"
+    elif isinstance(event, WorkflowLogEvent):
+        agent_name = event.workflow
+        message = f"[{event.phase}] {event.summary}"
     else:
         message = "事件"
 
@@ -292,6 +298,7 @@ subscribe_event(EventType.AGENT_TOOL_CALL_START, _on_agent_event)
 subscribe_event(EventType.AGENT_TOOL_CALL_END, _on_agent_event)
 subscribe_event(EventType.AGENT_DISPATCH, _on_agent_event)
 subscribe_event(EventType.AGENT_CONTENT, _on_agent_event)
+subscribe_event(EventType.WORKFLOW_LOG, _on_agent_event)
 # NOTE: 上述订阅作为备份路径（无event_callback时的fallback）
 # 当workflow传入event_callback时，事件会通过callback直接写入task_events
 # 为避免重复，_on_agent_event只在task_events中无该task的最近同类事件时才写入
@@ -344,9 +351,39 @@ async def _persist_workflow(task_id: str) -> None:
         return
     try:
         data = _workflow_context_to_response(context).model_dump(mode="json")
+        data["original_description"] = context.original_description
+        data["message_history"] = context.message_history
+        data["metadata"] = context.metadata
         await _get_persist_store().save("workflows", task_id, data)
     except Exception as e:
         logger.warning(f"保存工作流 {task_id} 到数据库失败: {e}")
+
+
+def _linked_workflow_conversation(task_id: str) -> Optional[dict]:
+    """Return the conversation linked to a workflow, if it is loaded in memory."""
+    for conv in conversations_store.values():
+        if conv.get("linked_workflow_id") == task_id:
+            return conv
+    return None
+
+
+def _conversation_disclosure_text(conv: Optional[dict]) -> str:
+    """Extract the strongest disclosure text from a linked conversation."""
+    if not conv:
+        return ""
+
+    user_messages = [m for m in conv.get("messages", []) if m.get("role") == "user"]
+    file_messages = [m for m in user_messages if m.get("type") == "file" and m.get("content")]
+    if file_messages:
+        return "\n\n".join(str(m["content"]) for m in file_messages)
+    return " ".join(str(m.get("content", "")) for m in user_messages).strip()
+
+
+def _restore_workflow_disclosure_from_conversation(context: WorkflowContext) -> None:
+    disclosure = _conversation_disclosure_text(_linked_workflow_conversation(context.task_id))
+    if disclosure:
+        context.original_description = disclosure
+        context.title = workflow_engine._extract_title(disclosure)
 
 
 async def _persist_org_tree() -> None:
@@ -406,7 +443,7 @@ async def restore_stores_from_db() -> None:
                     ctx = workflow_engine.create_workflow(
                         task_id=key,
                         user_id=value.get("user_id", "unknown"),
-                        description="",  # 从持久化数据恢复
+                        description=value.get("original_description", ""),
                         target_country=value.get("target_country", "中国"),
                     )
                     # 恢复标题
@@ -422,6 +459,8 @@ async def restore_stores_from_db() -> None:
                     ctx.patent_draft = outputs.get("patent_draft", {})
                     ctx.review_report = outputs.get("review_report", {})
                     ctx.brainstorming_output = outputs.get("brainstorming", {})
+                    ctx.message_history = value.get("message_history", [])
+                    ctx.metadata = {**ctx.metadata, **value.get("metadata", {})}
                     restored_workflows += 1
             except Exception as e:
                 logger.warning(f"恢复工作流 {key} 失败: {e}")
@@ -806,6 +845,48 @@ def _append_workflow_event(task_id: str, agent: str, message: str, event_type: s
     )
 
 
+def _append_workflow_terminal_event(task_id: str, context: WorkflowContext, completed_message: str):
+    if context.current_phase == EngineWorkflowState.COMPLETED:
+        _append_workflow_event(
+            task_id=task_id,
+            agent="workflow_engine",
+            message=completed_message,
+            event_type="workflow.completed",
+            data={"state": context.current_phase.value},
+        )
+    elif context.current_phase == EngineWorkflowState.FAILED:
+        _append_workflow_event(
+            task_id=task_id,
+            agent="workflow_engine",
+            message="专利申请流程未完成",
+            event_type="workflow.failed",
+            data={"state": context.current_phase.value},
+        )
+
+
+def _build_agent_activity_event(
+    *,
+    event_type: str,
+    agent_name: str,
+    sequence: int,
+    call_id: str,
+    message: str,
+    data: Dict[str, Any],
+    event_id: str | None = None,
+) -> Dict[str, Any]:
+    event = AgentEventInfo(
+        id=event_id or str(uuid.uuid4()),
+        sequence=sequence,
+        call_id=call_id,
+        type=event_type,
+        agent_name=agent_name,
+        timestamp=datetime.now().isoformat(),
+        message=message,
+        data=data,
+    )
+    return event.model_dump(mode="json")
+
+
 @router.post("/workflows", status_code=status.HTTP_201_CREATED)
 async def create_workflow_session(request: WorkflowStartRequest):
     """创建 Hermes/Profile 驱动的专利工作流会话（默认先进入头脑风暴）"""
@@ -867,6 +948,8 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
     if not context:
         raise HTTPException(status_code=404, detail="工作流不存在")
 
+    _restore_workflow_disclosure_from_conversation(context)
+
     async def phase_callback(phase, result):
         async with workflow_lock:
             _append_workflow_event(
@@ -881,6 +964,8 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
                     "issues": result.issues,
                 },
             )
+        await _persist_events(task_id)
+        await _persist_workflow(task_id)
 
     def _workflow_event_callback(agent_name: str, event_type: str, message: str, data: Dict[str, Any]):
         """直接将agent事件写入task_events（绕过事件总线）"""
@@ -903,13 +988,7 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
                 event_callback=_workflow_event_callback,
             )
             async with workflow_lock:
-                _append_workflow_event(
-                    task_id=task_id,
-                    agent="workflow_engine",
-                    message="专利申请流程已完成",
-                    event_type="workflow.completed",
-                    data={"state": context.current_phase.value},
-                )
+                _append_workflow_terminal_event(task_id, context, "专利申请流程已完成")
             await _persist_events(task_id)
             await _persist_workflow(task_id)
         except Exception as e:
@@ -978,6 +1057,8 @@ async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
                     "issues": result.issues,
                 },
             )
+        await _persist_events(task_id)
+        await _persist_workflow(task_id)
 
     async def run_resume():
         try:
@@ -987,13 +1068,7 @@ async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
                 force_start_from=force_start_from,
             )
             async with workflow_lock:
-                _append_workflow_event(
-                    task_id=task_id,
-                    agent="workflow_engine",
-                    message="专利工作流已恢复并完成",
-                    event_type="workflow.completed",
-                    data={"state": context.current_phase.value},
-                )
+                _append_workflow_terminal_event(task_id, context, "专利工作流已恢复并完成")
             await _persist_events(task_id)
         except Exception as e:
             async with workflow_lock:
@@ -1088,6 +1163,8 @@ async def restart_workflow(task_id: str, background_tasks: BackgroundTasks):
     if not context:
         raise HTTPException(status_code=404, detail="工作流不存在")
 
+    _restore_workflow_disclosure_from_conversation(context)
+
     # 重置所有阶段输出
     context.requirement_analysis = {}
     context.retrieval_report = {}
@@ -1095,7 +1172,7 @@ async def restart_workflow(task_id: str, background_tasks: BackgroundTasks):
     context.review_report = {}
     context.brainstorming_output = {}
     context.phase_history = []
-    context.current_phase = WorkflowState.INITIALIZED
+    context.current_phase = EngineWorkflowState.INITIALIZED
     context.iteration_count = 0
     context.latest_revision_suggestions = []
     context.latest_review_score = 0.0
@@ -1140,6 +1217,7 @@ async def restart_workflow(task_id: str, background_tasks: BackgroundTasks):
                     },
                 )
             await _persist_events(task_id)
+            await _persist_workflow(task_id)
 
         try:
             await workflow_engine.execute_full_workflow(
@@ -1148,16 +1226,14 @@ async def restart_workflow(task_id: str, background_tasks: BackgroundTasks):
                 event_callback=_event_cb,
             )
             async with workflow_lock:
-                _append_workflow_event(
-                    task_id=task_id,
-                    agent="workflow_engine",
-                    message="专利申请流程已完成",
-                    event_type="workflow.completed",
-                    data={"state": context.current_phase.value},
-                )
-                # 同步 tasks_store（如果存在）
-                if task_id in tasks_store:
-                    tasks_store[task_id].current_state = WorkflowState.COMPLETED
+                _append_workflow_terminal_event(task_id, context, "专利申请流程已完成")
+                if context.current_phase == EngineWorkflowState.COMPLETED:
+                    # 同步 tasks_store（如果存在）
+                    if task_id in tasks_store:
+                        tasks_store[task_id].current_state = WorkflowState.COMPLETED
+                elif context.current_phase == EngineWorkflowState.FAILED:
+                    if task_id in tasks_store:
+                        tasks_store[task_id].current_state = WorkflowState.FAILED
             await _persist_events(task_id)
             await _persist_workflow(task_id)
         except Exception as e:
@@ -1425,14 +1501,12 @@ async def _execute_workflow(task_id: str):
 
         # 5. 同步状态到 tasks_store
         async with workflow_lock:
-            _append_workflow_event(
-                task_id=task_id,
-                agent="workflow_engine",
-                message="专利申请流程已完成",
-                event_type="workflow.completed",
-                data={"state": context.current_phase.value},
+            _append_workflow_terminal_event(task_id, context, "专利申请流程已完成")
+            tasks_store[task_id].current_state = (
+                WorkflowState.COMPLETED
+                if context.current_phase == EngineWorkflowState.COMPLETED
+                else WorkflowState.FAILED
             )
-            tasks_store[task_id].current_state = WorkflowState.COMPLETED
         await _persist_task(task_id)
         await _persist_events(task_id)
         await _persist_workflow(task_id)
@@ -3125,8 +3199,20 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
             import json as _json
 
             yield "event: thinking\ndata: {\"agent\": \"workflow_engine\", \"message\": \"正在同步补充信息到关联工作流\"}\n\n"
+            workflow_chat_task = asyncio.create_task(
+                _handle_linked_workflow_conversation_chat(conv_id, conv, content)
+            )
             try:
-                result = await _handle_linked_workflow_conversation_chat(conv_id, conv, content)
+                while not workflow_chat_task.done():
+                    done, _ = await asyncio.wait(
+                        {workflow_chat_task},
+                        timeout=CONVERSATION_STREAM_HEARTBEAT_SECONDS,
+                    )
+                    if done:
+                        break
+                    yield "event: heartbeat\ndata: {\"status\": \"running\"}\n\n"
+
+                result = workflow_chat_task.result()
                 payload = result.model_dump(mode="json")
                 content_payload = {
                     "content": result.message.content,
@@ -3207,9 +3293,27 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
         events_lock = threading.Lock()
         final_content = ""
         result_holder = {"result": None, "error": None, "done": False}
+        sequence_counter = {"value": 0}
+        stream_call_id = f"conv-{conv_id}-{uuid.uuid4()}"
 
-        def _now_iso() -> str:
-            return datetime.now().isoformat()
+        def append_agent_activity(
+            event_type: str,
+            message: str,
+            data: Dict[str, Any],
+            call_id: str | None = None,
+            agent_name: str = "patent.ceo.v1",
+        ) -> None:
+            sequence_counter["value"] += 1
+            activity = _build_agent_activity_event(
+                event_type=event_type,
+                agent_name=agent_name,
+                sequence=sequence_counter["value"],
+                call_id=call_id or stream_call_id,
+                message=message,
+                data=data,
+            )
+            events.append({"type": "agent_activity", "data": activity})
+            agent_events.append(activity)
 
         def on_thinking(data):
             text = str(data).strip() if data else ""
@@ -3219,17 +3323,11 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                 return
             with events_lock:
                 trimmed = text[:300]
-                events.append({
-                    "type": "thinking",
-                    "data": {"agent": "patent.ceo.v1", "message": trimmed}
-                })
-                agent_events.append({
-                    "type": "thinking",
-                    "agent_name": "patent.ceo.v1",
-                    "timestamp": _now_iso(),
-                    "message": trimmed,
-                    "data": {},
-                })
+                append_agent_activity(
+                    event_type="thinking",
+                    message=trimmed,
+                    data={"agent": "patent.ceo.v1", "message": trimmed},
+                )
 
         def on_tool_start(call_id, name, args):
             with events_lock:
@@ -3241,17 +3339,12 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                         params = {"raw": args[:200]}
                 elif isinstance(args, dict):
                     params = args
-                events.append({
-                    "type": "tool_call_start",
-                    "data": {"name": name, "parameters": params}
-                })
-                agent_events.append({
-                    "type": "tool_call_start",
-                    "agent_name": "patent.ceo.v1",
-                    "timestamp": _now_iso(),
-                    "message": f"调用工具: {name}",
-                    "data": {"name": name, "parameters": params},
-                })
+                append_agent_activity(
+                    event_type="tool_call_start",
+                    message=f"调用工具: {name}",
+                    data={"name": name, "parameters": params},
+                    call_id=str(call_id),
+                )
 
         def on_tool_complete(call_id, name, args, result):
             with events_lock:
@@ -3261,31 +3354,20 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                     "result": result_str,
                     "success": True,
                 })
-                events.append({
-                    "type": "tool_call_end",
-                    "data": {"name": name, "result": result_str, "success": True}
-                })
-                agent_events.append({
-                    "type": "tool_call_end",
-                    "agent_name": "patent.ceo.v1",
-                    "timestamp": _now_iso(),
-                    "message": f"工具完成: {name}",
-                    "data": {"name": name, "result": result_str, "success": True},
-                })
+                append_agent_activity(
+                    event_type="tool_call_end",
+                    message=f"工具完成: {name}",
+                    data={"name": name, "result": result_str, "success": True},
+                    call_id=str(call_id),
+                )
 
         def on_status(kind, msg):
             with events_lock:
-                events.append({
-                    "type": "status",
-                    "data": {"kind": kind, "message": msg}
-                })
-                agent_events.append({
-                    "type": "status",
-                    "agent_name": "patent.ceo.v1",
-                    "timestamp": _now_iso(),
-                    "message": msg,
-                    "data": {"kind": kind, "message": msg},
-                })
+                append_agent_activity(
+                    event_type="status",
+                    message=msg,
+                    data={"kind": kind, "message": msg},
+                )
 
         def on_stream_delta(delta):
             if not delta:
@@ -3321,6 +3403,7 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
         thread.start()
 
         try:
+            last_heartbeat_at = asyncio.get_running_loop().time()
             while not result_holder["done"] or events:
                 with events_lock:
                     batch = list(events)
@@ -3332,6 +3415,11 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                     yield f"event: {event_type}\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
 
                 if not batch and not result_holder["done"]:
+                    now_monotonic = asyncio.get_running_loop().time()
+                    if now_monotonic - last_heartbeat_at >= CONVERSATION_STREAM_HEARTBEAT_SECONDS:
+                        heartbeat_payload = {"status": "running"}
+                        yield f"event: heartbeat\ndata: {_json.dumps(heartbeat_payload, ensure_ascii=False)}\n\n"
+                        last_heartbeat_at = now_monotonic
                     await asyncio.sleep(0.05)
 
             # 处理最终结果
@@ -3585,7 +3673,11 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
         else:
             raise HTTPException(status_code=404, detail="对话不存在")
     if conv.get("linked_workflow_id"):
-        raise HTTPException(status_code=400, detail="该对话已关联工作流")
+        return {
+            "task_id": conv["linked_workflow_id"],
+            "status": "already_linked",
+            "conversation_id": conv_id,
+        }
 
     # 从对话中提取技术描述（取所有用户消息合并）
     user_msgs = [m["content"] for m in conv["messages"] if m["role"] == "user"]
@@ -3608,12 +3700,13 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             user_id=request.user_id,
             tech_description=tech_description,
             target_country=request.target_country,
-            current_state=WorkflowState.INITIAL,
+            current_state=WorkflowState.REQUIREMENT_ANALYSIS,
             created_at=datetime.now(),
             updated_at=datetime.now(),
             iteration_count=0,
             max_iterations=3,
         )
+        context.current_phase = EngineWorkflowState.REQUIREMENT_ANALYSIS
         tasks_store[task_id] = patent_task
         _append_workflow_event(
             task_id=task_id,
@@ -3634,17 +3727,46 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             workflow_msg = {
                 "id": f"workflow-created-{task_id}",
                 "role": "assistant",
-                "content": f"专利申请流程已创建！\n\n任务编号：{task_id}\n\n多智能体系统将依次执行：\n1. 需求分析 — 结构化您的技术需求\n2. 检索分析 — 现有技术检索与专利性评估\n3. 专利撰写 — 生成申请文件\n4. 质量审查 — 合规性审查\n\n点击上方「开始流程」按钮即可启动。",
+                "content": f"专利申请流程已创建并自动启动！\n\n任务编号：{task_id}\n\n多智能体系统将依次执行：\n1. 需求分析 — 结构化您的技术需求\n2. 检索分析 — 现有技术检索与专利性评估\n3. 专利撰写 — 生成申请文件\n4. 质量审查 — 合规性审查",
                 "timestamp": datetime.now().isoformat(),
                 "type": "text",
                 "metadata": {"type": "workflow_created", "task_id": task_id},
             }
             conv["messages"].append(workflow_msg)
 
+    async def run_workflow():
+        try:
+            await workflow_engine.execute_full_workflow(context)
+            async with workflow_lock:
+                _append_workflow_terminal_event(task_id, context, "专利申请流程已完成")
+            await _persist_events(task_id)
+            await _persist_workflow(task_id)
+        except Exception as e:
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent="workflow_engine",
+                    message=str(e),
+                    event_type="workflow.failed",
+                )
+            await _persist_events(task_id)
+            await _persist_workflow(task_id)
+            raise
+
+    background_tasks.add_task(run_workflow)
+    async with workflow_lock:
+        _append_workflow_event(
+            task_id=task_id,
+            agent="workflow_engine",
+            message="专利申请流程已启动",
+            event_type="workflow.started",
+        )
+
     await _persist_events(task_id)
     await _persist_conversation(conv_id)
+    await _persist_workflow(task_id)
 
-    return {"task_id": task_id, "status": "created", "conversation_id": conv_id}
+    return {"task_id": task_id, "status": "started", "conversation_id": conv_id}
 
 
 @router.patch("/conversations/{conv_id}", response_model=dict)
@@ -4654,6 +4776,13 @@ async def export_workflow_patent_docx(task_id: str):
         raise HTTPException(status_code=400, detail="工作流尚未生成专利文档，请等待撰写阶段完成")
 
     draft_data = patent_draft if isinstance(patent_draft, dict) else patent_draft
+    existing_docx_path = draft_data.get("docx_path") if isinstance(draft_data, dict) else ""
+    if existing_docx_path and os.path.isfile(existing_docx_path):
+        return FileResponse(
+            path=existing_docx_path,
+            filename=f"patent_{task_id}.docx",
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
     # 处理 {agent, output, summary} 格式：尝试从 output 字段解析 JSON
     if "output" in draft_data and "agent" in draft_data and isinstance(draft_data.get("output"), str):

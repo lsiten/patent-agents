@@ -204,6 +204,8 @@ function getStatusLabel(workflow: WorkflowResponse | null): string {
   if (!workflow) return '加载中...';
 
   switch (workflow.current_state) {
+    case 'initialized':
+      return '待启动';
     case 'completed':
       return '已完成';
     case 'failed':
@@ -403,7 +405,10 @@ export default function WorkflowPage() {
     () => (agentLogs.length > 0 ? agentLogs : historyLogs),
     [historyLogs, agentLogs]
   );
+  const isInitialized = workflow?.current_state === 'initialized';
   const isTerminal = workflow ? terminalStates.has(workflow.current_state) : false;
+  const isRunning = Boolean(workflow && !isInitialized && !isTerminal);
+  const canRestart = Boolean(workflow && workflow.current_state !== 'completed');
 
   const loadWorkflow = useCallback(async (showLoading = false) => {
     if (showLoading) {
@@ -548,7 +553,25 @@ export default function WorkflowPage() {
               <RefreshCw className={`w-4 h-4 mr-1 ${isRefreshing ? 'animate-spin' : ''}`} />
               刷新
             </Button>
-            {!isTerminal && (
+            {isInitialized && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await workflowApi.start(taskId);
+                    setAgentLogs([]);
+                    loadWorkflow(true);
+                  } catch (requestError) {
+                    setError(requestError instanceof Error ? requestError.message : '启动工作流失败');
+                  }
+                }}
+              >
+                <Play className="w-4 h-4 mr-1" />
+                开始处理
+              </Button>
+            )}
+            {isRunning && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -561,14 +584,16 @@ export default function WorkflowPage() {
                       await workflowApi.pause(taskId);
                       setIsPaused(true);
                     }
-                  } catch {}
+                  } catch (requestError) {
+                    setError(requestError instanceof Error ? requestError.message : '更新工作流状态失败');
+                  }
                 }}
               >
                 {isPaused ? <Play className="w-4 h-4 mr-1" /> : <Pause className="w-4 h-4 mr-1" />}
                 {isPaused ? '恢复' : '暂停'}
               </Button>
             )}
-            {isTerminal && (
+            {canRestart && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -577,7 +602,9 @@ export default function WorkflowPage() {
                     await workflowApi.restart(taskId);
                     setAgentLogs([]);
                     loadWorkflow(true);
-                  } catch {}
+                  } catch (requestError) {
+                    setError(requestError instanceof Error ? requestError.message : '重新开始工作流失败');
+                  }
                 }}
               >
                 <RefreshCw className="w-4 h-4 mr-1" />

@@ -46,6 +46,7 @@ class EventType(str, Enum):
     WORKFLOW_STATE_CHANGED = "workflow.state_changed"
     WORKFLOW_PROGRESS_UPDATED = "workflow.progress_updated"
     WORKFLOW_ITERATION_COMPLETED = "workflow.iteration_completed"
+    WORKFLOW_LOG = "workflow.log"
 
     # Agent 事件
     AGENT_STARTED = "agent.started"
@@ -126,6 +127,43 @@ class TaskProgressUpdatedEvent(BaseEvent):
             "progress": self.progress,
             "message": self.message,
             "agent_name": self.agent_name,
+        }
+
+
+@dataclass
+class WorkflowLogEvent(BaseEvent):
+    """统一工作流实时日志事件"""
+
+    task_id: str = ""
+    user_id: str = ""
+    workflow: str = "ulw"
+    phase: str = ""
+    status: str = "progress"
+    summary: str = ""
+    detail: Optional[str] = None
+    trace_id: Optional[str] = None
+    parent_id: Optional[str] = None
+    artifacts: List[Dict[str, Any]] = field(default_factory=list)
+    next_actions: List[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        self.event_type = EventType.WORKFLOW_LOG
+        if self.trace_id is None:
+            self.trace_id = self.task_id
+
+    def _get_payload_dict(self) -> Dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "user_id": self.user_id,
+            "workflow": self.workflow,
+            "phase": self.phase,
+            "status": self.status,
+            "summary": self.summary,
+            "detail": self.detail,
+            "trace_id": self.trace_id,
+            "parent_id": self.parent_id,
+            "artifacts": self.artifacts,
+            "next_actions": self.next_actions,
         }
 
 
@@ -312,6 +350,7 @@ class InMemoryEventBus(EventBus):
         self._subscribers: Dict[EventType, List[Callable[[BaseEvent], None]]] = {}
         self._sse_events = {
             EventType.WORKFLOW_PROGRESS_UPDATED,
+            EventType.WORKFLOW_LOG,
             EventType.AGENT_THINKING,
             EventType.AGENT_TOOL_CALL_START,
             EventType.AGENT_TOOL_CALL_END,
@@ -439,6 +478,7 @@ class RedisEventBus(EventBus):
         """根据事件类型创建具体事件实例"""
         event_classes = {
             EventType.WORKFLOW_PROGRESS_UPDATED: TaskProgressUpdatedEvent,
+            EventType.WORKFLOW_LOG: WorkflowLogEvent,
             EventType.AGENT_THINKING: AgentThinkingEvent,
             EventType.AGENT_TOOL_CALL_START: AgentToolCallStartEvent,
             EventType.AGENT_TOOL_CALL_END: AgentToolCallEndEvent,

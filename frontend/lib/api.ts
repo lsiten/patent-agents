@@ -2,7 +2,7 @@
  * API Client for Patent Multi-Agent System
  */
 
-import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory, OrgNode, DirEntry, BrowseDirResponse, FileContentResponse, SystemConfigResponse, SystemConfigUpdateRequest, EnvInfoResponse, ResolvedLLMConfig, ResolvedImageGenConfig, AgentLLMConfigUpdate, AgentImageGenConfigUpdate, AgentModelConfigTestResponse } from '@/types';
+import type { AgentConfig, AgentEvent, AgentTool, AgentSkill, AgentTimer, AgentMemory, OrgNode, DirEntry, BrowseDirResponse, FileContentResponse, SystemConfigResponse, SystemConfigUpdateRequest, EnvInfoResponse, ResolvedLLMConfig, ResolvedImageGenConfig, AgentLLMConfigUpdate, AgentImageGenConfigUpdate, AgentModelConfigTestResponse } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
@@ -291,6 +291,7 @@ export interface ChatMessage {
   timestamp: string;
   type?: 'text' | 'json' | 'file' | 'progress';
   metadata?: Record<string, unknown>;
+  agent_events?: AgentEvent[];
   tool_calls?: Array<{
     name: string;
     parameters: Record<string, unknown>;
@@ -813,6 +814,7 @@ export const conversationApi = {
       onStreamDelta?: (data: { content: string }) => void;
       onContent?: (data: { content: string; has_recommendation: boolean }) => void;
       onConfirmation?: (data: { question: string; options: string[] }) => void;
+      onAgentActivity?: (data: AgentEvent) => void;
       onDone?: (data: { message: ChatMessage; has_recommendation: boolean; needs_confirmation?: boolean; conversation_id: string }) => void;
       onError?: (error: string) => void;
       onStatusChange?: (status: 'connecting' | 'connected' | 'disconnected') => void;
@@ -921,6 +923,9 @@ export const conversationApi = {
                 try {
                   const parsed = JSON.parse(eventData);
                   switch (eventType) {
+                    case 'agent_activity':
+                      callbacks.onAgentActivity?.(parsed);
+                      break;
                     case 'thinking':
                       callbacks.onThinking?.(parsed);
                       break;

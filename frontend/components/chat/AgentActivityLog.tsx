@@ -101,7 +101,7 @@ export function AgentActivityLog({ events, className = '' }: AgentActivityLogPro
         >
           {events.map((event, idx) => (
             <div
-              key={`${event.type}-${idx}-${event.timestamp}`}
+              key={event.id || `${event.type}-${idx}-${event.timestamp}`}
               className="flex items-start gap-2 py-0.5 text-[11px] leading-relaxed"
             >
               <span className="flex-shrink-0 mt-0.5">

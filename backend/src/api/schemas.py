@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 
@@ -389,11 +389,28 @@ class ToolCallInfo(BaseModel):
 
 class AgentEventInfo(BaseModel):
     """Agent事件记录（用于持久化和回放）"""
+    id: str
+    sequence: int
+    call_id: str
     type: str  # thinking | tool_call_start | tool_call_end | skill_use | status | dispatch
     agent_name: str
     timestamp: str
     message: str = ""
     data: Dict[str, Any] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_legacy_identity_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        data = dict(value)
+        timestamp = str(data.get("timestamp") or "")
+        event_type = str(data.get("type") or "agent_event")
+        data.setdefault("id", f"legacy-{event_type}-{timestamp}")
+        data.setdefault("sequence", 0)
+        data.setdefault("call_id", "legacy")
+        return data
 
 
 class ConversationMessage(BaseModel):
