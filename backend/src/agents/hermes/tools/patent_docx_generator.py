@@ -194,7 +194,7 @@ def add_document_heading(doc, text: str, profile: _Profile) -> None:
     h.alignment = _get_alignment(pfmt.doc_heading_alignment)
 
 
-def _set_section_margins(section, margins: tuple) -> None:
+def _set_section_margins(section, margins: Tuple[float, float, float, float]) -> None:
     from docx.shared import Cm
     top, bottom, left, right = margins
     section.top_margin = Cm(top)
@@ -209,7 +209,7 @@ def _set_page_size(section, profile: _Profile) -> None:
     section.page_height = Cm(profile.page_layout.page_height_cm)
 
 
-def _get_margins_for_section(section_name: str, profile: _Profile) -> tuple:
+def _get_margins_for_section(section_name: str, profile: _Profile) -> Tuple[float, float, float, float]:
     layout = profile.page_layout
     mapping = {
         "摘要": layout.margins_abstract,
@@ -229,7 +229,7 @@ def add_new_section(doc, section_name: str, profile: _Profile) -> None:
     _set_section_margins(new_section, margins)
 
 
-def _add_multiline_content(doc, content: str, profile: _Profile) -> None:
+def _add_multiline_content(doc, content: Any, profile: _Profile) -> None:
     """Add content that may contain multiple paragraphs. Strips Markdown syntax."""
     content = _strip_markdown(content)
     paragraphs = [p.strip() for p in content.split("\n") if p.strip()]
@@ -237,8 +237,37 @@ def _add_multiline_content(doc, content: str, profile: _Profile) -> None:
         add_body_paragraph(doc, para_text, profile)
 
 
-def _strip_markdown(text: str) -> str:
+def _coerce_text(value: Any) -> str:
+    """Convert structured agent/tool output fields into document text."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("content", "text", "value", "raw_response", "summary"):
+            nested = value.get(key)
+            if nested:
+                return _coerce_text(nested)
+
+        parts = []
+        for item in value.values():
+            text = _coerce_text(item).strip()
+            if text:
+                parts.append(text)
+        return "\n".join(parts)
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            text = _coerce_text(item).strip()
+            if text:
+                parts.append(text)
+        return "\n".join(parts)
+    return str(value)
+
+
+def _strip_markdown(text: Any) -> str:
     """Remove Markdown formatting from LLM-generated text for clean docx output."""
+    text = _coerce_text(text)
     if not text:
         return text
     lines = text.split("\n")
@@ -389,13 +418,13 @@ class PatentDocxGeneratorTool:
 
     async def execute(
         self,
-        title: str = "专利申请文件",
-        claims: Dict[str, Any] = None,
-        description: Dict[str, Any] = None,
-        abstract: str = "",
+        title: Any = "专利申请文件",
+        claims: Optional[Dict[str, Any]] = None,
+        description: Optional[Dict[str, Any]] = None,
+        abstract: Any = "",
         task_id: str = "",
         tech_description: str = "",
-        **kwargs,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """
         生成专利DOCX文件（含附图）。
@@ -431,6 +460,9 @@ class PatentDocxGeneratorTool:
             _set_page_size(first_section, profile)
             margins = _get_margins_for_section("摘要", profile)
             _set_section_margins(first_section, margins)
+
+            title = _coerce_text(title) or "专利申请文件"
+            abstract = _coerce_text(abstract)
 
             # ── 说明书摘要 ── (仅在有内容时生成)
             if abstract and abstract.strip():
@@ -522,7 +554,7 @@ class PatentDocxGeneratorTool:
                     _add_multiline_content(doc, summary, profile)
 
                 # 附图说明（仅在有内容时生成）
-                drawings_desc = description.get("description_of_drawings", "")
+                drawings_desc = description.get("description_of_drawings") or description.get("drawings_description", "")
                 if isinstance(drawings_desc, dict):
                     drawings_desc = drawings_desc.get("content", "") or str(drawings_desc)
                 if drawings_desc and drawings_desc.strip():

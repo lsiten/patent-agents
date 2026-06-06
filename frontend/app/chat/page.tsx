@@ -822,7 +822,7 @@ function ChatPageContent() {
       {/* Sidebar */}
       <aside
         className={clsx(
-          'w-72 flex-shrink-0 border-r border-hairline bg-surface flex flex-col transition-transform',
+          'w-80 flex-shrink-0 border-r border-hairline bg-surface/95 flex flex-col transition-transform',
           'md:relative md:translate-x-0',
           showSidebar ? 'translate-x-0' : '-translate-x-full absolute inset-y-0 z-20'
         )}
@@ -861,10 +861,10 @@ function ChatPageContent() {
                 role="button"
                 tabIndex={0}
                 className={clsx(
-                  'w-full text-left p-3 rounded-lg transition-colors group cursor-pointer',
+                  'w-full text-left p-3 rounded-xl border transition-all group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40',
                   activeConvId === conv.id
-                    ? 'bg-brand-green/10 text-ink'
-                    : 'hover:bg-hairline text-slate hover:text-ink'
+                    ? 'border-brand-green/30 bg-brand-green/10 text-ink shadow-sm'
+                    : 'border-transparent hover:border-hairline-strong hover:bg-canvas text-slate hover:text-ink'
                 )}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -876,16 +876,18 @@ function ChatPageContent() {
                       {conv.message_count} 条消息 · {formatDate(conv.updated_at)}
                     </p>
                     {conv.linked_workflow_id && (
-                      <div className="flex items-center gap-1 mt-1">
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-canvas px-2 py-0.5 text-[11px] font-medium text-slate ring-1 ring-hairline">
                         {conv.status === 'completed' ? (
                           <CheckCircle2 className="w-3 h-3 text-green-600" />
                         ) : (
                           <Clock className="w-3 h-3 text-amber-500" />
                         )}
-                        <span className="text-xs text-slate/60">
+                        <span>
                           {conv.status === 'completed' ? '已完成' :
                            conv.status === 'failed' ? '已失败' :
                            conv.status === 'initial' ? '待启动' : '进行中'}
+                        </span>
                         </span>
                         {conv.linked_workflow_id && (
                           <button
@@ -893,7 +895,8 @@ function ChatPageContent() {
                               e.stopPropagation();
                               router.push(`/workflow/${encodeURIComponent(conv.linked_workflow_id!)}`);
                             }}
-                            className="ml-2 text-xs text-brand-green-dark hover:text-brand-green font-medium underline-offset-2 hover:underline"
+                            className="rounded-full px-2 py-0.5 text-[11px] font-medium text-brand-green-dark transition-colors hover:bg-brand-green/10 hover:text-brand-green focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
+                            aria-label={`查看 ${conv.title || '当前对话'} 的工作流`}
                           >
                             查看工作流
                           </button>
@@ -903,7 +906,9 @@ function ChatPageContent() {
                   </div>
                   <button
                     onClick={(e) => handleDeleteConversation(e, conv.id)}
-                    className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-red-50 transition-all"
+                    className="rounded-md p-1.5 opacity-0 transition-all hover:bg-red-50 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-200 group-hover:opacity-100"
+                    aria-label={`删除对话：${conv.title || '新对话'}`}
+                    title="删除对话"
                   >
                     <Trash2 className="w-3.5 h-3.5 text-slate/40 hover:text-red-500" />
                   </button>
@@ -917,7 +922,7 @@ function ChatPageContent() {
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <div className="border-b border-hairline bg-canvas px-6 py-3">
+        <div className="border-b border-hairline bg-canvas/95 px-6 py-3 backdrop-blur">
           <div className="flex items-center justify-between">
             <div>
               {editingTitle ? (
@@ -992,7 +997,7 @@ function ChatPageContent() {
                       </Button>
                     </div>
                   ) : (
-                    <Button variant="ghost" size="sm" onClick={() => setShowSearch(true)} title="搜索消息">
+                    <Button variant="ghost" size="sm" onClick={() => setShowSearch(true)} title="搜索消息" aria-label="搜索消息">
                       <Search className="w-4 h-4" />
                     </Button>
                   )}
@@ -1022,8 +1027,8 @@ function ChatPageContent() {
         />
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="max-w-4xl mx-auto px-4 py-6 space-y-5">
+        <div className="flex-1 overflow-y-auto bg-surface/35">
+          <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 md:px-6">
 
             {isLoadingConv ? (
               <div className="flex justify-center py-12">
@@ -1109,7 +1114,7 @@ function ChatPageContent() {
                       </div>
                     )}
 
-                    <div className={clsx('max-w-xl', msg.role === 'user' ? 'order-1' : 'order-1')}>
+                    <div className={clsx(msg.role === 'user' ? 'order-1 max-w-[680px]' : 'order-1 max-w-[760px]')}>
                       {msg.type === 'file' && !msg.content ? (
                         <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-hairline bg-canvas text-sm text-ink">
                           <FileText className="w-4 h-4 text-slate-600 flex-shrink-0" />
@@ -1126,10 +1131,10 @@ function ChatPageContent() {
                         <div className="relative group">
                           <div
                             className={clsx(
-                              'rounded-xl text-sm leading-relaxed',
+                              'rounded-2xl text-sm leading-relaxed shadow-sm',
                               msg.role === 'user'
                                 ? 'bg-brand-green text-ink rounded-br-md'
-                                : 'bg-canvas border border-hairline rounded-bl-md'
+                                : 'border border-hairline bg-canvas rounded-bl-md'
                             )}
                           >
                             {msg.type === 'file' && (
@@ -1176,6 +1181,7 @@ function ChatPageContent() {
                               onClick={() => handleCopy(msg.id, msg.content)}
                               className="absolute -top-2 right-2 p-1 rounded-md bg-white border border-hairline shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-slate-50"
                               title="复制消息"
+                              aria-label="复制消息"
                             >
                               {copiedId === msg.id ? (
                                 <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
@@ -1254,20 +1260,23 @@ function ChatPageContent() {
         )}
 
         {pendingConfirmation && !recommendStartWorkflow && !workflowTaskId && (
-          <div className="border-t border-hairline bg-amber-50 px-4 py-3">
-            <div className="max-w-4xl mx-auto">
-              <div className="rounded-lg border border-amber-200 bg-white px-4 py-3 shadow-sm">
-                <p className="text-sm font-medium text-amber-900 mb-2">
+          <div className="sticky bottom-[76px] z-10 border-t border-amber-200/80 bg-amber-50/95 px-4 py-3 shadow-[0_-12px_30px_rgba(0,30,43,0.08)] backdrop-blur">
+            <div className="mx-auto max-w-5xl">
+              <div className="rounded-2xl border border-amber-200 bg-white px-4 py-3 shadow-sm" role="group" aria-label="待确认的问题">
+                <p className="mb-3 flex items-start gap-2 text-sm font-semibold text-amber-900">
+                  <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
+                  <span>
                   {pendingConfirmation.question}
+                  </span>
                 </p>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {pendingConfirmation.options.length > 0 ? (
                     pendingConfirmation.options.map((opt, i) => (
                       <button
                         key={i}
                         type="button"
                         onClick={() => handleConfirmationAnswer(opt)}
-                        className="px-3 py-1.5 text-sm rounded-md border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 hover:border-amber-400 transition-colors"
+                        className="min-h-9 rounded-full border border-amber-300 bg-amber-50 px-3.5 py-1.5 text-sm font-medium text-amber-800 transition-colors hover:border-amber-400 hover:bg-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
                       >
                         {opt}
                       </button>
@@ -1278,7 +1287,7 @@ function ChatPageContent() {
                   <button
                     type="button"
                     onClick={() => setPendingConfirmation(null)}
-                    className="px-3 py-1.5 text-sm rounded-md text-slate/60 hover:text-slate-800 hover:bg-slate-100 transition-colors ml-auto"
+                    className="ml-auto min-h-9 rounded-full px-3.5 py-1.5 text-sm text-slate/60 transition-colors hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
                   >
                     跳过
                   </button>
@@ -1290,7 +1299,7 @@ function ChatPageContent() {
 
         {/* Input Area */}
         <div className="border-t border-hairline bg-canvas px-4 py-3">
-          <div className="max-w-4xl mx-auto">
+          <div className="mx-auto max-w-5xl">
             {pendingFile && (
               <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-hairline bg-canvas text-sm">
                 <FileText className="w-4 h-4 text-slate-600 flex-shrink-0" />
@@ -1307,8 +1316,9 @@ function ChatPageContent() {
                   type="button"
                   onClick={() => setPendingFile(null)}
                   disabled={isUploadingFile}
-                  className="ml-auto p-0.5 rounded hover:bg-slate-100 text-slate-500 disabled:opacity-50"
+                  className="ml-auto p-1.5 rounded-md hover:bg-slate-100 text-slate-500 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
                   title="移除文件"
+                  aria-label="移除待上传文件"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -1331,6 +1341,7 @@ function ChatPageContent() {
                 disabled={!!pendingFile || isUploadingFile || isLoading || isLoadingConv || isStartingWorkflow}
                 className="self-end"
                 title="选择交底书（.txt / .docx / .pdf）"
+                aria-label="选择交底书文件"
               >
                 <Paperclip className="w-4 h-4" />
               </Button>
@@ -1361,6 +1372,7 @@ function ChatPageContent() {
                 disabled={(!input.trim() && !pendingFile) || isLoading || isLoadingConv || isUploadingFile}
                 isLoading={isLoading || isUploadingFile}
                 className="self-end"
+                aria-label="发送消息"
               >
                 {!(isLoading || isUploadingFile) && <Send className="w-4 h-4" />}
               </Button>

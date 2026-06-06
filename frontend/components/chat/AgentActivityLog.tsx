@@ -53,7 +53,7 @@ function getEventMessage(event: AgentEvent): string {
 }
 
 export function AgentActivityLog({ events, className = '' }: AgentActivityLogProps) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -70,17 +70,20 @@ export function AgentActivityLog({ events, className = '' }: AgentActivityLogPro
   const doneCount = events.filter((e) => e.type === 'tool_call_end').length;
 
   return (
-    <div className={`border-t border-hairline bg-surface/60 ${className}`}>
+    <div className={`mt-2 rounded-xl border border-hairline bg-surface/70 ${className}`}>
       {/* Summary bar */}
       <button
+        type="button"
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-4 py-1.5 text-left hover:bg-surface transition-colors"
+        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
+        aria-expanded={expanded}
       >
         {expanded ? (
           <ChevronDown className="w-3.5 h-3.5 text-slate" />
         ) : (
           <ChevronRight className="w-3.5 h-3.5 text-slate" />
         )}
+        <Timer className="h-3.5 w-3.5 text-slate/70" />
         <span className="text-xs font-medium text-slate">Agent 活动日志</span>
         <span className="text-[11px] text-slate/60">
           {events.length} 条事件
@@ -97,12 +100,12 @@ export function AgentActivityLog({ events, className = '' }: AgentActivityLogPro
       {expanded && (
         <div
           ref={scrollRef}
-          className="max-h-48 overflow-y-auto px-4 pb-2 space-y-0.5"
+          className="max-h-48 space-y-0.5 overflow-y-auto border-t border-hairline px-3 py-2"
         >
           {events.map((event, idx) => (
             <div
               key={event.id || `${event.type}-${idx}-${event.timestamp}`}
-              className="flex items-start gap-2 py-0.5 text-[11px] leading-relaxed"
+              className="flex items-start gap-2 rounded-md px-1 py-0.5 text-[11px] leading-relaxed hover:bg-canvas/70"
             >
               <span className="flex-shrink-0 mt-0.5">
                 {event.type === 'tool_call_start' ? (

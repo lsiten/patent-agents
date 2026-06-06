@@ -117,6 +117,33 @@ async def test_generate_patent_in_sections_preserves_agent_tool_messages(monkeyp
     assert draft["description"]["technical_field"] == "本发明涉及沉浸式折幕显示视频处理技术领域。"
 
 
+@pytest.mark.asyncio
+async def test_generate_patent_in_sections_preserves_agent_failure(monkeypatch):
+    engine = PatentWorkflowEngine()
+    context = engine.create_workflow(
+        task_id="writer-agent-truncated",
+        user_id="test-user",
+        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+    )
+
+    async def fake_run_agent_conversation(profile_id, prompt):
+        return {
+            "failed": True,
+            "error": "Response truncated due to output length limit",
+            "completed": False,
+        }
+
+    monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
+
+    draft = await engine._generate_patent_in_sections(None, "patent.writer.v1", "", context)
+
+    assert draft["_agent_failed"] is True
+    assert draft["_agent_error"] == "Response truncated due to output length limit"
+    assert draft["claims"]["independent_claim"] == ""
+    assert draft["description"]["technical_field"] == ""
+    assert draft["abstract"] == ""
+
+
 def test_revision_prompt_keeps_source_disclosure_when_draft_is_failed():
     engine = PatentWorkflowEngine()
     context = engine.create_workflow(
@@ -256,3 +283,35 @@ def test_patent_draft_normalizes_streamed_tool_results_instead_of_docx_envelope(
     assert normalized["abstract"] == "本发明公开一种沉浸式折幕显示空间姿态联动显示控制方法。"
     assert normalized["docx_path"] == "/tmp/generated.docx"
     assert "tool_results" not in normalized
+
+
+@pytest.mark.asyncio
+async def test_patent_docx_generator_accepts_structured_text_values():
+    from src.agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
+
+    tool = PatentDocxGeneratorTool()
+
+    result = await tool.execute(
+        title={"content": "可调式沉浸显示系统及其显示控制方法"},
+        claims={
+            "independent_claim": {"content": "1. 一种可调式沉浸显示系统，包括入口交互终端和可调显示面。"},
+            "dependent_claims": [
+                {"content": "2. 根据权利要求1所述的系统，其中所述可调显示面绕预设转轴转动。"},
+            ],
+        },
+        description={
+            "technical_field": {"content": "本发明涉及沉浸式显示控制技术领域。"},
+            "background_art": {"content": "现有沉浸式显示空间难以适配不同体验者。"},
+            "summary_of_invention": {"technical_solution": "系统根据人体参数调整显示面姿态。"},
+            "drawings_description": {"content": "图1为系统结构示意图。"},
+            "detailed_description": [
+                {"title": "实施例一", "content": "入口交互终端采集人体参数并生成推荐姿态。"},
+            ],
+        },
+        abstract={"content": "本发明公开一种可调式沉浸显示系统及其显示控制方法。"},
+        task_id="structured-docx-values",
+        tech_description="",
+    )
+
+    assert result["success"] is True
+    assert result["file_path"].endswith(".docx")

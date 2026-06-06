@@ -37,6 +37,7 @@ const toolDisplayNames: Record<string, { label: string; icon: string }> = {
   scenario_miner: { label: '场景挖掘', icon: '💎' },
   patent_search: { label: '专利检索', icon: '🔍' },
   knowledge_search: { label: '知识库搜索', icon: '📚' },
+  dispatch_specialist: { label: '调度专业 Agent', icon: '🛠️' },
 };
 
 const skillDisplayIcons: Record<string, string> = {
@@ -62,12 +63,14 @@ function SingleToolCall({ tool }: { tool: ToolCallInfo }) {
   const isLoading = tool.result === null && tool.success;
 
   return (
-    <div className="border border-hairline rounded-lg overflow-hidden bg-surface/50">
+    <div className="overflow-hidden rounded-xl border border-hairline bg-surface/60">
       <button
+        type="button"
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-surface transition-colors"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
+        aria-expanded={expanded}
       >
-        <span className="text-sm">{display.icon}</span>
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-canvas text-sm ring-1 ring-hairline" aria-hidden="true">{display.icon}</span>
         <span className="flex-1 text-xs font-medium text-ink truncate">
           {display.label}
         </span>
@@ -86,7 +89,7 @@ function SingleToolCall({ tool }: { tool: ToolCallInfo }) {
       </button>
 
       {expanded && (
-        <div className="px-3 pb-3 border-t border-hairline">
+        <div className="border-t border-hairline px-3 pb-3">
           {tool.parameters && Object.keys(tool.parameters).length > 0 && (
             <div className="mt-2">
               <p className="text-[10px] font-medium text-slate uppercase tracking-wide mb-1">参数</p>
@@ -133,12 +136,14 @@ function SingleSkillUse({ skill }: { skill: SkillUseInfo }) {
   const icon = skillDisplayIcons[skill.name] || '✨';
 
   return (
-    <div className="border border-purple-200 rounded-lg overflow-hidden bg-purple-50/30">
+    <div className="overflow-hidden rounded-xl border border-purple-200 bg-purple-50/30">
       <button
+        type="button"
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-purple-50/50 transition-colors"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-purple-50/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
+        aria-expanded={expanded}
       >
-        <span className="text-sm">{icon}</span>
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white text-sm ring-1 ring-purple-100" aria-hidden="true">{icon}</span>
         <span className="flex-1 text-xs font-medium text-purple-800 truncate">
           {skill.name}
         </span>
@@ -177,7 +182,7 @@ export function ToolCallCard({ toolCalls, skillUses, isStreaming }: ToolCallCard
   if (!hasTools && !hasSkills) return null;
 
   return (
-    <div className="mt-2 space-y-2">
+    <div className="mt-3 space-y-2 rounded-xl border border-hairline bg-surface/45 p-2">
       {hasSkills && (
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5 text-[11px] text-purple-600">

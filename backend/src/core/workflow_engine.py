@@ -1527,6 +1527,8 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         # Agent 会通过 tool callbacks 返回工具执行结果
         final_response = ""
         if isinstance(result, dict):
+            if result.get("failed") is True or result.get("completed") is False and result.get("error"):
+                return self._normalize_phase_output("patent_draft", result)
             final_response = result.get("final_response", "") or result.get("content", "") or ""
             # 检查是否有工具调用结果
             tool_results = result.get("tool_results", {})
