@@ -118,6 +118,129 @@ async def test_generate_patent_in_sections_preserves_agent_tool_messages(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_generate_patent_in_sections_recovers_tool_messages_without_name(monkeypatch):
+    engine = PatentWorkflowEngine()
+    context = engine.create_workflow(
+        task_id="agent-result-tool-call-ids",
+        user_id="test-user",
+        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+    )
+
+    claim_result = {
+        "tool": "claim_drafter",
+        "success": True,
+        "data": {
+            "independent_claim": "1. 一种Cave折幕空间视频补偿方法，包括获取相邻屏幕空间关系并识别补充处理区域。",
+            "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于相邻屏幕边界计算空间间隙。"],
+        },
+    }
+    description_result = {
+        "tool": "description_writer",
+        "success": True,
+        "data": {
+            "section_type": "summary",
+            "content": "系统根据姿态变化量及相邻屏幕的空间关系识别画面处理区域，避免补偿内容缺失。",
+        },
+    }
+
+    async def fake_run_agent_conversation(profile_id, prompt):
+        return {
+            "final_response": "或者",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "call_claim", "function": {"name": "claim_drafter", "arguments": "{}"}},
+                        {"id": "call_summary", "function": {"name": "description_writer", "arguments": "{}"}},
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_claim",
+                    "content": json.dumps(claim_result, ensure_ascii=False),
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_summary",
+                    "content": json.dumps(description_result, ensure_ascii=False),
+                },
+            ],
+        }
+
+    monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
+
+    draft = await engine._generate_patent_in_sections(None, "patent.writer.v1", "", context)
+
+    assert draft["claims"]["independent_claim"].startswith("1. 一种Cave折幕空间视频补偿方法")
+    assert draft["description"]["summary_of_invention"] == "系统根据姿态变化量及相邻屏幕的空间关系识别画面处理区域，避免补偿内容缺失。"
+    assert draft["full_response"] == "或者"
+
+
+@pytest.mark.asyncio
+async def test_generate_patent_in_sections_collects_drawing_tool_output(monkeypatch):
+    engine = PatentWorkflowEngine()
+    context = engine.create_workflow(
+        task_id="agent-result-drawing-tool-call",
+        user_id="test-user",
+        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+    )
+
+    claim_result = {
+        "tool": "claim_drafter",
+        "success": True,
+        "data": {
+            "independent_claim": "1. 一种Cave折幕空间视频补偿方法，包括获取相邻屏幕空间关系并识别补充处理区域。",
+            "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于相邻屏幕边界计算空间间隙。"],
+        },
+    }
+    expected_drawings = [
+        {
+            "figure_number": "图1",
+            "title": "Cave折幕空间视频补偿系统结构示意图",
+            "description": "展示入口终端、姿态控制模块、相邻屏幕和视频补偿模块之间的连接关系。",
+            "file_path": "/tmp/agent-result-drawing-tool-call/draft/drawings/fig1.png",
+            "artifact_url": "/api/v1/workflows/agent-result-drawing-tool-call/artifacts/draft/drawings/fig1.png",
+            "mime_type": "image/png",
+        }
+    ]
+    drawing_result = {
+        "tool": "patent_drawing_generator",
+        "success": True,
+        "data": {"drawings": expected_drawings},
+    }
+
+    async def fake_run_agent_conversation(profile_id, prompt):
+        return {
+            "final_response": "工具调用完成",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {"id": "call_claim", "function": {"name": "claim_drafter", "arguments": "{}"}},
+                        {"id": "call_drawing", "function": {"name": "patent_drawing_generator", "arguments": "{}"}},
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_claim",
+                    "content": json.dumps(claim_result, ensure_ascii=False),
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_drawing",
+                    "content": json.dumps(drawing_result, ensure_ascii=False),
+                },
+            ],
+        }
+
+    monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
+
+    draft = await engine._generate_patent_in_sections(None, "patent.writer.v1", "", context)
+
+    assert draft["drawings"] == expected_drawings
+
+
+@pytest.mark.asyncio
 async def test_generate_patent_in_sections_preserves_agent_failure(monkeypatch):
     engine = PatentWorkflowEngine()
     context = engine.create_workflow(
@@ -283,6 +406,55 @@ def test_patent_draft_normalizes_streamed_tool_results_instead_of_docx_envelope(
     assert normalized["abstract"] == "本发明公开一种沉浸式折幕显示空间姿态联动显示控制方法。"
     assert normalized["docx_path"] == "/tmp/generated.docx"
     assert "tool_results" not in normalized
+
+
+def test_patent_draft_normalizes_streamed_drawing_tool_results():
+    engine = PatentWorkflowEngine()
+    drawing = {
+        "figure_number": "图1",
+        "title": "折幕空间姿态控制系统结构示意图",
+        "description": "展示入口终端、姿态控制模块、折幕组件和视频补偿模块的连接关系。",
+        "file_path": "/tmp/draft/drawings/fig1.png",
+        "artifact_url": "/api/v1/workflows/streamed-drawings/artifacts/draft/drawings/fig1.png",
+        "mime_type": "image/png",
+    }
+    streamed_result = {
+        "success": True,
+        "message": "工具调用完成",
+        "tool_results": [
+            {
+                "tool": "claim_drafter",
+                "result": json.dumps(
+                    {
+                        "tool": "claim_drafter",
+                        "success": True,
+                        "data": {
+                            "independent_claim": "1. 一种折幕空间姿态控制系统，包括入口终端和姿态控制模块。",
+                            "dependent_claims": ["2. 根据权利要求1所述的系统，其中姿态控制模块输出折幕角度。"],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                "success": True,
+            },
+            {
+                "tool": "patent_drawing_generator",
+                "result": json.dumps(
+                    {
+                        "tool": "patent_drawing_generator",
+                        "success": True,
+                        "data": {"drawings": [drawing]},
+                    },
+                    ensure_ascii=False,
+                ),
+                "success": True,
+            },
+        ],
+    }
+
+    normalized = engine._normalize_phase_output("patent_draft", streamed_result)
+
+    assert normalized["drawings"] == [drawing]
 
 
 @pytest.mark.asyncio

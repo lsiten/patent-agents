@@ -12,6 +12,7 @@ enabled_tools:
 - description_writer
 - terminology_normalizer
 - support_checker
+- patent_drawing_generator
 - patent_docx_generator
 memory:
   short_term: true

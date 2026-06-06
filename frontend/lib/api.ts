@@ -6,6 +6,38 @@ import type { AgentConfig, AgentEvent, AgentTool, AgentSkill, AgentTimer, AgentM
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
+function apiOrigin(): string {
+  try {
+    return new URL(API_BASE_URL).origin;
+  } catch {
+    return '';
+  }
+}
+
+function resolveApiUrl(pathOrUrl: string): string {
+  if (/^https?:\/\//.test(pathOrUrl)) {
+    return pathOrUrl;
+  }
+
+  if (pathOrUrl.startsWith('/api/')) {
+    return `${apiOrigin()}${pathOrUrl}`;
+  }
+
+  if (pathOrUrl.startsWith('/')) {
+    return `${API_BASE_URL}${pathOrUrl}`;
+  }
+
+  return `${API_BASE_URL}/${pathOrUrl}`;
+}
+
+function encodeArtifactPath(artifactPath: string): string {
+  return artifactPath
+    .replace(/^\/+/, '')
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
 // ============ Helper Functions ============
 async function request<T>(
   endpoint: string,
@@ -280,6 +312,20 @@ export const workflowApi = {
 
   exportDocx: (taskId: string) =>
     `${API_BASE_URL}/workflows/${encodeURIComponent(taskId)}/export/docx`,
+
+  artifactUrl: (taskId: string, artifactPathOrUrl: string) => {
+    const trimmedArtifactPathOrUrl = artifactPathOrUrl.trim();
+
+    if (!trimmedArtifactPathOrUrl) {
+      return '';
+    }
+
+    if (/^https?:\/\//.test(trimmedArtifactPathOrUrl) || trimmedArtifactPathOrUrl.startsWith('/api/')) {
+      return resolveApiUrl(trimmedArtifactPathOrUrl);
+    }
+
+    return `${API_BASE_URL}/workflows/${encodeURIComponent(taskId)}/artifacts/${encodeArtifactPath(trimmedArtifactPathOrUrl)}`;
+  },
 };
 
 // ============ Chat API ============

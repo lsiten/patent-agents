@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import asyncio
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, status, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
@@ -59,6 +60,9 @@ from ..knowledge.base import get_knowledge_base
 from ..data_sources.base import get_data_source_manager
 from ..infrastructure.persistence import get_store
 from .schemas import WorkflowEventResponse, OrgNodeResponse
+
+
+_EXPORTS_ROOT = Path(__file__).resolve().parents[2] / "exports"
 
 
 def _repair_truncated_json(json_str: str) -> dict | None:
@@ -4046,6 +4050,7 @@ _KNOWN_TOOL_IMPL_FILES: dict[str, str] = {
     "agent_selector": "backend/src/agents/hermes/tools/agent_selector.py",
     "dispatch_specialist": "backend/src/agents/hermes/tools/dispatch_specialist.py",
     "prior_art_comparator": "backend/src/agents/hermes/tools/prior_art_comparator.py",
+    "patent_drawing_generator": "backend/src/agents/hermes/tools/patent_drawing_generator.py",
     "patent_docx_generator": "backend/src/agents/hermes/tools/patent_docx_generator.py",
 }
 
@@ -4843,6 +4848,23 @@ async def export_workflow_patent_docx(task_id: str):
         filename=f"patent_{task_id}.docx",
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+
+
+@router.get("/workflows/{task_id}/artifacts/{artifact_path:path}")
+async def get_workflow_artifact(task_id: str, artifact_path: str):
+    """Serve generated workflow artifacts from the task export directory only."""
+    task_root = (_EXPORTS_ROOT / task_id).resolve()
+    artifact_file = (task_root / artifact_path).resolve()
+
+    try:
+        artifact_file.relative_to(task_root)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    if not artifact_file.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    return FileResponse(path=str(artifact_file))
 
 
 @router.post("/workflows/{task_id}/pause")

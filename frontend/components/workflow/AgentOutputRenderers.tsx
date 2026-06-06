@@ -27,7 +27,9 @@ import { useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { workflowApi } from '@/lib/api';
 import { getRetrievalPatentReferences } from '@/lib/retrieval-report';
+import type { PatentDrawing } from '@/types';
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -66,6 +68,37 @@ function downloadText(filename: string, content: string) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function normalizePatentDrawing(value: unknown, taskId: string): PatentDrawing | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const figureNumber = str(value.figure_number || value.figureNumber).trim();
+  const title = str(value.title).trim();
+  const description = str(value.description).trim();
+  const artifactPathOrUrl = str(value.artifact_url || value.artifactUrl).trim();
+  const artifactUrl = artifactPathOrUrl ? workflowApi.artifactUrl(taskId, artifactPathOrUrl) : '';
+
+  if (!figureNumber && !title && !description && !artifactUrl) {
+    return null;
+  }
+
+  return {
+    figure_number: figureNumber,
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(str(value.file_path).trim() ? { file_path: str(value.file_path).trim() } : {}),
+    ...(artifactUrl ? { artifact_url: artifactUrl } : {}),
+    ...(str(value.mime_type).trim() ? { mime_type: str(value.mime_type).trim() } : {}),
+  };
+}
+
+function drawingAltText(drawing: PatentDrawing): string {
+  return [drawing.figure_number, drawing.title, drawing.description]
+    .filter((part): part is string => Boolean(part))
+    .join('，');
 }
 
 // ─── 1. 需求分析视图 ────────────────────────────────────────────────────────
@@ -543,6 +576,9 @@ export function PatentDraftView({ data, taskId, title }: PatentDraftViewProps) {
   const claims = isRecord(parsedData.claims) ? parsedData.claims : {};
   const description = isRecord(parsedData.description) ? parsedData.description : {};
   const abstract = str(parsedData.abstract);
+  const drawings = arr(parsedData.drawings)
+    .map((drawing) => normalizePatentDrawing(drawing, taskId))
+    .filter((drawing): drawing is PatentDrawing => drawing !== null);
 
   const independentClaim = str(claims.independent_claim);
   const dependentClaims = arr(claims.dependent_claims).map((c) => str(c)).filter(Boolean);
@@ -568,9 +604,8 @@ export function PatentDraftView({ data, taskId, title }: PatentDraftViewProps) {
             variant="secondary"
             size="sm"
             onClick={() => {
-              const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
               const link = document.createElement('a');
-              link.href = `${apiBase}/workflows/${encodeURIComponent(taskId)}/export/docx`;
+              link.href = workflowApi.exportDocx(taskId);
               link.download = `${title || '专利申请文件'}.docx`;
               document.body.appendChild(link);
               link.click();
@@ -627,6 +662,56 @@ export function PatentDraftView({ data, taskId, title }: PatentDraftViewProps) {
           })}
         </div>
       </section>
+
+      {drawings.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-md">附图</h4>
+          <div className="grid gap-md md:grid-cols-2">
+            {drawings.map((drawing, index) => {
+              const imageUrl = drawing.artifact_url || drawing.artifactUrl || '';
+              const figureLabel = drawing.figure_number || `附图 ${index + 1}`;
+              const altText = drawingAltText(drawing) || figureLabel;
+
+              return (
+                <article key={`${figureLabel}-${index}`} className="border border-hairline rounded-lg overflow-hidden bg-surface">
+                  {imageUrl && (
+                    <a href={imageUrl} target="_blank" rel="noopener noreferrer" aria-label={`打开${figureLabel}附图`}>
+                      <div className="bg-surface-feature border-b border-hairline p-md">
+                        <img
+                          src={imageUrl}
+                          alt={altText}
+                          className="w-full max-h-[320px] object-contain rounded-lg bg-surface"
+                        />
+                      </div>
+                    </a>
+                  )}
+                  <div className="p-md space-y-sm">
+                    <div>
+                      <p className="text-body-sm-medium font-medium text-ink">{figureLabel}</p>
+                      {drawing.title && <p className="text-body-sm text-steel mt-xs">{drawing.title}</p>}
+                    </div>
+                    {drawing.description && (
+                      <p className="text-body-sm text-steel leading-relaxed">{drawing.description}</p>
+                    )}
+                    {imageUrl && (
+                      <a
+                        href={imageUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download
+                        className="inline-flex items-center gap-1 text-body-sm-medium font-medium text-brand-green-dark hover:underline"
+                      >
+                        <Download className="w-3 h-3" />
+                        打开 / 下载附图
+                      </a>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

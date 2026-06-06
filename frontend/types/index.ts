@@ -87,10 +87,21 @@ export interface Description {
   detailed_description: string;
 }
 
+export interface PatentDrawing {
+  figure_number: string;
+  title?: string;
+  description?: string;
+  file_path?: string;
+  artifact_url?: string;
+  artifactUrl?: string;
+  mime_type?: string;
+}
+
 export interface PatentDraft {
   claims: Claims;
   description: Description;
   abstract: string;
+  drawings?: PatentDrawing[];
   key_terms_dictionary: Record<string, string>;
 }
 

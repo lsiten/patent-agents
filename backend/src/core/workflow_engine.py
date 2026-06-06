@@ -1278,6 +1278,87 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 
         return issues[:10]  # 最多取10个问题
 
+    def _validate_patent_draft_completeness(self, draft: Dict[str, Any]) -> List[str]:
+        issues: List[str] = []
+
+        if not draft or not isinstance(draft, dict):
+            return ["patent_draft_missing"]
+        if draft.get("_agent_failed") is True:
+            issues.append("patent_draft_agent_failed")
+        if draft.get("_incomplete_output") is True:
+            issues.append("patent_draft_incomplete_output")
+
+        claims = draft.get("claims", {}) or {}
+        if not isinstance(claims, dict):
+            issues.append("claims_missing")
+            claims = {}
+
+        independent_claim = claims.get("independent_claim", "")
+        if not isinstance(independent_claim, str) or not independent_claim.strip():
+            issues.append("independent_claim_missing")
+
+        dependent_claims = claims.get("dependent_claims", [])
+        has_dependent_claim = False
+        if isinstance(dependent_claims, list):
+            has_dependent_claim = any(
+                isinstance(claim, str) and claim.strip()
+                for claim in dependent_claims
+            )
+        elif isinstance(dependent_claims, str):
+            has_dependent_claim = bool(dependent_claims.strip())
+        if not has_dependent_claim:
+            issues.append("dependent_claims_missing")
+
+        description = draft.get("description", {}) or {}
+        if not isinstance(description, dict):
+            issues.append("description_missing")
+            description = {}
+
+        for section_name in (
+            "technical_field",
+            "background_art",
+            "summary_of_invention",
+            "detailed_description",
+        ):
+            content = description.get(section_name, "")
+            if not isinstance(content, str) or not content.strip():
+                issues.append(f"description_{section_name}_missing")
+
+        abstract = draft.get("abstract", "") or ""
+        if not isinstance(abstract, str) or not abstract.strip():
+            issues.append("abstract_missing")
+
+        drawing_texts = (
+            description.get("drawings_description", ""),
+            description.get("description_of_drawings", ""),
+        )
+        drawings_expected = any(isinstance(text, str) and text.strip() for text in drawing_texts)
+        drawings_expected = drawings_expected or draft.get("drawings_expected") is True
+        drawings_expected = drawings_expected or draft.get("requires_drawings") is True
+
+        expected_drawings = draft.get("expected_drawings")
+        if isinstance(expected_drawings, int) and expected_drawings > 0:
+            drawings_expected = True
+        if isinstance(expected_drawings, list) and expected_drawings:
+            drawings_expected = True
+
+        drawings = draft.get("drawings", [])
+        has_drawing_artifact = False
+        if isinstance(drawings, list):
+            has_drawing_artifact = any(
+                isinstance(drawing, dict)
+                and bool(
+                    drawing.get("artifact_url")
+                    or drawing.get("artifactUrl")
+                    or drawing.get("file_path")
+                )
+                for drawing in drawings
+            )
+        if drawings_expected and not has_drawing_artifact:
+            issues.append("drawing_artifacts_missing")
+
+        return issues
+
     def _has_unresolved_critical_issues(self, context: WorkflowContext) -> bool:
         """检查工作流是否还有未解决的关键问题 (在 COMPLETED 之前的最后一道闸)
 
@@ -1287,27 +1368,8 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         这种情况必须以 FAILED 状态结束,而不是 COMPLETED,
         否则用户会看到一份"流程完成"的空专利文件。
         """
-        # 1) 检查 patent_draft 是否真的成功生成
-        draft = context.patent_draft
-        if not draft or not isinstance(draft, dict):
-            return True
-        if draft.get("_agent_failed") is True:
-            return True
-        if draft.get("_incomplete_output") is True:
-            return True
-
-        # 检查实际内容是否为空
-        claims = draft.get("claims", {}) or {}
-        description = draft.get("description", {}) or {}
-        abstract = draft.get("abstract", "") or ""
-        has_independent_claim = bool(claims.get("independent_claim", "").strip())
-        has_description_section = any(
-            isinstance(description.get(k), str) and description.get(k, "").strip()
-            for k in ("technical_field", "background_art", "summary_of_invention", "detailed_description")
-        )
-        has_abstract = bool(abstract.strip())
-        if not (has_independent_claim and has_description_section and has_abstract):
-            # 草稿缺乏最基本的内容,绝对不能 COMPLETED
+        draft_issues = self._validate_patent_draft_completeness(context.patent_draft)
+        if draft_issues:
             return True
 
         # 2) 检查 review_report 是否有未解决的 critical issue
@@ -1543,16 +1605,36 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         description_data = {}
         abstract_text = ""
         docx_path = ""
+        drawings_data = []
+
+        tool_call_names: Dict[str, str] = {}
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            for tool_call in msg.get("tool_calls", []) or []:
+                if not isinstance(tool_call, dict):
+                    continue
+                call_id = str(tool_call.get("id") or "")
+                function_data = tool_call.get("function", {})
+                function_name = ""
+                if isinstance(function_data, dict):
+                    function_name = str(function_data.get("name") or "")
+                function_name = function_name or str(tool_call.get("name") or "")
+                if call_id and function_name:
+                    tool_call_names[call_id] = function_name
         
         # 遍历消息历史查找工具调用结果
         for msg in messages:
             if isinstance(msg, dict) and msg.get("role") == "tool":
-                tool_name = msg.get("name", "")
+                tool_call_id = str(msg.get("tool_call_id") or "")
+                tool_name = str(msg.get("name") or tool_call_names.get(tool_call_id, ""))
                 try:
                     content_text = msg.get("content", "{}")
                     if isinstance(content_text, str) and "[TOOL_OUTPUT_SAVED_TO]:" in content_text:
                         content_text = content_text.split("[TOOL_OUTPUT_SAVED_TO]:", 1)[0].strip()
                     tool_content = json.loads(content_text)
+                    if not tool_name:
+                        tool_name = str(tool_content.get("tool") or "")
                     tool_data = tool_content.get("data", {})
                     
                     if tool_name == "claim_drafter" and tool_content.get("success"):
@@ -1576,6 +1658,12 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                         docx_path = tool_data.get("file_path", "")
                         abstract_text = tool_data.get("abstract", "") or abstract_text
                         self._logger.info(f"DOCX generated: {docx_path}")
+
+                    elif tool_name == "patent_drawing_generator" and tool_content.get("success"):
+                        drawings = tool_data.get("drawings", [])
+                        if isinstance(drawings, list):
+                            drawings_data.extend(item for item in drawings if isinstance(item, dict))
+                        self._logger.info(f"Got patent drawings: {len(drawings_data)} drawings")
                         
                 except (json.JSONDecodeError, KeyError) as e:
                     self._logger.warning(f"Failed to parse tool result: {e}")
@@ -1617,6 +1705,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 "detailed_description": description_data.get("detailed_description", ""),
             },
             "abstract": abstract_text,
+            "drawings": drawings_data,
             "docx_path": "",
             "full_response": final_response,
         }
@@ -2367,6 +2456,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         description_data: Dict[str, Any] = {}
         abstract_text = str(data.get("abstract") or "")
         docx_path = str(data.get("docx_path") or "")
+        drawings_data: List[Dict[str, Any]] = []
 
         for item in data.get("tool_results", []):
             if not isinstance(item, dict):
@@ -2409,6 +2499,10 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     or docx_path
                 )
                 abstract_text = str(tool_data.get("abstract") or tool_content.get("abstract") or abstract_text)
+            elif tool_name == "patent_drawing_generator" and tool_content.get("success"):
+                drawings = tool_data.get("drawings", [])
+                if isinstance(drawings, list):
+                    drawings_data.extend(item for item in drawings if isinstance(item, dict))
 
         has_content = bool(
             claims_data.get("independent_claim")
@@ -2431,6 +2525,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 "detailed_description": description_data.get("detailed_description", ""),
             },
             "abstract": abstract_text,
+            "drawings": drawings_data,
             "docx_path": docx_path,
             "full_response": str(data.get("message") or ""),
         }

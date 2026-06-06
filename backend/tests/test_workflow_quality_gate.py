@@ -257,6 +257,31 @@ class TestWorkflowCompletionGate:
     critical issues, the workflow must end in FAILED state, not COMPLETED.
     This is the user-facing manifestation of Bug #1."""
 
+    def _complete_draft(self) -> dict:
+        return {
+            "claims": {
+                "independent_claim": "1. 一种基于AI的图像分类方法，包括：步骤A；步骤B。",
+                "dependent_claims": ["2. 根据权利要求1所述的方法..."],
+            },
+            "description": {
+                "technical_field": "人工智能",
+                "background_art": "现有技术存在准确率低的问题。",
+                "summary_of_invention": "本发明提供一种...",
+                "drawings_description": "",
+                "detailed_description": "下面结合实施例详细说明...",
+            },
+            "abstract": "本发明公开了一种基于AI的图像分类方法。",
+            "docx_path": "",
+        }
+
+    def _context_with_draft(self, draft: dict):
+        from src.core.workflow_engine import WorkflowContext
+
+        ctx = WorkflowContext(task_id="test", user_id="test")
+        ctx.patent_draft = draft
+        ctx.review_report = _clean_review()
+        return ctx
+
     def test_final_state_failed_when_agent_failed(self):
         """If patent_draft has _agent_failed=True, the workflow should never
         reach COMPLETED with a .docx generated from empty content."""
@@ -281,6 +306,51 @@ class TestWorkflowCompletionGate:
         # should detect this and refuse to mark the workflow as complete.
         engine = PatentWorkflowEngine()
         assert engine._has_unresolved_critical_issues(ctx) is True
+
+    def test_partial_draft_no_dependent_claims_blocked(self):
+        """A complete application needs dependent claims, not only claim 1."""
+        draft = self._complete_draft()
+        draft["claims"]["dependent_claims"] = []
+
+        engine = PatentWorkflowEngine()
+        assert engine._has_unresolved_critical_issues(self._context_with_draft(draft)) is True
+
+    @pytest.mark.parametrize(
+        "section_name",
+        ["technical_field", "background_art", "summary_of_invention", "detailed_description"],
+    )
+    def test_partial_draft_missing_core_description_section_blocked(self, section_name):
+        """Every core specification section must be present before completion."""
+        draft = self._complete_draft()
+        draft["description"][section_name] = ""
+
+        engine = PatentWorkflowEngine()
+        assert engine._has_unresolved_critical_issues(self._context_with_draft(draft)) is True
+
+    def test_partial_draft_declares_drawings_but_has_no_drawing_artifacts_blocked(self):
+        """If the draft says drawings are needed, metadata/artifacts must exist."""
+        draft = self._complete_draft()
+        draft["description"]["drawings_description"] = "图1为系统结构示意图。"
+        draft["drawings"] = []
+
+        engine = PatentWorkflowEngine()
+        assert engine._has_unresolved_critical_issues(self._context_with_draft(draft)) is True
+
+    def test_complete_draft_with_declared_drawings_allows_complete(self):
+        """Declared drawings are complete when at least one safe artifact URL is present."""
+        draft = self._complete_draft()
+        draft["description"]["drawings_description"] = "图1为系统结构示意图。"
+        draft["drawings"] = [
+            {
+                "figure_number": "图1",
+                "title": "系统结构示意图",
+                "description": "图1为系统结构示意图。",
+                "artifact_url": "/api/v1/workflows/test/artifacts/draft/drawings/fig1.png",
+            }
+        ]
+
+        engine = PatentWorkflowEngine()
+        assert engine._has_unresolved_critical_issues(self._context_with_draft(draft)) is False
 
     def test_writer_succeeded_review_passed_allow_complete(self):
         """If writer produced real content AND review passed, gate should NOT block."""

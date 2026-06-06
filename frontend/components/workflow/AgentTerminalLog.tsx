@@ -220,6 +220,10 @@ function LogEntryContent({ entry }: { entry: AgentLogEntry }) {
   }
 }
 
+function entryMatchesAgent(entry: AgentLogEntry, agentName: string): boolean {
+  return entry.agent_name === agentName || entry.dispatch_to === agentName;
+}
+
 interface AgentTerminalLogProps {
   entries: AgentLogEntry[];
   className?: string;
@@ -234,6 +238,7 @@ export function AgentTerminalLog({ entries, className }: AgentTerminalLogProps) 
     const names = new Set<string>();
     for (const entry of entries) {
       if (entry.agent_name) names.add(entry.agent_name);
+      if (entry.dispatch_to) names.add(entry.dispatch_to);
     }
     return Array.from(names);
   }, [entries]);
@@ -241,7 +246,7 @@ export function AgentTerminalLog({ entries, className }: AgentTerminalLogProps) 
   // 过滤后的日志
   const filteredEntries = useMemo(() => {
     if (activeFilter === 'all') return entries;
-    return entries.filter((e) => e.agent_name === activeFilter);
+    return entries.filter((entry) => entryMatchesAgent(entry, activeFilter));
   }, [entries, activeFilter]);
 
   // 自动滚动到底部

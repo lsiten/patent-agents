@@ -328,22 +328,35 @@ class ImageGenSettings(BaseSettings):
 
     def resolve_config(
         self, llm_settings: "LLMSettings",
-    ) -> dict:
+    ) -> Dict[str, Any]:
         """
         解析最终的生图配置。
         生图已配置 → 返回生图配置
         生图未配置 → 回退到文字 LLM 配置（base_url + api_key + 默认图片模型 ID）
         """
-        if self.is_configured():
-            return self.get_provider_config()
-        # Fallback: 用文字 LLM 当前激活的供应商
+        return self.resolve_with_llm_fallback(llm_settings)
+
+    def resolve_with_llm_fallback(
+        self,
+        llm_settings: "LLMSettings",
+        overrides: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        解析最终生图配置。
+
+        生图配置存在 api_key 时优先使用生图配置；否则使用当前 LLM 配置的
+        base_url/api_key，并指定默认图片模型，避免工具直接读取环境变量。
+        """
+        image_config = self.resolve_for_agent(overrides)
+        if image_config.get("api_key"):
+            return image_config
+
         llm_provider = llm_settings.get_provider_config()
-        llm_base_url = llm_provider.get("base_url") or ""
-        # OpenAI-compatible base url → 拼接 /images/generations 路径
         return {
-            "base_url": llm_base_url,
+            "provider": llm_settings.active_provider if llm_settings.active_provider in TEXT_LLM_PROVIDERS else "openai",
+            "base_url": llm_provider.get("base_url") or "",
             "api_key": llm_provider.get("api_key"),
-            "model_id": "gpt-image-2",  # 回退时的默认图片模型
+            "model_id": "gpt-image-2",
         }
 
 

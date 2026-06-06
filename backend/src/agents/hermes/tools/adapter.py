@@ -253,6 +253,13 @@ def _handle_patent_docx_generator(args: Dict[str, Any], **kw) -> str:
     return _json_result(result)
 
 
+def _handle_patent_drawing_generator(args: Dict[str, Any], **kw) -> str:
+    from src.agents.hermes.tools.patent_drawing_generator import PatentDrawingGeneratorTool
+    tool = PatentDrawingGeneratorTool()
+    result = _run_async(tool.execute(**args))
+    return _json_result(result)
+
+
 def _handle_prior_art_comparator(args: Dict[str, Any], **kw) -> str:
     from src.agents.hermes.tools.prior_art_comparator import PriorArtComparatorTool
     tool = PriorArtComparatorTool()
@@ -661,6 +668,37 @@ PATENT_TOOL_DEFINITIONS = [
         },
         "handler": _handle_dispatch_specialist,
         "emoji": "🎯",
+    },
+    {
+        "name": "patent_drawing_generator",
+        "schema": {
+            "name": "patent_drawing_generator",
+            "description": "根据技术方案生成专利说明书附图，使用系统配置的生图/LLM配置并返回附图元数据。需要附图时在生成DOCX前调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tech_description": {
+                        "type": "string",
+                        "description": "需要绘制为专利附图的技术方案、系统结构或流程描述",
+                    },
+                    "task_id": {
+                        "type": "string",
+                        "description": "任务ID，用于将附图保存到对应工作流导出目录",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "附图标题，例如：系统结构示意图、方法流程图",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "附图说明文本，可用于前端展示和说明书附图说明",
+                    },
+                },
+                "required": ["tech_description", "task_id"],
+            },
+        },
+        "handler": _handle_patent_drawing_generator,
+        "emoji": "🖼️",
     },
     {
         "name": "patent_docx_generator",
