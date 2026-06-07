@@ -71,7 +71,9 @@ def _load_system_defaults() -> Dict[str, Any]:
     if config_path.exists():
         try:
             with open(config_path, "r", encoding="utf-8") as f:
-                _system_defaults = yaml.safe_load(f) or {}
+                raw = yaml.safe_load(f) or {}
+                # 展开环境变量引用
+                _system_defaults = _expand_env(raw)
                 logger.info(f"Loaded system defaults from {config_path}")
         except Exception as e:
             logger.warning(f"Failed to load system defaults: {e}")

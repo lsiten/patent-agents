@@ -53,7 +53,7 @@ function getEventMessage(event: AgentEvent): string {
 }
 
 export function AgentActivityLog({ events, className = '' }: AgentActivityLogProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

@@ -4,7 +4,8 @@ import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'rea
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Send, Bot, User, Sparkles, FileText, Loader2, Plus, Trash2,
-  MessageSquare, ChevronRight, AlertCircle, CheckCircle2, Clock, Paperclip, X, Copy, Search
+  MessageSquare, ChevronRight, AlertCircle, CheckCircle2, Clock, Paperclip, X, Copy, Search,
+  ChevronDown
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -49,6 +50,64 @@ function createLocalChatMessage(
     timestamp: new Date().toISOString(),
     ...options,
   };
+}
+
+interface ParsedMessageContent {
+  conclusion: string;
+  interaction: string;
+}
+
+function parseMessageContent(content: string): ParsedMessageContent {
+  const lines = content.split('\n');
+  const interactionLines: string[] = [];
+  const conclusionLines: string[] = [];
+  
+  for (const line of lines) {
+    if (line.trim().startsWith('[ASSISTANT:]') || line.trim().startsWith('[USER:]')) {
+      interactionLines.push(line);
+    } else {
+      conclusionLines.push(line);
+    }
+  }
+  
+  return {
+    conclusion: conclusionLines.join('\n').trim(),
+    interaction: interactionLines.join('\n').trim(),
+  };
+}
+
+interface InteractionPanelProps {
+  interaction: string;
+}
+
+function InteractionPanel({ interaction }: InteractionPanelProps) {
+  const [expanded, setExpanded] = useState(false);
+  
+  return (
+    <div className="mt-2 rounded-xl border border-hairline bg-surface/70">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
+        aria-expanded={expanded}
+      >
+        {expanded ? (
+          <ChevronDown className="w-3.5 h-3.5 text-slate" />
+        ) : (
+          <ChevronRight className="w-3.5 h-3.5 text-slate" />
+        )}
+        <span className="text-xs font-medium text-slate">查看交互过程</span>
+      </button>
+      
+      {expanded && (
+        <div className="border-t border-hairline px-3 pb-3">
+          <pre className="text-xs text-slate/80 whitespace-pre-wrap bg-canvas rounded-lg p-3 mt-2 max-h-64 overflow-y-auto">
+            {interaction}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ChatPageContent() {
@@ -368,7 +427,9 @@ function ChatPageContent() {
     let isAutoAnalysis = false;
     if (pendingFile) {
       try {
-        fileUpload = await uploadPendingFile();
+        // 如果用户有输入文字内容，传递 false 避免在 uploadPendingFile 中创建消息
+        // 消息将在下方统一创建，包含文件信息和文字内容
+        fileUpload = await uploadPendingFile(!content);
       } catch {
         sendingRef.current = false;
         return;
@@ -706,7 +767,7 @@ function ChatPageContent() {
     setPendingFile(file);
   };
 
-  const uploadPendingFile = async (): Promise<{
+  const uploadPendingFile = async (appendMessage = true): Promise<{
     messageId: string;
     metadata: Record<string, unknown>;
     charCount: number;
@@ -733,13 +794,17 @@ function ChatPageContent() {
 
       const result = await conversationApi.uploadDisclosure(convId, file);
 
-      appendFileMessage(`文件已解析：${result.filename} · ${result.char_count} 字符`, {
-        filename: result.filename,
-        file_type: result.file_type,
-        file_size: result.file_size,
-        char_count: result.char_count,
-        ...(result.metadata || {}),
-      });
+      // 仅当用户没有输入文字内容时才创建文件消息
+      // 如果有文字内容，将由 handleSend 合并成一条消息
+      if (appendMessage) {
+        appendFileMessage(`文件已解析：${result.filename} · ${result.char_count} 字符`, {
+          filename: result.filename,
+          file_type: result.file_type,
+          file_size: result.file_size,
+          char_count: result.char_count,
+          ...(result.metadata || {}),
+        });
+      }
       setPendingFile(null);
       return {
         messageId: result.message_id,
@@ -1097,121 +1162,197 @@ function ChatPageContent() {
                   return acc;
                 }
 
-                acc.push(
-                  <div
-                    key={msg.id}
-                    data-testid={msg.type === 'file' ? 'chat-file-message' : `chat-message-${msg.role}`}
-                    className={clsx(
-                      'flex gap-3',
-                      msg.role === 'user' ? 'justify-end' : 'justify-start'
-                    )}
-                  >
-                    {msg.role === 'assistant' && (
-                      <div className="flex-shrink-0 mt-1">
-                        <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
-                          <Bot className="w-4.5 h-4.5 text-ink" />
-                        </div>
-                      </div>
-                    )}
-
-                    <div className={clsx(msg.role === 'user' ? 'order-1 max-w-[680px]' : 'order-1 max-w-[760px]')}>
-                      {msg.type === 'file' && !msg.content ? (
-                        <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-hairline bg-canvas text-sm text-ink">
-                          <FileText className="w-4 h-4 text-slate-600 flex-shrink-0" />
-                          <span className="font-medium truncate max-w-[240px]">
-                            {(msg.metadata?.filename as string) || '上传文件'}
-                          </span>
-                          <span className="text-xs text-slate/70 flex-shrink-0">
-                            {((msg.metadata?.file_size as number) || 0) > 0
-                              ? `${Math.round(((msg.metadata?.file_size as number) || 0) / 1024)} KB`
-                              : ''}
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="relative group">
-                          <div
-                            className={clsx(
-                              'rounded-2xl text-sm leading-relaxed shadow-sm',
-                              msg.role === 'user'
-                                ? 'bg-brand-green text-ink rounded-br-md'
-                                : 'border border-hairline bg-canvas rounded-bl-md'
-                            )}
-                          >
-                            {msg.type === 'file' && (
-                              <div className="flex items-center gap-2 px-3.5 pt-2.5 pb-1.5 text-xs border-b border-ink/15">
-                                <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                                <span className="font-medium truncate">
-                                  {(msg.metadata?.filename as string) || '上传文件'}
-                                </span>
-                                <span className="flex-shrink-0 opacity-80">
-                                  {((msg.metadata?.file_size as number) || 0) > 0
-                                    ? `${Math.round(((msg.metadata?.file_size as number) || 0) / 1024)} KB`
-                                    : ''}
-                                </span>
-                              </div>
-                            )}
-                            <div className={clsx('px-3.5 py-2.5', msg.role === 'user' ? 'whitespace-pre-wrap' : 'prose prose-sm max-w-none')}>
-                              {msg.isStreaming && !msg.content ? (
-                                <div className="flex items-center gap-1.5 text-slate">
-                                  <span>思考中</span>
-                                  <span className="thinking-dot" />
-                                  <span className="thinking-dot" />
-                                  <span className="thinking-dot" />
-                                </div>
-                              ) : msg.role === 'user' ? (
-                                msg.content
-                              ) : (
-                                <div className={msg.isStreaming ? 'streaming-text streaming-cursor' : 'streaming-text'}>
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                                    {msg.content}
-                                  </ReactMarkdown>
-                                </div>
-                              )}
-                              {msg.role === 'assistant' && (msg.tool_calls?.length || msg.skill_uses?.length) ? (
-                                <ToolCallCard
-                                  toolCalls={msg.tool_calls}
-                                  skillUses={msg.skill_uses}
-                                  isStreaming={msg.isStreaming}
-                                />
-                              ) : null}
+                {(() => {
+                  // 对于 assistant 消息，解析内容判断是否需要显示消息容器
+                  const parsedContent = msg.role === 'assistant' && !msg.isStreaming ? parseMessageContent(msg.content) : null;
+                  const hasConclusion = !parsedContent || parsedContent.conclusion;
+                  const hasInteraction = parsedContent?.interaction;
+                  const hasEmptyContent = !msg.content || !msg.content.trim();
+                  
+                  // 如果消息内容完全为空，不显示消息容器
+                  if (msg.role === 'assistant' && !msg.isStreaming && hasEmptyContent) {
+                    // 如果有活动日志，仍然显示活动日志
+                    if (msg.agent_events && msg.agent_events.length > 0) {
+                      acc.push(
+                        <div
+                          key={msg.id}
+                          data-testid="chat-message-assistant-empty"
+                          className="flex gap-3 justify-start"
+                        >
+                          <div className="flex-shrink-0 mt-1">
+                            <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
+                              <Bot className="w-4.5 h-4.5 text-ink" />
                             </div>
                           </div>
-                          {msg.role === 'assistant' && !msg.isStreaming && msg.content && (
-                            <button
-                              onClick={() => handleCopy(msg.id, msg.content)}
-                              className="absolute -top-2 right-2 p-1 rounded-md bg-white border border-hairline shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-slate-50"
-                              title="复制消息"
-                              aria-label="复制消息"
-                            >
-                              {copiedId === msg.id ? (
-                                <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5 text-slate-500" />
-                              )}
-                            </button>
-                          )}
+                          <div className="order-1 max-w-[760px]">
+                            <AgentActivityLog events={msg.agent_events} className="-mx-1 mt-2" />
+                            <p className="text-[11px] text-slate/60 mt-1 px-1">
+                              {new Date(msg.timestamp).toLocaleTimeString('zh-CN', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </p>
+                          </div>
                         </div>
-                      )}
-                      {msg.role === 'assistant' && msg.agent_events && msg.agent_events.length > 0 && (
-                        <AgentActivityLog events={msg.agent_events} className="-mx-1 mt-2" />
-                      )}
-                      <p className="text-[11px] text-slate/60 mt-1 px-1">
-                        {new Date(msg.timestamp).toLocaleTimeString('zh-CN', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </p>
-                    </div>
-
-                    {msg.role === 'user' && (
-                      <div className="flex-shrink-0 mt-1">
-                        <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center">
-                          <User className="w-4.5 h-4.5 text-slate-600" />
+                      );
+                    }
+                    return acc;
+                  }
+                  
+                  // 如果没有结论但有交互过程，只显示交互面板和活动日志
+                  if (msg.role === 'assistant' && !msg.isStreaming && !hasConclusion && hasInteraction) {
+                    acc.push(
+                      <div
+                        key={msg.id}
+                        data-testid="chat-message-assistant-interaction-only"
+                        className="flex gap-3 justify-start"
+                      >
+                        <div className="flex-shrink-0 mt-1">
+                          <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
+                            <Bot className="w-4.5 h-4.5 text-ink" />
+                          </div>
+                        </div>
+                        <div className="order-1 max-w-[760px]">
+                          <InteractionPanel interaction={parsedContent.interaction} />
+                          {msg.agent_events && msg.agent_events.length > 0 && (
+                            <AgentActivityLog events={msg.agent_events} className="-mx-1 mt-2" />
+                          )}
+                          <p className="text-[11px] text-slate/60 mt-1 px-1">
+                            {new Date(msg.timestamp).toLocaleTimeString('zh-CN', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </p>
                         </div>
                       </div>
-                    )}
-                  </div>
-                );
+                    );
+                    return acc;
+                  }
+                  
+                  // 正常消息渲染
+                  acc.push(
+                    <div
+                      key={msg.id}
+                      data-testid={msg.type === 'file' ? 'chat-file-message' : `chat-message-${msg.role}`}
+                      className={clsx(
+                        'flex gap-3',
+                        msg.role === 'user' ? 'justify-end' : 'justify-start'
+                      )}
+                    >
+                      {msg.role === 'assistant' && (
+                        <div className="flex-shrink-0 mt-1">
+                          <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
+                            <Bot className="w-4.5 h-4.5 text-ink" />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className={clsx(msg.role === 'user' ? 'order-1 max-w-[680px]' : 'order-1 max-w-[760px]')}>
+                        {msg.type === 'file' && !msg.content ? (
+                          <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-hairline bg-canvas text-sm text-ink">
+                            <FileText className="w-4 h-4 text-slate-600 flex-shrink-0" />
+                            <span className="font-medium truncate max-w-[240px]">
+                              {(msg.metadata?.filename as string) || '上传文件'}
+                            </span>
+                            <span className="text-xs text-slate/70 flex-shrink-0">
+                              {((msg.metadata?.file_size as number) || 0) > 0
+                                ? `${Math.round(((msg.metadata?.file_size as number) || 0) / 1024)} KB`
+                                : ''}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="relative group">
+                            <div
+                              className={clsx(
+                                'rounded-2xl text-sm leading-relaxed shadow-sm',
+                                msg.role === 'user'
+                                  ? 'bg-brand-green text-ink rounded-br-md'
+                                  : 'border border-hairline bg-canvas rounded-bl-md'
+                              )}
+                            >
+                              {msg.type === 'file' && (
+                                <div className="flex items-center gap-2 px-3.5 pt-2.5 pb-1.5 text-xs border-b border-ink/15">
+                                  <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                                  <span className="font-medium truncate">
+                                    {(msg.metadata?.filename as string) || '上传文件'}
+                                  </span>
+                                  <span className="flex-shrink-0 opacity-80">
+                                    {((msg.metadata?.file_size as number) || 0) > 0
+                                      ? `${Math.round(((msg.metadata?.file_size as number) || 0) / 1024)} KB`
+                                      : ''}
+                                  </span>
+                                </div>
+                              )}
+                              <div className={clsx('px-3.5 py-2.5', msg.role === 'user' ? 'whitespace-pre-wrap' : 'prose prose-sm max-w-none')}>
+                                {msg.isStreaming && !msg.content ? (
+                                  <div className="flex items-center gap-1.5 text-slate">
+                                    <span>思考中</span>
+                                    <span className="thinking-dot" />
+                                    <span className="thinking-dot" />
+                                    <span className="thinking-dot" />
+                                  </div>
+                                ) : msg.role === 'user' ? (
+                                  msg.content
+                                ) : (
+                                  <>
+                                    <div className={msg.isStreaming ? 'streaming-text streaming-cursor' : 'streaming-text'}>
+                                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                                        {msg.isStreaming ? msg.content : (parsedContent?.conclusion || msg.content)}
+                                      </ReactMarkdown>
+                                    </div>
+                                    {msg.role === 'assistant' && (msg.tool_calls?.length || msg.skill_uses?.length) ? (
+                                      <ToolCallCard
+                                        toolCalls={msg.tool_calls}
+                                        skillUses={msg.skill_uses}
+                                        isStreaming={msg.isStreaming}
+                                      />
+                                    ) : null}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            {msg.role === 'assistant' && !msg.isStreaming && msg.content && (
+                              <button
+                                onClick={() => handleCopy(msg.id, msg.content)}
+                                className="absolute -top-2 right-2 p-1 rounded-md bg-white border border-hairline shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-slate-50"
+                                title="复制消息"
+                                aria-label="复制消息"
+                              >
+                                {copiedId === msg.id ? (
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5 text-slate-500" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {/* 交互过程展开面板 */}
+                        {msg.role === 'assistant' && !msg.isStreaming && msg.content && hasInteraction && (
+                          <InteractionPanel interaction={parsedContent!.interaction} />
+                        )}
+                        {msg.role === 'assistant' && msg.agent_events && msg.agent_events.length > 0 && (
+                          <AgentActivityLog events={msg.agent_events} className="-mx-1 mt-2" />
+                        )}
+                        <p className="text-[11px] text-slate/60 mt-1 px-1">
+                          {new Date(msg.timestamp).toLocaleTimeString('zh-CN', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </p>
+                      </div>
+
+                      {msg.role === 'user' && (
+                        <div className="flex-shrink-0 mt-1">
+                          <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center">
+                            <User className="w-4.5 h-4.5 text-slate-600" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                  return acc;
+                })()}
                 return acc;
               }, [])
             )}

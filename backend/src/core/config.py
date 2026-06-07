@@ -43,7 +43,7 @@ class Environment(str, Enum):
 
 
 # ── 所有已知供应商列表（用于校验等） ──
-TEXT_LLM_PROVIDERS = {"openai", "anthropic", "spark"}
+TEXT_LLM_PROVIDERS = {"openai", "anthropic", "spark", "openai-spark"}
 IMAGE_GEN_PROVIDERS = {"azure_aoai", "openai"}
 
 
@@ -160,6 +160,24 @@ class LLMSettings(BaseSettings):
     def get_provider_config(self, provider: Optional[str] = None) -> dict:
         """获取指定供应商（或当前激活供应商）的连接配置"""
         p = provider or self.active_provider
+        
+        # openai-spark: 使用 OpenAI 格式调用讯飞星火
+        if p == "openai-spark":
+            spark_api_key = getattr(self, "spark_api_key", None)
+            spark_api_secret = getattr(self, "spark_api_secret", None)
+            if spark_api_key and spark_api_secret:
+                combined_key = f"{spark_api_key}:{spark_api_secret}"
+            elif spark_api_key:
+                combined_key = spark_api_key
+            else:
+                combined_key = None
+            return {
+                "provider": "openai",  # 返回 openai 作为 provider
+                "base_url": getattr(self, "spark_base_url", "https://spark-api-open.xf-yun.com/v1"),
+                "api_key": combined_key,
+                "model_id": getattr(self, "spark_model", "lite"),
+            }
+        
         if p not in TEXT_LLM_PROVIDERS:
             p = "openai"
         

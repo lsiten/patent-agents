@@ -30,8 +30,13 @@ memory:
 # 字段：provider / base_url / api_key / model(或 model_id)
 # 缺失时回退全局 LLMSettings / ImageGenSettings 的 active_provider。
 # 配置优先级（高→低）：runtime override > agent yaml > system-config 默认 > 全局
+#
+# 使用 LLM_AGENT_PROVIDER 环境变量控制：
+# - openai-spark: 使用 OpenAI 格式调用讯飞星火（推荐）
+# - openai: 使用 OpenAI
+# - anthropic: 使用 Anthropic Claude
 llm:
-  provider: openai
+  provider: ${LLM_AGENT_PROVIDER}
 
 image_gen:
   provider: azure_aoai

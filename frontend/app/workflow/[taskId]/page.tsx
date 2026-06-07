@@ -79,8 +79,32 @@ function getAgentStatus(
   workflow: WorkflowResponse | null
 ): AgentInfo['status'] {
   if (!workflow) return 'idle';
-  if (workflow.current_state === 'failed' || workflow.current_state === 'cancelled') {
-    return agentState === currentState ? 'error' : 'idle';
+  
+  // 映射 agentState 到 phase 名称（注意：API 返回的 phase 名称）
+  const stateToPhase: Record<WorkflowState, string> = {
+    initial: 'brainstorming',
+    requirement: 'requirement',
+    retrieval: 'retrieval',
+    writing: 'writing',
+    reviewing: 'review',
+    completed: 'completed',
+  };
+  
+  const agentPhase = stateToPhase[agentState];
+  
+  // 检查 phase_history 中是否有该阶段的记录
+  const phaseResult = workflow.phase_history.find(
+    (phase) => phase.phase === agentPhase
+  );
+  
+  // 如果有历史记录，根据实际结果返回状态
+  if (phaseResult) {
+    return phaseResult.success ? 'completed' : 'error';
+  }
+  
+  // 如果工作流已终止且没有该阶段记录，返回 idle
+  if (terminalStates.has(workflow.current_state)) {
+    return 'idle';
   }
 
   const currentIndex = workflowSteps.findIndex((step) => step.state === currentState);
@@ -396,8 +420,35 @@ export default function WorkflowPage() {
 
   const currentState = getWorkflowState(workflow);
   const currentStepIndex = useMemo(() => {
+    if (!workflow) return -1;
+    
+    // 如果工作流已终止（失败/取消/完成），根据 phase_history 确定实际完成的步骤
+    if (terminalStates.has(workflow.current_state)) {
+      // 找到最后一个成功完成的阶段
+      const stateToPhase: Record<WorkflowState, string> = {
+        initial: 'brainstorming',
+        requirement: 'requirement',
+        retrieval: 'retrieval',
+        writing: 'writing',
+        reviewing: 'review',
+        completed: 'completed',
+      };
+      
+      // 按顺序检查每个阶段是否完成
+      for (let i = workflowSteps.length - 1; i >= 0; i--) {
+        const step = workflowSteps[i];
+        const phaseName = stateToPhase[step.state];
+        const phaseResult = workflow.phase_history.find(p => p.phase === phaseName);
+        if (phaseResult && phaseResult.success) {
+          return i;
+        }
+      }
+      return -1;
+    }
+    
+    // 正常运行中的工作流，使用原来的逻辑
     return workflowSteps.findIndex((step) => step.state === currentState);
-  }, [currentState]);
+  }, [currentState, workflow]);
   const agents = useMemo(() => createAgents(currentState, workflow), [currentState, workflow]);
   const historyLogs = useMemo(() => createHistoryLogs(workflow, taskId), [workflow, taskId]);
   // SSE事件优先；如果有实时事件则只用SSE数据（更详细），否则用历史回放
