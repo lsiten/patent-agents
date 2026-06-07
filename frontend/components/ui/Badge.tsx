@@ -9,11 +9,13 @@ export type BadgeVariant =
   | 'green-soft'
   | 'purple'
   | 'orange'
+  | 'red'
+  | 'red-soft'
   | 'popular'
   | 'gray'
   | 'soft';
 
-export type BadgeColor = 'green' | 'blue' | 'purple' | 'orange' | 'slate' | 'gray';
+export type BadgeColor = 'green' | 'blue' | 'purple' | 'orange' | 'red' | 'slate' | 'gray';
 
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   variant?: BadgeVariant;
@@ -25,6 +27,8 @@ const variantStyles: Record<BadgeVariant, string> = {
   'green-soft': 'bg-brand-green-soft text-brand-green-dark rounded-full px-2.5 py-1',
   purple: 'bg-accent-purple text-on-dark rounded-sm px-2 py-0.5',
   orange: 'bg-accent-orange text-on-dark rounded-sm px-2 py-0.5',
+  red: 'bg-red-500 text-white rounded-sm px-2 py-0.5',
+  'red-soft': 'bg-red-100 text-red-700 rounded-full px-2.5 py-1',
   popular: 'bg-brand-teal-deep text-brand-green rounded-full px-2.5 py-1',
   gray: 'bg-hairline-soft text-steel rounded-sm px-2 py-0.5',
   soft: 'rounded-full px-2.5 py-1',
@@ -35,6 +39,7 @@ const softColorStyles: Record<BadgeColor, string> = {
   blue: 'bg-blue-100 text-blue-700',
   purple: 'bg-purple-100 text-purple-700',
   orange: 'bg-orange-100 text-orange-700',
+  red: 'bg-red-100 text-red-700',
   slate: 'bg-slate-100 text-slate-700',
   gray: 'bg-gray-100 text-gray-700',
 };

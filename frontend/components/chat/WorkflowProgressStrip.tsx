@@ -39,7 +39,7 @@ const STAGES: Array<{
     id: 'brainstorm',
     label: '头脑风暴',
     icon: Lightbulb,
-    matchStates: ['brainstorming'],
+    matchStates: ['brainstorm', 'brainstorming'],
   },
   {
     id: 'requirement',
@@ -63,7 +63,7 @@ const STAGES: Array<{
     id: 'review',
     label: '质量审查',
     icon: CheckCircle2,
-    matchStates: ['reviewing', 'quality_review', 'iteration'],
+    matchStates: ['review', 'reviewing', 'quality_review', 'iteration'],
   },
 ];
 
@@ -90,6 +90,26 @@ function resolveStageIndex(
     }
   }
 
+  // 找到最后一个完成的阶段索引
+  let lastCompletedIndex = -1;
+  for (let i = STAGES.length - 1; i >= 0; i--) {
+    const stage = STAGES[i];
+    if (stage.matchStates.some((m) => completedSet.has(m))) {
+      lastCompletedIndex = i;
+      break;
+    }
+  }
+
+  // 如果有完成的阶段，那么该阶段之前的所有阶段都应该被视为已完成（顺序执行）
+  if (lastCompletedIndex >= 0) {
+    for (let i = 0; i <= lastCompletedIndex; i++) {
+      const stage = STAGES[i];
+      for (const state of stage.matchStates) {
+        completedSet.add(state);
+      }
+    }
+  }
+
   let activeIndex = STAGES.findIndex((s) =>
     s.matchStates.includes(currentState ?? '')
   );
@@ -97,10 +117,7 @@ function resolveStageIndex(
     if (currentState === 'completed') {
       activeIndex = STAGES.length;
     } else if (currentState === 'failed' || currentState === 'cancelled') {
-      activeIndex = STAGES.findIndex((s) =>
-        s.matchStates.some((m) => completedSet.has(m))
-      );
-      if (activeIndex === -1) activeIndex = 0;
+      activeIndex = lastCompletedIndex !== -1 ? lastCompletedIndex + 1 : 0;
     } else {
       activeIndex = 0;
     }
@@ -268,7 +285,7 @@ export function WorkflowProgressStrip({
                 {taskId && latestState === 'failed' && (
                   <span className="inline-flex items-center gap-1 text-[11px] text-red-600">
                     <XCircle className="w-3 h-3" />
-                    失败
+                    流程失败
                   </span>
                 )}
                 {taskId && latestState === 'cancelled' && (
@@ -350,7 +367,8 @@ export function WorkflowProgressStrip({
             {taskId && (
               <div className="flex items-center gap-1 mt-3 pt-3 border-t border-hairline/60">
                 {STAGES.map((stage, idx) => {
-                  const isCompleted = idx < activeIndex;
+                  // 检查该阶段是否完成
+                  const isCompleted = stage.matchStates.some((m) => completedSet.has(m));
                   const isActive = idx === activeIndex && !isTerminal && !isInitial;
                   const Icon = stage.icon;
 

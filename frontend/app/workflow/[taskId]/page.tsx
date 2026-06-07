@@ -44,10 +44,15 @@ const workflowSteps: { state: WorkflowState; label: string; icon: typeof Brain }
 const stateMap: Record<string, WorkflowState> = {
   initialized: 'initial',
   brainstorming: 'initial',
+  brainstorm: 'initial',
   requirement_analysis: 'requirement',
+  requirement: 'requirement',
   retrieval_analysis: 'retrieval',
+  retrieval: 'retrieval',
   patent_writing: 'writing',
+  writing: 'writing',
   quality_review: 'reviewing',
+  review: 'reviewing',
   iteration: 'reviewing',
   completed: 'completed',
   failed: 'failed',
@@ -56,10 +61,15 @@ const stateMap: Record<string, WorkflowState> = {
 
 const phaseAgentMap: Record<string, string> = {
   brainstorming: '专利头脑风暴 Agent',
+  brainstorm: '专利头脑风暴 Agent',
   requirement_analysis: '需求分析 Agent',
+  requirement: '需求分析 Agent',
   retrieval_analysis: '检索分析 Agent',
+  retrieval: '检索分析 Agent',
   patent_writing: '专利撰写 Agent',
+  writing: '专利撰写 Agent',
   quality_review: '质量审查 Agent',
+  review: '质量审查 Agent',
 };
 
 const terminalStates = new Set(['completed', 'failed', 'cancelled']);
@@ -424,23 +434,25 @@ export default function WorkflowPage() {
     
     // 如果工作流已终止（失败/取消/完成），根据 phase_history 确定实际完成的步骤
     if (terminalStates.has(workflow.current_state)) {
-      // 找到最后一个成功完成的阶段
-      const stateToPhase: Record<WorkflowState, string> = {
-        initial: 'brainstorming',
-        requirement: 'requirement',
-        retrieval: 'retrieval',
-        writing: 'writing',
-        reviewing: 'review',
-        completed: 'completed',
-      };
+      // 找到最后一个成功完成的阶段（允许所有可能的 phase 值）
+      const phaseChecks: Array<{ state: WorkflowState; phases: string[] }> = [
+        { state: 'initial', phases: ['brainstorming', 'brainstorm'] },
+        { state: 'requirement', phases: ['requirement', 'requirement_analysis'] },
+        { state: 'retrieval', phases: ['retrieval', 'retrieval_analysis'] },
+        { state: 'writing', phases: ['writing', 'patent_writing'] },
+        { state: 'reviewing', phases: ['review', 'reviewing', 'quality_review', 'iteration'] },
+      ];
       
-      // 按顺序检查每个阶段是否完成
-      for (let i = workflowSteps.length - 1; i >= 0; i--) {
-        const step = workflowSteps[i];
-        const phaseName = stateToPhase[step.state];
-        const phaseResult = workflow.phase_history.find(p => p.phase === phaseName);
-        if (phaseResult && phaseResult.success) {
-          return i;
+      // 从后往前找最后一个完成的阶段
+      for (let i = phaseChecks.length - 1; i >= 0; i--) {
+        const { state, phases } = phaseChecks[i];
+        const phaseResult = workflow.phase_history.find(p => phases.includes(p.phase) && p.success);
+        if (phaseResult) {
+          // 找到该 state 在 workflowSteps 中的索引
+          const stepIndex = workflowSteps.findIndex((step) => step.state === state);
+          if (stepIndex !== -1) {
+            return stepIndex;
+          }
         }
       }
       return -1;
@@ -588,7 +600,16 @@ export default function WorkflowPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <Badge variant={error ? 'orange' : 'green-soft'} className="text-sm">
+            <Badge 
+              variant={
+                error ? 'orange' :
+                workflow?.current_state === 'failed' ? 'red-soft' :
+                workflow?.current_state === 'cancelled' ? 'orange' :
+                workflow?.current_state === 'completed' ? 'green-soft' :
+                'green-soft'
+              } 
+              className="text-sm"
+            >
               {error ? '获取失败' : getStatusLabel(workflow)}
             </Badge>
             <Button
