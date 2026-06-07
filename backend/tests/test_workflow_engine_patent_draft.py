@@ -268,6 +268,314 @@ async def test_generate_patent_in_sections_preserves_agent_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_generate_patent_in_sections_resumes_partial_failed_output(monkeypatch):
+    engine = PatentWorkflowEngine()
+    context = engine.create_workflow(
+        task_id="writer-resume-partial",
+        user_id="test-user",
+        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+    )
+    prompts = []
+
+    claim_result = {
+        "tool": "claim_drafter",
+        "success": True,
+        "data": {
+            "independent_claim": "1. 一种Cave折幕视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
+            "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于虚拟空间模型生成屏幕角度。"],
+        },
+    }
+    technical_field_result = {
+        "tool": "description_writer",
+        "success": True,
+        "data": {
+            "section_type": "technical_field",
+            "content": "本发明涉及沉浸式折幕显示视频处理技术领域。",
+        },
+    }
+
+    async def fake_run_agent_conversation(profile_id, prompt):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return {
+                "failed": True,
+                "error": "说明书生成到背景技术时响应截断",
+                "completed": False,
+                "messages": [
+                    {
+                        "role": "tool",
+                        "name": "claim_drafter",
+                        "content": json.dumps(claim_result, ensure_ascii=False),
+                    },
+                    {
+                        "role": "tool",
+                        "name": "description_writer",
+                        "content": json.dumps(technical_field_result, ensure_ascii=False),
+                    },
+                ],
+            }
+
+        assert "说明书生成到背景技术时响应截断" in prompt
+        assert "不要重新生成权利要求书" in prompt
+        assert "技术领域已完成" in prompt
+        return {
+            "final_response": "继续补全剩余说明书章节",
+            "messages": [
+                {
+                    "role": "tool",
+                    "name": "description_writer",
+                    "content": json.dumps(
+                        {
+                            "tool": "description_writer",
+                            "success": True,
+                            "data": {
+                                "section_type": "background",
+                                "content": "现有Cave折幕显示空间难以根据入口姿态预配置跨屏画面。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+                {
+                    "role": "tool",
+                    "name": "description_writer",
+                    "content": json.dumps(
+                        {
+                            "tool": "description_writer",
+                            "success": True,
+                            "data": {
+                                "section_type": "summary",
+                                "content": "系统根据入口预配置屏幕姿态重映射跨屏画面。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+                {
+                    "role": "tool",
+                    "name": "description_writer",
+                    "content": json.dumps(
+                        {
+                            "tool": "description_writer",
+                            "success": True,
+                            "data": {
+                                "section_type": "detailed",
+                                "content": "入口终端获取空间配置后，生成折幕姿态参数并对跨屏视频画面进行重映射。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+                {
+                    "role": "tool",
+                    "name": "patent_docx_generator",
+                    "content": json.dumps(
+                        {
+                            "tool": "patent_docx_generator",
+                            "success": True,
+                            "data": {
+                                "file_path": "",
+                                "abstract": "本发明公开一种Cave折幕视频处理方法，可预配置屏幕姿态并重映射跨屏视频画面。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+        }
+
+    monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
+
+    draft = await engine._generate_patent_in_sections(None, "patent.writer.v1", "", context)
+
+    assert len(prompts) == 2
+    assert draft.get("_agent_failed") is not True
+    assert draft["claims"]["independent_claim"].startswith("1. 一种Cave折幕视频处理方法")
+    assert draft["description"]["technical_field"] == "本发明涉及沉浸式折幕显示视频处理技术领域。"
+    assert draft["description"]["background_art"] == "现有Cave折幕显示空间难以根据入口姿态预配置跨屏画面。"
+    assert draft["description"]["summary_of_invention"] == "系统根据入口预配置屏幕姿态重映射跨屏画面。"
+    assert draft["description"]["detailed_description"] == "入口终端获取空间配置后，生成折幕姿态参数并对跨屏视频画面进行重映射。"
+    assert draft["abstract"].startswith("本发明公开一种Cave折幕视频处理方法")
+
+
+@pytest.mark.asyncio
+async def test_generate_patent_in_sections_retries_successful_but_incomplete_output(monkeypatch):
+    engine = PatentWorkflowEngine()
+    context = engine.create_workflow(
+        task_id="writer-successful-incomplete-output",
+        user_id="test-user",
+        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+    )
+    prompts = []
+
+    async def fake_run_agent_conversation(profile_id, prompt):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return {
+                "final_response": "请提供已完成章节，以便仅补全权利要求书和说明书摘要。",
+                "messages": [
+                    {
+                        "role": "tool",
+                        "name": "description_writer",
+                        "content": json.dumps(
+                            {
+                                "tool": "description_writer",
+                                "success": True,
+                                "data": {
+                                    "section_type": "technical_field",
+                                    "content": "本发明涉及沉浸式折幕显示视频处理技术领域。",
+                                },
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                    {
+                        "role": "tool",
+                        "name": "description_writer",
+                        "content": json.dumps(
+                            {
+                                "tool": "description_writer",
+                                "success": True,
+                                "data": {
+                                    "section_type": "background",
+                                    "content": "现有Cave折幕显示空间难以根据入口姿态预配置跨屏画面。",
+                                },
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                    {
+                        "role": "tool",
+                        "name": "description_writer",
+                        "content": json.dumps(
+                            {
+                                "tool": "description_writer",
+                                "success": True,
+                                "data": {
+                                    "section_type": "summary",
+                                    "content": "系统根据入口预配置屏幕姿态重映射跨屏画面。",
+                                },
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                    {
+                        "role": "tool",
+                        "name": "description_writer",
+                        "content": json.dumps(
+                            {
+                                "tool": "description_writer",
+                                "success": True,
+                                "data": {
+                                    "section_type": "detailed",
+                                    "content": "入口终端获取空间配置后，生成折幕姿态参数并对跨屏视频画面进行重映射。",
+                                },
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+            }
+
+        return {
+            "final_response": "已补全缺失内容。",
+            "messages": [
+                {
+                    "role": "tool",
+                    "name": "claim_drafter",
+                    "content": json.dumps(
+                        {
+                            "tool": "claim_drafter",
+                            "success": True,
+                            "data": {
+                                "independent_claim": "1. 一种Cave折幕视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
+                                "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于虚拟空间模型生成屏幕角度。"],
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+                {
+                    "role": "tool",
+                    "name": "patent_docx_generator",
+                    "content": json.dumps(
+                        {
+                            "tool": "patent_docx_generator",
+                            "success": True,
+                            "data": {
+                                "file_path": "",
+                                "abstract": "本发明公开一种Cave折幕视频处理方法，可预配置屏幕姿态并重映射跨屏视频画面。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+        }
+
+    monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
+
+    draft = await engine._generate_patent_in_sections(None, "patent.writer.v1", "", context)
+
+    assert len(prompts) == 2
+    assert "权利要求书" in prompts[1]
+    assert "说明书摘要" in prompts[1]
+    assert draft.get("_agent_failed") is not True
+    assert draft["claims"]["independent_claim"].startswith("1. 一种Cave折幕视频处理方法")
+    assert draft["description"]["technical_field"] == "本发明涉及沉浸式折幕显示视频处理技术领域。"
+    assert draft["description"]["background_art"] == "现有Cave折幕显示空间难以根据入口姿态预配置跨屏画面。"
+    assert draft["description"]["summary_of_invention"] == "系统根据入口预配置屏幕姿态重映射跨屏画面。"
+    assert draft["description"]["detailed_description"] == "入口终端获取空间配置后，生成折幕姿态参数并对跨屏视频画面进行重映射。"
+    assert draft["abstract"].startswith("本发明公开一种Cave折幕视频处理方法")
+
+
+@pytest.mark.asyncio
+async def test_generate_patent_in_sections_preserves_partial_output_when_resume_fails(monkeypatch):
+    engine = PatentWorkflowEngine()
+    context = engine.create_workflow(
+        task_id="writer-resume-still-fails",
+        user_id="test-user",
+        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+    )
+    prompts = []
+
+    claim_result = {
+        "tool": "claim_drafter",
+        "success": True,
+        "data": {
+            "independent_claim": "1. 一种Cave折幕视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
+            "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于虚拟空间模型生成屏幕角度。"],
+        },
+    }
+
+    async def fake_run_agent_conversation(profile_id, prompt):
+        prompts.append(prompt)
+        return {
+            "failed": True,
+            "error": "说明书生成连续截断",
+            "completed": False,
+            "messages": [
+                {
+                    "role": "tool",
+                    "name": "claim_drafter",
+                    "content": json.dumps(claim_result, ensure_ascii=False),
+                }
+            ],
+        }
+
+    monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
+
+    draft = await engine._generate_patent_in_sections(None, "patent.writer.v1", "", context)
+
+    assert len(prompts) == 3
+    assert draft["_agent_failed"] is True
+    assert draft["_agent_error"] == "说明书生成连续截断"
+    assert draft["claims"]["independent_claim"].startswith("1. 一种Cave折幕视频处理方法")
+    assert draft["claims"]["dependent_claims"]
+    assert draft["description"]["technical_field"] == ""
+
+
+@pytest.mark.asyncio
 async def test_execute_full_workflow_marks_truncated_writer_stage_failed(monkeypatch):
     engine = PatentWorkflowEngine()
     context = engine.create_workflow(

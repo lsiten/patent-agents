@@ -149,6 +149,56 @@ def test_linked_conversation_upload_syncs_file_to_workflow(client, api_prefix):
     assert routes.conversations_store[conv_id]["messages"][0]["type"] == "file"
 
 
+def test_create_workflow_from_conversation_forwards_engine_callbacks(client, api_prefix, monkeypatch):
+    conv_id = "conv-create-workflow-callbacks"
+    now = datetime.now().isoformat()
+    routes.conversations_store[conv_id] = {
+        "id": conv_id,
+        "title": "Create workflow callbacks",
+        "messages": [
+            {
+                "id": "user-message",
+                "role": "user",
+                "content": "一种可调屏幕角度的沉浸式 Cave 视频处理系统",
+                "timestamp": now,
+                "type": "text",
+            }
+        ],
+        "created_at": now,
+        "updated_at": now,
+        "status": "active",
+        "linked_workflow_id": None,
+    }
+
+    async def fake_execute_full_workflow(context, phase_callback=None, event_callback=None):
+        assert phase_callback is not None
+        assert event_callback is not None
+        event_callback(
+            "专利撰写 Agent",
+            "agent.thinking",
+            "🧾 正在生成权利要求书...",
+            {"agent_name": "专利撰写 Agent", "thought": "生成权利要求书", "step": 1},
+        )
+        context.current_phase = routes.EngineWorkflowState.COMPLETED
+        return context
+
+    monkeypatch.setattr(routes.workflow_engine, "execute_full_workflow", fake_execute_full_workflow)
+
+    response = client.post(
+        f"{api_prefix}/conversations/{conv_id}/create-workflow",
+        json={"user_id": "test_user", "target_country": "中国"},
+    )
+
+    assert response.status_code == 200, response.text
+    task_id = response.json()["task_id"]
+    assert any(
+        event.event_type == "agent.thinking"
+        and event.agent == "专利撰写 Agent"
+        and "正在生成权利要求书" in event.message
+        for event in routes.task_events[task_id]
+    )
+
+
 
 def test_restart_failed_linked_workflow_uses_engine_initialized_state(client, api_prefix, monkeypatch):
     conv_id = "conv-restart-workflow"

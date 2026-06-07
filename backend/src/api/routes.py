@@ -3739,8 +3739,41 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             conv["messages"].append(workflow_msg)
 
     async def run_workflow():
+        def _event_cb(agent_name: str, event_type: str, message: str, data: Dict[str, Any]):
+            task_events.setdefault(task_id, []).append(
+                WorkflowEventResponse(
+                    task_id=task_id,
+                    timestamp=datetime.now(),
+                    agent=agent_name,
+                    message=message,
+                    event_type=event_type,
+                    data=data,
+                )
+            )
+
+        async def _phase_cb(phase, result):
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent=phase.value,
+                    message=f"阶段 {phase.value} 已完成",
+                    event_type="workflow.phase.completed",
+                    data={
+                        "phase": phase.value,
+                        "success": result.success,
+                        "duration_seconds": result.duration_seconds,
+                        "issues": result.issues,
+                    },
+                )
+            await _persist_events(task_id)
+            await _persist_workflow(task_id)
+
         try:
-            await workflow_engine.execute_full_workflow(context)
+            await workflow_engine.execute_full_workflow(
+                context,
+                phase_callback=_phase_cb,
+                event_callback=_event_cb,
+            )
             async with workflow_lock:
                 _append_workflow_terminal_event(task_id, context, "专利申请流程已完成")
             await _persist_events(task_id)

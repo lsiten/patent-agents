@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Type, TypeVar
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -346,7 +346,7 @@ class PatentWorkflowEngine:
     async def execute_full_workflow(
         self,
         context: WorkflowContext,
-        phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None]] = None,
+        phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None | Awaitable[None]]] = None,
         event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
     ) -> WorkflowContext:
         """
@@ -791,7 +791,7 @@ class PatentWorkflowEngine:
     async def resume_workflow(
         self,
         context: WorkflowContext,
-        phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None]] = None,
+        phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None | Awaitable[None]]] = None,
         force_start_from: Optional[WorkflowState] = None,
     ) -> WorkflowContext:
         """
@@ -1645,92 +1645,199 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     {"agent_name": "专利撰写 Agent", "thought": thought, "step": step},
                 )
 
-        # 调用 Agent，让其通过工具生成专利内容
-        agent_result = await _run_agent_conversation(profile_id, task_prompt)
-        
-        # 从 Agent 的工具调用结果中提取数据
-        # Agent 会通过 tool callbacks 返回工具执行结果
-        final_response = ""
-        if isinstance(agent_result, dict):
-            if agent_result.get("failed") is True or agent_result.get("completed") is False and agent_result.get("error"):
-                return self._normalize_phase_output("patent_draft", agent_result)
-            final_response = agent_result.get("final_response", "") or agent_result.get("content", "") or ""
-            # 检查是否有工具调用结果
-            tool_results = agent_result.get("tool_results", {})
-            messages = agent_result.get("messages", [])
-        else:
-            final_response = str(agent_result) if agent_result else ""
-            tool_results = {}
-            messages = []
-
-        # 尝试从工具调用历史中提取结构化数据
         claims_data = {}
         description_data = {}
         abstract_text = ""
         docx_path = ""
         drawings_data = []
+        final_response = ""
+        last_failed_result: Optional[Dict[str, Any]] = None
 
-        tool_call_names: Dict[str, str] = {}
-        for msg in messages:
-            if not isinstance(msg, dict):
-                continue
-            for tool_call in msg.get("tool_calls", []) or []:
-                if not isinstance(tool_call, dict):
-                    continue
-                call_id = str(tool_call.get("id") or "")
-                function_data = tool_call.get("function", {})
-                function_name = ""
-                if isinstance(function_data, dict):
-                    function_name = str(function_data.get("name") or "")
-                function_name = function_name or str(tool_call.get("name") or "")
-                if call_id and function_name:
-                    tool_call_names[call_id] = function_name
-        
-        # 遍历消息历史查找工具调用结果
-        for msg in messages:
-            if isinstance(msg, dict) and msg.get("role") == "tool":
-                tool_call_id = str(msg.get("tool_call_id") or "")
-                tool_name = str(msg.get("name") or tool_call_names.get(tool_call_id, ""))
-                try:
-                    content_text = msg.get("content", "{}")
-                    if isinstance(content_text, str) and "[TOOL_OUTPUT_SAVED_TO]:" in content_text:
-                        content_text = content_text.split("[TOOL_OUTPUT_SAVED_TO]:", 1)[0].strip()
-                    tool_content = json.loads(content_text)
-                    if not tool_name:
-                        tool_name = str(tool_content.get("tool") or "")
-                    tool_data = tool_content.get("data", {})
-                    
-                    if tool_name == "claim_drafter" and tool_content.get("success"):
-                        claims_data = tool_data
-                        self._logger.info(f"Got claims from tool: {len(tool_data.get('dependent_claims', []))+1} claims")
-                        
-                    elif tool_name == "description_writer" and tool_content.get("success"):
-                        section_type = tool_data.get("section_type", "")
-                        content = tool_data.get("content", "")
-                        if section_type == "technical_field":
-                            description_data["technical_field"] = content
-                        elif section_type == "background":
-                            description_data["background_art"] = content
-                        elif section_type == "summary":
-                            description_data["summary_of_invention"] = content
-                        elif section_type == "detailed":
-                            description_data["detailed_description"] = content
-                        self._logger.info(f"Got description section: {section_type}")
-                        
-                    elif tool_name == "patent_docx_generator" and tool_content.get("success"):
-                        docx_path = tool_data.get("file_path", "")
-                        abstract_text = tool_data.get("abstract", "") or abstract_text
-                        self._logger.info(f"DOCX generated: {docx_path}")
+        for writer_attempt in range(3):
+            agent_result = await _run_agent_conversation(profile_id, task_prompt)
 
-                    elif tool_name == "patent_drawing_generator" and tool_content.get("success"):
-                        drawings = tool_data.get("drawings", [])
-                        if isinstance(drawings, list):
-                            drawings_data.extend(item for item in drawings if isinstance(item, dict))
-                        self._logger.info(f"Got patent drawings: {len(drawings_data)} drawings")
-                        
-                except (json.JSONDecodeError, KeyError) as e:
-                    self._logger.warning(f"Failed to parse tool result: {e}")
+            if isinstance(agent_result, dict):
+                final_response = agent_result.get("final_response", "") or agent_result.get("content", "") or final_response
+                messages = agent_result.get("messages", [])
+                agent_failed = agent_result.get("failed") is True or (
+                    agent_result.get("completed") is False and bool(agent_result.get("error"))
+                )
+            else:
+                final_response = str(agent_result) if agent_result else final_response
+                messages = []
+                agent_failed = False
+
+            tool_call_names: Dict[str, str] = {}
+            for msg in messages:
+                if not isinstance(msg, dict):
                     continue
+                for tool_call in msg.get("tool_calls", []) or []:
+                    if not isinstance(tool_call, dict):
+                        continue
+                    call_id = str(tool_call.get("id") or "")
+                    function_data = tool_call.get("function", {})
+                    function_name = ""
+                    if isinstance(function_data, dict):
+                        function_name = str(function_data.get("name") or "")
+                    function_name = function_name or str(tool_call.get("name") or "")
+                    if call_id and function_name:
+                        tool_call_names[call_id] = function_name
+
+            for msg in messages:
+                if isinstance(msg, dict) and msg.get("role") == "tool":
+                    tool_call_id = str(msg.get("tool_call_id") or "")
+                    tool_name = str(msg.get("name") or tool_call_names.get(tool_call_id, ""))
+                    try:
+                        content_text = msg.get("content", "{}")
+                        if isinstance(content_text, str) and "[TOOL_OUTPUT_SAVED_TO]:" in content_text:
+                            content_text = content_text.split("[TOOL_OUTPUT_SAVED_TO]:", 1)[0].strip()
+                        tool_content = json.loads(content_text)
+                        if not tool_name:
+                            tool_name = str(tool_content.get("tool") or "")
+                        tool_data = tool_content.get("data", {})
+
+                        if tool_name == "claim_drafter" and tool_content.get("success"):
+                            claims_data = tool_data
+                            self._logger.info(f"Got claims from tool: {len(tool_data.get('dependent_claims', []))+1} claims")
+
+                        elif tool_name == "description_writer" and tool_content.get("success"):
+                            section_type = tool_data.get("section_type", "")
+                            content = tool_data.get("content", "")
+                            if section_type == "technical_field":
+                                description_data["technical_field"] = content
+                            elif section_type == "background":
+                                description_data["background_art"] = content
+                            elif section_type == "summary":
+                                description_data["summary_of_invention"] = content
+                            elif section_type == "detailed":
+                                description_data["detailed_description"] = content
+                            self._logger.info(f"Got description section: {section_type}")
+
+                        elif tool_name == "patent_docx_generator" and tool_content.get("success"):
+                            docx_path = tool_data.get("file_path", "")
+                            abstract_text = tool_data.get("abstract", "") or abstract_text
+                            self._logger.info(f"DOCX generated: {docx_path}")
+
+                        elif tool_name == "patent_drawing_generator" and tool_content.get("success"):
+                            drawings = tool_data.get("drawings", [])
+                            if isinstance(drawings, list):
+                                drawings_data.extend(item for item in drawings if isinstance(item, dict))
+                            self._logger.info(f"Got patent drawings: {len(drawings_data)} drawings")
+
+                    except (json.JSONDecodeError, KeyError) as e:
+                        self._logger.warning(f"Failed to parse tool result: {e}")
+                        continue
+
+            has_partial_content = bool(
+                claims_data
+                or any(description_data.values())
+                or abstract_text
+                or drawings_data
+            )
+            if (
+                not agent_failed
+                and has_partial_content
+                and not claims_data.get("independent_claim", "").strip()
+            ):
+                agent_failed = True
+                incomplete_error = "专利撰写输出不完整：缺少权利要求书"
+                if isinstance(agent_result, dict):
+                    agent_result = dict(agent_result)
+                    agent_result["failed"] = True
+                    agent_result["completed"] = False
+                    agent_result["error"] = incomplete_error
+                else:
+                    agent_result = {
+                        "failed": True,
+                        "completed": False,
+                        "error": incomplete_error,
+                    }
+
+            if not agent_failed:
+                last_failed_result = None
+                break
+
+            last_failed_result = agent_result if isinstance(agent_result, dict) else None
+            if not has_partial_content:
+                failed_result: Dict[str, Any]
+                if isinstance(agent_result, dict):
+                    failed_result = agent_result
+                else:
+                    failed_result = {
+                        "failed": True,
+                        "completed": False,
+                        "error": "专利撰写中断",
+                    }
+                return self._normalize_phase_output("patent_draft", failed_result)
+            if writer_attempt >= 2:
+                break
+
+            completed_items = []
+            if claims_data.get("independent_claim"):
+                completed_items.append("权利要求书已完成，请不要重新生成权利要求书")
+            if description_data.get("technical_field"):
+                completed_items.append("技术领域已完成")
+            if description_data.get("background_art"):
+                completed_items.append("背景技术已完成")
+            if description_data.get("summary_of_invention"):
+                completed_items.append("发明内容已完成")
+            if description_data.get("detailed_description"):
+                completed_items.append("具体实施方式已完成")
+            if abstract_text:
+                completed_items.append("说明书摘要已完成")
+
+            missing_items = []
+            if not claims_data.get("independent_claim"):
+                missing_items.append("权利要求书")
+            if not description_data.get("technical_field"):
+                missing_items.append("技术领域")
+            if not description_data.get("background_art"):
+                missing_items.append("背景技术")
+            if not description_data.get("summary_of_invention"):
+                missing_items.append("发明内容")
+            if not description_data.get("detailed_description"):
+                missing_items.append("具体实施方式")
+            if not abstract_text:
+                missing_items.append("说明书摘要")
+
+            error_text = str(agent_result.get("error") or "专利撰写中断") if isinstance(agent_result, dict) else "专利撰写中断"
+            task_prompt = f"""专利撰写过程中发生错误，需要从已完成内容之后继续撰写，不要从头重写。
+
+【本次错误】
+{error_text}
+
+【已完成内容】
+{chr(10).join(f"- {item}" for item in completed_items)}
+
+【待补全内容】
+{chr(10).join(f"- {item}" for item in missing_items)}
+
+【继续要求】
+1. 只调用工具补全待补全内容。
+2. 已完成内容不要重新生成、不要改写、不要重复输出。
+3. 补全时保持与已完成权利要求和说明书章节一致。
+4. 本阶段仍然只生成专利内容，不生成最终文档文件。"""
+
+        if last_failed_result is not None:
+            return {
+                "_agent_failed": True,
+                "_agent_error": str(last_failed_result.get("error") or "专利撰写中断")[:500],
+                "claims": {
+                    "independent_claim": claims_data.get("independent_claim", ""),
+                    "dependent_claims": claims_data.get("dependent_claims", []),
+                },
+                "description": {
+                    "technical_field": description_data.get("technical_field", ""),
+                    "background_art": description_data.get("background_art", ""),
+                    "summary_of_invention": description_data.get("summary_of_invention", ""),
+                    "drawings_description": description_data.get("drawings_description", ""),
+                    "detailed_description": description_data.get("detailed_description", ""),
+                },
+                "abstract": abstract_text,
+                "drawings": drawings_data,
+                "docx_path": "",
+                "full_response": final_response,
+            }
         
         # 如果工具调用没有返回结构化数据，尝试从 final_response 解析
         if not claims_data and not description_data:
