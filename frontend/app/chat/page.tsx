@@ -99,6 +99,42 @@ function createLocalChatMessage(
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function resolveAgentName(data: unknown, fallback = 'patent.ceo.v1'): string {
+  if (!isRecord(data)) return fallback;
+
+  const direct = stringField(data, 'agent_name')
+    ?? stringField(data, 'agent')
+    ?? stringField(data, 'profile_id');
+  if (direct) return direct;
+
+  const result = data.result;
+  if (isRecord(result)) {
+    const resultAgent = stringField(result, 'agent')
+      ?? stringField(result, 'agent_name')
+      ?? stringField(result, 'profile_id');
+    if (resultAgent) return resultAgent;
+  }
+
+  const parameters = data.parameters;
+  if (isRecord(parameters)) {
+    const parameterAgent = stringField(parameters, 'agent')
+      ?? stringField(parameters, 'agent_name')
+      ?? stringField(parameters, 'agent_id');
+    if (parameterAgent) return parameterAgent;
+  }
+
+  return fallback;
+}
+
 interface ParsedMessageContent {
   conclusion: string;
   interaction: string;
@@ -608,7 +644,7 @@ function ChatPageContent() {
                       {
                         ...nextLocalEventFields('thinking'),
                         type: 'thinking' as const,
-                        agent_name: 'patent.ceo.v1',
+                        agent_name: resolveAgentName(_data),
                         timestamp: now,
                         message: '思考中...',
                         data: _data as Record<string, unknown>,
@@ -632,7 +668,7 @@ function ChatPageContent() {
                       {
                         ...nextLocalEventFields('skill_use'),
                         type: 'skill_use' as const,
-                        agent_name: 'patent.ceo.v1',
+                        agent_name: resolveAgentName(data),
                         timestamp: now,
                         message: `技能: ${data.name}`,
                         data: data as Record<string, unknown>,
@@ -656,7 +692,7 @@ function ChatPageContent() {
                       {
                         ...nextLocalEventFields('tool_call_start'),
                         type: 'tool_call_start' as const,
-                        agent_name: 'patent.ceo.v1',
+                        agent_name: resolveAgentName(data),
                         timestamp: now,
                         message: `调用工具: ${data.name}`,
                         data: data as Record<string, unknown>,
@@ -702,7 +738,7 @@ function ChatPageContent() {
                   {
                     ...nextLocalEventFields('tool_call_end'),
                     type: 'tool_call_end' as const,
-                    agent_name: 'patent.ceo.v1',
+                    agent_name: resolveAgentName(data),
                     timestamp: now,
                     message: `工具完成: ${data.name}`,
                     data: data as Record<string, unknown>,
@@ -764,7 +800,7 @@ function ChatPageContent() {
                       {
                         ...nextLocalEventFields('status'),
                         type: 'status' as const,
-                        agent_name: data.agent || 'patent.ceo.v1',
+                        agent_name: resolveAgentName(data),
                         timestamp: now,
                         message: data.message || data.status || '',
                         data: data as Record<string, unknown>,

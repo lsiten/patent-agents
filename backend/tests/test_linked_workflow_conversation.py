@@ -327,6 +327,30 @@ def test_start_workflow_persists_workflow_snapshot_after_phase_callback(
     assert response.status_code == 200, response.text
 
 
+def test_workflow_response_preserves_phase_result_output():
+    task_id = "task-phase-output-response"
+    context = routes.workflow_engine.create_workflow(
+        task_id=task_id,
+        user_id="test_user",
+        description="Original invention description",
+    )
+    context.requirement_analysis = {"tech_field": "Cave folded-screen video"}
+    context.add_phase_result(
+        PhaseResult(
+            phase=WorkflowPhase.REQUIREMENT,
+            success=True,
+            duration_seconds=0,
+            output=context.requirement_analysis,
+        )
+    )
+
+    response = routes._workflow_context_to_response(context)
+
+    assert response.model_dump()["phase_history"][0]["output"] == {
+        "tech_field": "Cave folded-screen video"
+    }
+
+
 def test_restart_linked_workflow_prefers_uploaded_disclosure_over_placeholder(
     client, api_prefix, monkeypatch
 ):

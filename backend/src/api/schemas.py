@@ -91,6 +91,7 @@ class WorkflowPhaseResultResponse(BaseModel):
     phase: str
     success: bool
     duration_seconds: float
+    output: Dict[str, Any] = Field(default_factory=dict)
     issues: List[str]
     warnings: List[str]
 

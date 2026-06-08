@@ -52,6 +52,19 @@ function getEventMessage(event: AgentEvent): string {
   }
 }
 
+const agentDisplayNames: Record<string, string> = {
+  'patent.ceo.v1': 'CEO Agent',
+  'patent.requirement_analyst.v1': '需求分析师',
+  'patent.retrieval_analyst.v1': '检索分析师',
+  'patent.writer.v1': '专利撰写师',
+  'patent.quality_reviewer.v1': '质量审查师',
+  'patent.brainstorm_partner.v1': '头脑风暴伙伴',
+};
+
+function getAgentDisplayName(agentName: string): string {
+  return agentDisplayNames[agentName] ?? agentName;
+}
+
 export function AgentActivityLog({ events, className = '' }: AgentActivityLogProps) {
   const [expanded, setExpanded] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -118,6 +131,9 @@ export function AgentActivityLog({ events, className = '' }: AgentActivityLogPro
               </span>
               <span className="text-slate/70 flex-shrink-0 font-mono">
                 {formatTime(event.timestamp)}
+              </span>
+              <span className="text-ink/70 flex-shrink-0 font-medium max-w-28 truncate">
+                {getAgentDisplayName(event.agent_name)}
               </span>
               <span className="text-ink/80 flex-1 min-w-0 truncate">
                 {getEventMessage(event)}

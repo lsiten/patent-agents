@@ -167,3 +167,144 @@ test('chat shows which Hermes agent is working and what it is doing', async ({ p
   await expect(page.getByText('分析技术方案并提取创新点').first()).toBeVisible();
   await expect(page.getByText('CEO 调度')).toBeVisible();
 });
+
+test('chat activity log shows specialist agent name for agent events', async ({ page }) => {
+  const convId = 'conv-agent-activity-name';
+  const now = new Date().toISOString();
+
+  await page.route('**/api/v1/conversations?user_id=default_user', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        total: 1,
+        items: [
+          {
+            id: convId,
+            user_id: 'default_user',
+            title: '智能专利撰写系统',
+            created_at: now,
+            updated_at: now,
+            message_count: 1,
+            status: 'active',
+            linked_workflow_id: null,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route(`**/api/v1/conversations/${convId}`, async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: convId,
+        user_id: 'default_user',
+        title: '智能专利撰写系统',
+        created_at: now,
+        updated_at: now,
+        message_count: 1,
+        status: 'active',
+        linked_workflow_id: null,
+        messages: [
+          {
+            id: 'assistant-with-agent-events',
+            role: 'assistant',
+            content: '分析过程如下。',
+            timestamp: now,
+            type: 'text',
+            metadata: null,
+            agent_events: [
+              {
+                id: 'evt-specialist-thinking',
+                sequence: 1,
+                call_id: 'call-specialist',
+                type: 'thinking',
+                agent_name: '需求分析师',
+                timestamp: now,
+                message: '正在拆解技术方案',
+                data: {},
+              },
+            ],
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto(`/chat?conv_id=${convId}`);
+
+  await expect(page.getByText('Agent 活动日志')).toBeVisible();
+  await expect(page.getByText('正在拆解技术方案')).toBeVisible();
+  await expect(page.getByText('需求分析师')).toBeVisible();
+});
+
+test('chat activity log maps raw Hermes profile ids to display names', async ({ page }) => {
+  const convId = 'conv-agent-profile-id-name';
+  const now = new Date().toISOString();
+
+  await page.route('**/api/v1/conversations?user_id=default_user', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        total: 1,
+        items: [
+          {
+            id: convId,
+            user_id: 'default_user',
+            title: '智能专利撰写系统',
+            created_at: now,
+            updated_at: now,
+            message_count: 1,
+            status: 'active',
+            linked_workflow_id: null,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route(`**/api/v1/conversations/${convId}`, async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: convId,
+        user_id: 'default_user',
+        title: '智能专利撰写系统',
+        created_at: now,
+        updated_at: now,
+        message_count: 1,
+        status: 'active',
+        linked_workflow_id: null,
+        messages: [
+          {
+            id: 'assistant-with-ceo-profile-event',
+            role: 'assistant',
+            content: '分析过程如下。',
+            timestamp: now,
+            type: 'text',
+            metadata: null,
+            agent_events: [
+              {
+                id: 'evt-ceo-thinking',
+                sequence: 1,
+                call_id: 'call-ceo',
+                type: 'thinking',
+                agent_name: 'patent.ceo.v1',
+                timestamp: now,
+                message: 'reflecting...',
+                data: {},
+              },
+            ],
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto(`/chat?conv_id=${convId}`);
+
+  await expect(page.getByText('Agent 活动日志')).toBeVisible();
+  await expect(page.getByText('reflecting...')).toBeVisible();
+  await expect(page.getByText('CEO Agent')).toBeVisible();
+  await expect(page.getByText('patent.ceo.v1')).toHaveCount(0);
+});

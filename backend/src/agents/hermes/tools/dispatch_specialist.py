@@ -40,6 +40,34 @@ def get_parent_context() -> str:
     """获取当前线程的父级对话上下文"""
     return getattr(_thread_local, "parent_context", "")
 
+
+def clear_parent_context() -> None:
+    """清理当前线程的父级对话上下文"""
+    if hasattr(_thread_local, "parent_context"):
+        delattr(_thread_local, "parent_context")
+
+
+def set_parent_callbacks(callbacks: Optional[Dict[str, Any]]) -> None:
+    """设置当前线程的父级回调，供子 Agent 将实时事件回传给父流。"""
+    _thread_local.parent_callbacks = callbacks or {}
+
+
+def get_parent_callbacks() -> Dict[str, Any]:
+    """获取当前线程的父级回调。"""
+    return getattr(_thread_local, "parent_callbacks", {})
+
+
+def clear_parent_callbacks() -> None:
+    """清理当前线程的父级回调。"""
+    if hasattr(_thread_local, "parent_callbacks"):
+        delattr(_thread_local, "parent_callbacks")
+
+
+def clear_parent_state() -> None:
+    """清理当前线程的父级上下文和回调。"""
+    clear_parent_context()
+    clear_parent_callbacks()
+
 # 可调度的专业 Agent 列表
 SPECIALIST_AGENTS = {
     "brainstorm_partner": {
@@ -142,8 +170,6 @@ class DispatchSpecialistTool(HermesTool):
         )
 
     async def execute(self, **kwargs) -> Dict[str, Any]:
-        import asyncio
-
         agent_id = kwargs.get("agent_id", "")
         task = kwargs.get("task", "")
         context = kwargs.get("context", "")
@@ -181,7 +207,85 @@ class DispatchSpecialistTool(HermesTool):
         try:
             from src.agents.agent_config import create_ai_agent
 
-            agent = create_ai_agent(profile_id=profile_id)
+            parent_callbacks = get_parent_callbacks()
+            parent_activity = parent_callbacks.get("agent_activity")
+            child_callbacks: Optional[Dict[str, Any]] = None
+
+            if callable(parent_activity):
+                base_data = {
+                    "agent_id": agent_id,
+                    "agent_name": specialist["name"],
+                    "profile_id": profile_id,
+                }
+
+                def forward_activity(
+                    event_type: str,
+                    message: str,
+                    data: Optional[Dict[str, Any]] = None,
+                    call_id: Optional[str] = None,
+                ) -> None:
+                    payload = {**base_data, **(data or {})}
+                    parent_activity(
+                        event_type=event_type,
+                        message=message,
+                        data=payload,
+                        call_id=call_id,
+                        agent_name=specialist["name"],
+                    )
+
+                def on_thinking(text: Any) -> None:
+                    thought = str(text).strip() if text else ""
+                    if thought:
+                        forward_activity(
+                            "thinking",
+                            thought[:300],
+                            {"message": thought[:300]},
+                        )
+
+                def on_status(kind: Any, message: Any) -> None:
+                    status_message = str(message).strip() if message else ""
+                    if status_message:
+                        forward_activity(
+                            "status",
+                            status_message[:300],
+                            {"kind": str(kind), "message": status_message[:300]},
+                        )
+
+                def on_tool_start(call_id: Any, name: Any, args: Any) -> None:
+                    params: Dict[str, Any] = {}
+                    if isinstance(args, str):
+                        try:
+                            params = json.loads(args)
+                        except Exception:
+                            params = {"raw": args[:200]}
+                    elif isinstance(args, dict):
+                        params = args
+                    tool_name = str(name)
+                    forward_activity(
+                        "tool_call_start",
+                        f"调用工具: {tool_name}",
+                        {"name": tool_name, "parameters": params},
+                        str(call_id),
+                    )
+
+                def on_tool_complete(call_id: Any, name: Any, args: Any, result: Any) -> None:
+                    tool_name = str(name)
+                    result_text = str(result)[:500] if result else ""
+                    forward_activity(
+                        "tool_call_end",
+                        f"工具完成: {tool_name}",
+                        {"name": tool_name, "result": result_text, "success": True},
+                        str(call_id),
+                    )
+
+                child_callbacks = {
+                    "thinking": on_thinking,
+                    "status": on_status,
+                    "tool_start": on_tool_start,
+                    "tool_complete": on_tool_complete,
+                }
+
+            agent = create_ai_agent(profile_id=profile_id, callbacks=child_callbacks)
             # AIAgent.run_conversation 是同步的，需要在线程中运行
             result = await asyncio.to_thread(agent.run_conversation, full_prompt)
 

@@ -20,6 +20,7 @@ from .schemas import (
     TaskListResponse,
     WorkflowEventResponse,
     WorkflowListResponse,
+    WorkflowPhaseResultResponse,
     WorkflowResponse,
     SearchPatentRequest,
     SearchResponse,
@@ -506,13 +507,14 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
         iteration_count=context.iteration_count,
         message_count=len(context.message_history),
         phase_history=[
-            {
-                "phase": result.phase.value,
-                "success": result.success,
-                "duration_seconds": result.duration_seconds,
-                "issues": result.issues,
-                "warnings": result.warnings,
-            }
+            WorkflowPhaseResultResponse(
+                phase=result.phase.value,
+                success=result.success,
+                duration_seconds=result.duration_seconds,
+                output=result.output,
+                issues=result.issues,
+                warnings=result.warnings,
+            )
             for result in context.phase_history
         ],
         outputs={
@@ -3504,8 +3506,11 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
             _format_msg(m)
             for m in conv["messages"]
         ])
-        from src.agents.hermes.tools.dispatch_specialist import set_parent_context
-        set_parent_context(full_history_text)
+        from src.agents.hermes.tools.dispatch_specialist import (
+            clear_parent_state,
+            set_parent_callbacks,
+            set_parent_context,
+        )
 
         prompt = f"""对话历史:
 {history_text}
@@ -3614,6 +3619,7 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                 })
 
         callbacks = {
+            "agent_activity": append_agent_activity,
             "thinking": on_thinking,
             "tool_start": on_tool_start,
             "tool_complete": on_tool_complete,
@@ -3623,6 +3629,8 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
 
         def run_agent():
             try:
+                set_parent_context(full_history_text)
+                set_parent_callbacks(callbacks)
                 agent = create_ai_agent(
                     profile_id="patent.ceo.v1",
                     session_id=f"conv_{conv_id}",
@@ -3632,6 +3640,7 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
             except Exception as e:
                 result_holder["error"] = str(e)
             finally:
+                clear_parent_state()
                 result_holder["done"] = True
 
         thread = threading.Thread(target=run_agent, daemon=True)

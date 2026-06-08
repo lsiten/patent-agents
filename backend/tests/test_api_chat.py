@@ -153,6 +153,84 @@ class TestAgentActivityEvents:
         assert persisted["role"] == "assistant"
         assert persisted["agent_events"] == agent_activity_events
 
+    def test_conversation_stream_bridges_specialist_agent_activity(
+        self,
+        client,
+        api_prefix,
+        monkeypatch,
+    ):
+        conv_id = "conv-specialist-agent-activity-stream"
+        now = datetime.now().isoformat()
+        routes.conversations_store[conv_id] = {
+            "id": conv_id,
+            "title": "新的对话",
+            "messages": [],
+            "created_at": now,
+            "updated_at": now,
+            "status": "active",
+            "linked_workflow_id": None,
+        }
+
+        class FakeCeoAgent:
+            def run_conversation(self, prompt):
+                import asyncio
+
+                from src.agents.hermes.tools.dispatch_specialist import DispatchSpecialistTool
+
+                asyncio.run(
+                    DispatchSpecialistTool().execute(
+                        agent_id="requirement_analyst",
+                        task="分析技术方案并提取创新点",
+                    )
+                )
+                return {"final_response": "已完成专业分析"}
+
+        class FakeSpecialistAgent:
+            def __init__(self, callbacks):
+                self.callbacks = callbacks or {}
+
+            def run_conversation(self, prompt):
+                if "thinking" in self.callbacks:
+                    self.callbacks["thinking"]("正在拆解技术方案")
+                if "status" in self.callbacks:
+                    self.callbacks["status"]("lifecycle", "正在提取创新点")
+                return {"final_response": "结构化需求分析结果"}
+
+        def fake_route_create_ai_agent(*, profile_id, session_id, callbacks):
+            return FakeCeoAgent()
+
+        def fake_agent_config_create_ai_agent(profile_id, *args, **kwargs):
+            return FakeSpecialistAgent(kwargs.get("callbacks"))
+
+        monkeypatch.setattr(routes, "create_ai_agent", fake_route_create_ai_agent)
+
+        import src.agents.agent_config as agent_config
+
+        monkeypatch.setattr(agent_config, "create_ai_agent", fake_agent_config_create_ai_agent)
+
+        with client.stream(
+            "POST",
+            f"{api_prefix}/conversations/{conv_id}/chat/stream",
+            json={"content": "请分析这个方案"},
+        ) as response:
+            body = "".join(response.iter_text())
+
+        agent_activity_events = []
+        for block in body.split("\n\n"):
+            if block.startswith("event: agent_activity"):
+                data_line = next(line for line in block.splitlines() if line.startswith("data: "))
+                agent_activity_events.append(json.loads(data_line.removeprefix("data: ")))
+
+        assert response.status_code == 200, body
+        assert any(event["agent_name"] == "需求分析师" for event in agent_activity_events)
+        assert any(
+            event["agent_name"] == "需求分析师" and "正在拆解技术方案" in event["message"]
+            for event in agent_activity_events
+        )
+
+        persisted = routes.conversations_store[conv_id]["messages"][-1]
+        assert any(event["agent_name"] == "需求分析师" for event in persisted["agent_events"])
+
     def test_conversation_stream_emits_heartbeat_when_agent_is_quiet(
         self,
         client,
@@ -173,7 +251,7 @@ class TestAgentActivityEvents:
 
         class QuietAgent:
             def run_conversation(self, prompt):
-                time.sleep(0.05)
+                time.sleep(0.2)
                 return {"final_response": "安静运行后的答复"}
 
         def fake_create_ai_agent(*, profile_id, session_id, callbacks):
