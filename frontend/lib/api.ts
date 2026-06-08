@@ -2,7 +2,7 @@
  * API Client for Patent Multi-Agent System
  */
 
-import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory, OrgNode, DirEntry, BrowseDirResponse, FileContentResponse } from '@/types';
+import type { AgentConfig, AgentTool, AgentSkill, AgentTimer, AgentMemory, AgentWorkEvent, OrgNode, BrowseDirResponse, FileContentResponse } from '@/types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
@@ -629,6 +629,7 @@ export interface ConversationSummary {
   updated_at: string;
   message_count: number;
   workflow_task_id?: string;
+  linked_workflow_id?: string;
   workflow_state?: string;
 }
 
@@ -695,6 +696,107 @@ export const conversationApi = {
   /**
    * 流式聊天 — SSE 接收 agent 的工具调用、技能使用、内容输出
    */
+
+
+  /**
+   * 对话事件流 — 接收关联工作流的 Agent 工作状态
+   */
+  eventStream: (
+    conv_id: string,
+    callbacks: {
+      onAgentWork?: (data: AgentWorkEvent) => void;
+      onConversationMessage?: (data: ChatMessage) => void;
+      onDone?: () => void;
+      onError?: (error: string) => void;
+    },
+  ): { abort: () => void } => {
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/conversations/${encodeURIComponent(conv_id)}/events/stream`,
+          { signal: controller.signal }
+        );
+
+        if (!response.ok) {
+          callbacks.onError?.(`HTTP ${response.status}`);
+          return;
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          callbacks.onError?.('No response body');
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        const handleFrame = (frame: string) => {
+          let eventType = '';
+          const dataLines: string[] = [];
+
+          for (const line of frame.split(/\r?\n/)) {
+            if (line.startsWith('event:')) {
+              eventType = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+              dataLines.push(line.slice(5).trimStart());
+            }
+          }
+
+          if (!eventType || dataLines.length === 0) return;
+
+          try {
+            const parsed = JSON.parse(dataLines.join('\n'));
+            switch (eventType) {
+              case 'agent_work':
+                callbacks.onAgentWork?.(parsed);
+                break;
+              case 'conversation_message':
+                callbacks.onConversationMessage?.(parsed);
+                break;
+              case 'done':
+                callbacks.onDone?.();
+                break;
+              case 'error':
+                callbacks.onError?.(isRecord(parsed) && typeof parsed.error === 'string' ? parsed.error : 'Unknown error');
+                break;
+            }
+          } catch {
+            // Keep streaming when a malformed event arrives.
+          }
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          buffer += value ? decoder.decode(value, { stream: !done }) : decoder.decode();
+
+          let boundaryIndex = buffer.search(/\r?\n\r?\n/);
+          while (boundaryIndex !== -1) {
+            const frame = buffer.slice(0, boundaryIndex);
+            const separator = buffer.startsWith('\r\n\r\n', boundaryIndex) ? 4 : 2;
+            buffer = buffer.slice(boundaryIndex + separator);
+            handleFrame(frame);
+            boundaryIndex = buffer.search(/\r?\n\r?\n/);
+          }
+
+          if (done) break;
+        }
+
+        if (buffer.trim()) {
+          handleFrame(buffer);
+        }
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          callbacks.onError?.(err instanceof Error ? err.message : 'Stream failed');
+        }
+      }
+    })();
+
+    return { abort: () => controller.abort() };
+  },
+
   chatStream: (
     conv_id: string,
     data: ConversationChatRequest,

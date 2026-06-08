@@ -163,6 +163,23 @@ export interface AgentInfo {
 }
 
 // ============ 对话相关类型 ============
+export type AgentWorkStatus = 'running' | 'completed' | 'failed';
+
+export interface AgentWorkEvent {
+  event_type: 'agent.work.started' | 'agent.work.completed' | 'agent.work.failed' | 'agent.work.thinking';
+  task_id: string;
+  conversation_id?: string;
+  agent_id: string;
+  agent_name: string;
+  profile_id?: string;
+  action: string;
+  status: AgentWorkStatus;
+  timestamp: string;
+  summary?: string;
+  error?: string;
+  data?: Record<string, unknown>;
+}
+
 export type MessageRole = 'user' | 'assistant' | 'system' | 'agent';
 
 export interface ToolCallInfo {
