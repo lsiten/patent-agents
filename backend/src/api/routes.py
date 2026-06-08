@@ -135,6 +135,7 @@ workflow_lock = asyncio.Lock()
 conversations_store: Dict[str, dict] = {}
 conversations_lock = asyncio.Lock()
 CONVERSATION_STREAM_HEARTBEAT_SECONDS = 15.0
+conversation_event_queues: Dict[str, List[Dict[str, Any]]] = {}
 
 workflow_engine = PatentWorkflowEngine()
 organization_tree_store: OrgNodeResponse | None = None
@@ -897,6 +898,62 @@ def _build_agent_activity_event(
     return event.model_dump(mode="json")
 
 
+def _agent_work_message(conv_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
+    status_value = event.get("status", "running")
+    agent_name = str(event.get("agent_name") or event.get("agent_id") or "Agent")
+    action = str(event.get("action") or event.get("summary") or "正在处理任务")
+    content = f"{agent_name}：{action}"
+    if status_value == "completed" and event.get("summary"):
+        content = f"{content}\n结果：{event['summary']}"
+    if status_value == "failed" and event.get("error"):
+        content = f"{content}\n错误：{event['error']}"
+
+    return {
+        "id": str(uuid.uuid4()),
+        "role": "agent",
+        "agent_name": agent_name,
+        "content": content,
+        "timestamp": str(event.get("timestamp") or datetime.now().isoformat()),
+        "type": "progress",
+        "metadata": {
+            "workflow_id": event.get("task_id"),
+            "event_type": event.get("event_type"),
+            "agent_id": event.get("agent_id"),
+            "profile_id": event.get("profile_id"),
+            "status": status_value,
+            "task": (event.get("data") or {}).get("task") or action,
+            "summary": event.get("summary"),
+            "error": event.get("error"),
+        },
+    }
+
+
+def _queue_conversation_event(conv_id: str, event_type: str, data: Dict[str, Any]) -> None:
+    queue = conversation_event_queues.setdefault(conv_id, [])
+    queue.append({"type": event_type, "data": data})
+    del queue[:-200]
+
+
+async def _execute_full_workflow_compat(
+    context: WorkflowContext,
+    *,
+    phase_callback=None,
+    event_callback=None,
+    agent_event_callback=None,
+):
+    import inspect as _inspect
+
+    params = _inspect.signature(workflow_engine.execute_full_workflow).parameters
+    kwargs = {}
+    if "phase_callback" in params:
+        kwargs["phase_callback"] = phase_callback
+    if "event_callback" in params:
+        kwargs["event_callback"] = event_callback
+    if "agent_event_callback" in params:
+        kwargs["agent_event_callback"] = agent_event_callback
+    return await workflow_engine.execute_full_workflow(context, **kwargs)
+
+
 @router.post("/workflows", status_code=status.HTTP_201_CREATED)
 async def create_workflow_session(request: WorkflowStartRequest):
     """创建 Hermes/Profile 驱动的专利工作流会话（默认先进入头脑风暴）"""
@@ -991,11 +1048,27 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
         )
 
     async def run_workflow():
+        async def agent_event_callback(event: Dict[str, Any]):
+            event = dict(event)
+            event.setdefault("task_id", task_id)
+            event.setdefault("timestamp", datetime.now().isoformat())
+            message = _agent_work_message("", event)
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent=str(event.get("agent_name") or event.get("agent_id") or "agent"),
+                    message=message["content"],
+                    event_type=str(event.get("event_type") or "agent.work"),
+                    data=event,
+                )
+            await _persist_events(task_id)
+
         try:
-            await workflow_engine.execute_full_workflow(
+            await _execute_full_workflow_compat(
                 context,
                 phase_callback=phase_callback,
                 event_callback=_workflow_event_callback,
+                agent_event_callback=agent_event_callback,
             )
             async with workflow_lock:
                 _append_workflow_terminal_event(task_id, context, "专利申请流程已完成")
@@ -1342,11 +1415,36 @@ async def restart_workflow(task_id: str, background_tasks: BackgroundTasks):
             await _persist_events(task_id)
             await _persist_workflow(task_id)
 
+        async def agent_event_callback(event: Dict[str, Any]):
+            event = dict(event)
+            event.setdefault("task_id", task_id)
+            event.setdefault("conversation_id", conv_id)
+            event.setdefault("timestamp", datetime.now().isoformat())
+            message = _agent_work_message(conv_id, event)
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent=str(event.get("agent_name") or event.get("agent_id") or "agent"),
+                    message=message["content"],
+                    event_type=str(event.get("event_type") or "agent.work"),
+                    data=event,
+                )
+            async with conversations_lock:
+                c = conversations_store.get(conv_id)
+                if c:
+                    c["messages"].append(message)
+                    c["updated_at"] = datetime.now().isoformat()
+            _queue_conversation_event(conv_id, "agent_work", event)
+            _queue_conversation_event(conv_id, "conversation_message", message)
+            await _persist_events(task_id)
+            await _persist_conversation(conv_id)
+
         try:
-            await workflow_engine.execute_full_workflow(
+            await _execute_full_workflow_compat(
                 context,
                 phase_callback=_phase_cb,
                 event_callback=_event_cb,
+                agent_event_callback=agent_event_callback,
             )
             async with workflow_lock:
                 _append_workflow_terminal_event(task_id, context, "专利申请流程已完成")
@@ -1616,7 +1714,7 @@ async def _execute_workflow(task_id: str):
             await _persist_events(task_id)
 
         # 4. 执行完整工作流（依次调度各 Agent）
-        await workflow_engine.execute_full_workflow(
+        await _execute_full_workflow_compat(
             context,
             phase_callback=phase_callback,
             event_callback=_workflow_event_callback,
@@ -3887,11 +3985,36 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             await _persist_events(task_id)
             await _persist_workflow(task_id)
 
+        async def agent_event_callback(event: Dict[str, Any]):
+            event = dict(event)
+            event.setdefault("task_id", task_id)
+            event.setdefault("conversation_id", conv_id)
+            event.setdefault("timestamp", datetime.now().isoformat())
+            message = _agent_work_message(conv_id, event)
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent=str(event.get("agent_name") or event.get("agent_id") or "agent"),
+                    message=message["content"],
+                    event_type=str(event.get("event_type") or "agent.work"),
+                    data=event,
+                )
+            async with conversations_lock:
+                c = conversations_store.get(conv_id)
+                if c:
+                    c["messages"].append(message)
+                    c["updated_at"] = datetime.now().isoformat()
+            _queue_conversation_event(conv_id, "agent_work", event)
+            _queue_conversation_event(conv_id, "conversation_message", message)
+            await _persist_events(task_id)
+            await _persist_conversation(conv_id)
+
         try:
-            await workflow_engine.execute_full_workflow(
+            await _execute_full_workflow_compat(
                 context,
                 phase_callback=_phase_cb,
                 event_callback=_event_cb,
+                agent_event_callback=agent_event_callback,
             )
             async with workflow_lock:
                 _append_workflow_terminal_event(task_id, context, "专利申请流程已完成")
@@ -3925,6 +4048,61 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
     return {"task_id": task_id, "status": "started", "conversation_id": conv_id}
 
 
+@router.get("/conversations/{conv_id}/events/stream")
+async def stream_conversation_events(conv_id: str):
+    """SSE stream for linked workflow agent work events in a conversation."""
+    async with conversations_lock:
+        if conv_id not in conversations_store:
+            stored = await _get_persist_store().load("conversations", conv_id)
+            if stored:
+                conversations_store[conv_id] = stored
+            else:
+                raise HTTPException(status_code=404, detail="对话不存在")
+
+    async def event_generator():
+        import json as _json
+
+        last_sent = 0
+        idle_ticks = 0
+        while True:
+            sent_this_tick = False
+            while True:
+                async with conversations_lock:
+                    queue = conversation_event_queues.get(conv_id)
+                    item = queue.pop(0) if queue else None
+                    if queue == []:
+                        conversation_event_queues.pop(conv_id, None)
+                if item is None:
+                    break
+                yield f"event: {item['type']}\ndata: {_json.dumps(item['data'], ensure_ascii=False)}\n\n"
+                last_sent += 1
+                sent_this_tick = True
+
+            async with conversations_lock:
+                conv = conversations_store.get(conv_id)
+                linked_id = conv.get("linked_workflow_id") if conv else None
+            context = workflow_engine.get_workflow(linked_id) if linked_id else None
+            if last_sent > 0 and (not context or context.current_phase in [EngineWorkflowState.COMPLETED, EngineWorkflowState.FAILED, EngineWorkflowState.CANCELLED]):
+                async with conversations_lock:
+                    conversation_event_queues.pop(conv_id, None)
+                yield "event: done\ndata: {}\n\n"
+                break
+
+            idle_ticks += 1
+            if not linked_id and idle_ticks >= 1:
+                break
+            if idle_ticks > 30 and not sent_this_tick:
+                yield "event: heartbeat\ndata: {}\n\n"
+                idle_ticks = 0
+            await asyncio.sleep(0.1)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.patch("/conversations/{conv_id}", response_model=dict)
 async def update_conversation(conv_id: str, body: dict):
     """更新对话会话属性（如标题）"""
@@ -3951,6 +4129,7 @@ async def delete_conversation(conv_id: str):
         if conv_id not in conversations_store:
             raise HTTPException(status_code=404, detail="对话不存在")
         del conversations_store[conv_id]
+        conversation_event_queues.pop(conv_id, None)
     store = _get_persist_store()
     await store.delete("conversations", conv_id)
 

@@ -20,7 +20,54 @@ import rehypeHighlight from 'rehype-highlight';
 import { clsx } from 'clsx';
 import { conversationApi, workflowApi } from '@/lib/api';
 import type { ConversationSummary } from '@/lib/api';
-import type { AgentEvent, ChatMessage } from '@/types';
+import type { AgentEvent, AgentWorkEvent, ChatMessage } from '@/types';
+
+const terminalWorkflowStates = new Set(['completed', 'failed', 'cancelled']);
+
+function upsertMessage(messages: ChatMessage[], nextMessage: ChatMessage): ChatMessage[] {
+  if (messages.some((message) => message.id === nextMessage.id)) return messages;
+  return [...messages, nextMessage];
+}
+
+function updateDispatchActivities(activities: DispatchActivity[], event: AgentWorkEvent): DispatchActivity[] {
+  const task = typeof event.data?.task === 'string' ? event.data.task : event.action;
+
+  if (event.event_type === 'agent.work.started') {
+    if (activities.some((activity) => activity.agentId === event.agent_id && activity.task === task && activity.status === 'running')) {
+      return activities;
+    }
+    return [...activities, {
+      id: `workflow-${event.timestamp}-${event.agent_id}`,
+      agentId: event.agent_id,
+      agentName: event.agent_name,
+      task,
+      status: 'running',
+      startedAt: event.timestamp,
+    }];
+  }
+
+  if (event.event_type === 'agent.work.completed' || event.event_type === 'agent.work.failed') {
+    const nextStatus = event.event_type === 'agent.work.completed' ? 'completed' : 'failed';
+    const idx = activities.findLastIndex((activity) => activity.agentId === event.agent_id && activity.task === task && activity.status === 'running');
+    if (idx === -1) {
+      return [...activities, {
+        id: `workflow-${event.timestamp}-${event.agent_id}`,
+        agentId: event.agent_id,
+        agentName: event.agent_name,
+        task,
+        status: nextStatus,
+        result: event.summary || event.error,
+        startedAt: event.timestamp,
+        completedAt: event.timestamp,
+      }];
+    }
+    const updated = [...activities];
+    updated[idx] = { ...updated[idx], status: nextStatus, result: event.summary || event.error, completedAt: event.timestamp };
+    return updated;
+  }
+
+  return activities;
+}
 
 function createWelcomeMessage(): ChatMessage {
   return {
@@ -361,6 +408,28 @@ function ChatPageContent() {
       setWorkflowState(workflow.current_state);
     }).catch(() => {});
   }, [taskIdFromParam, convIdFromParam]);
+
+  useEffect(() => {
+    if (!activeConvId || !workflowTaskId || (workflowState && terminalWorkflowStates.has(workflowState))) return;
+
+    const stream = conversationApi.eventStream(activeConvId, {
+      onAgentWork: (event) => {
+        setDispatchActivities((current) => updateDispatchActivities(current, event));
+        if (event.event_type === 'agent.work.failed') {
+          setWorkflowState('failed');
+        }
+      },
+      onConversationMessage: (message) => {
+        setMessages((current) => upsertMessage(current, message));
+      },
+      onDone: () => {
+        void loadConversation(activeConvId);
+      },
+      onError: () => {},
+    });
+
+    return () => stream.abort();
+  }, [activeConvId, loadConversation, workflowState, workflowTaskId]);
 
   // Create new conversation
   const handleNewConversation = async () => {
@@ -940,7 +1009,7 @@ function ChatPageContent() {
                     <p className="text-xs text-slate/60 mt-0.5">
                       {conv.message_count} 条消息 · {formatDate(conv.updated_at)}
                     </p>
-                    {conv.linked_workflow_id && (
+                    {(conv.linked_workflow_id || conv.workflow_task_id) && (
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         <span className="inline-flex items-center gap-1 rounded-full bg-canvas px-2 py-0.5 text-[11px] font-medium text-slate ring-1 ring-hairline">
                         {conv.status === 'completed' ? (
@@ -954,11 +1023,11 @@ function ChatPageContent() {
                            conv.status === 'initial' ? '待启动' : '进行中'}
                         </span>
                         </span>
-                        {conv.linked_workflow_id && (
+                        {(conv.linked_workflow_id || conv.workflow_task_id) && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              router.push(`/workflow/${encodeURIComponent(conv.linked_workflow_id!)}`);
+                              router.push(`/workflow/${encodeURIComponent((conv.linked_workflow_id || conv.workflow_task_id)! )}`);
                             }}
                             className="rounded-full px-2 py-0.5 text-[11px] font-medium text-brand-green-dark transition-colors hover:bg-brand-green/10 hover:text-brand-green focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
                             aria-label={`查看 ${conv.title || '当前对话'} 的工作流`}
@@ -1239,7 +1308,7 @@ function ChatPageContent() {
                         msg.role === 'user' ? 'justify-end' : 'justify-start'
                       )}
                     >
-                      {msg.role === 'assistant' && (
+                      {(msg.role === 'assistant' || msg.role === 'agent') && (
                         <div className="flex-shrink-0 mt-1">
                           <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
                             <Bot className="w-4.5 h-4.5 text-ink" />
@@ -1300,7 +1369,7 @@ function ChatPageContent() {
                                         {msg.isStreaming ? msg.content : (parsedContent?.conclusion || msg.content)}
                                       </ReactMarkdown>
                                     </div>
-                                    {msg.role === 'assistant' && (msg.tool_calls?.length || msg.skill_uses?.length) ? (
+                                    {(msg.role === 'assistant' || msg.role === 'agent') && (msg.tool_calls?.length || msg.skill_uses?.length) ? (
                                       <ToolCallCard
                                         toolCalls={msg.tool_calls}
                                         skillUses={msg.skill_uses}
@@ -1331,7 +1400,7 @@ function ChatPageContent() {
                         {msg.role === 'assistant' && !msg.isStreaming && msg.content && hasInteraction && (
                           <InteractionPanel interaction={parsedContent!.interaction} />
                         )}
-                        {msg.role === 'assistant' && msg.agent_events && msg.agent_events.length > 0 && (
+                        {(msg.role === 'assistant' || msg.role === 'agent') && msg.agent_events && msg.agent_events.length > 0 && (
                           <AgentActivityLog events={msg.agent_events} className="-mx-1 mt-2" />
                         )}
                         <p className="text-[11px] text-slate/60 mt-1 px-1">

@@ -100,6 +100,20 @@ logger = get_logger("workflow_engine")
 T = TypeVar("T", bound=BaseModel)
 
 QUALITY_REMEDIATION_THRESHOLD = 0.8
+SPECIALIST_AGENT_NAMES = {
+    "requirement_analyst": "需求分析师",
+    "retrieval_analyst": "检索分析师",
+    "patent_writer": "专利撰写 Agent",
+    "quality_reviewer": "质量审查 Agent",
+}
+
+SPECIALIST_AGENT_ACTIONS = {
+    "requirement_analyst": "分析技术方案并提取创新点",
+    "retrieval_analyst": "检索先有技术",
+    "patent_writer": "撰写专利申请文件",
+    "quality_reviewer": "审查专利申请文件质量",
+}
+
 
 
 class WorkflowState(str, Enum):
@@ -366,6 +380,7 @@ class PatentWorkflowEngine:
         context: WorkflowContext,
         phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None | Awaitable[None]]] = None,
         event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
+        agent_event_callback: Optional[Callable[[Dict[str, Any]], None | Awaitable[None]]] = None,
     ) -> WorkflowContext:
         """
         执行完整工作流 — 顺序调用各专业 Agent
@@ -374,6 +389,15 @@ class PatentWorkflowEngine:
         patent_writer 使用分段生成策略（权利要求+说明书+摘要）。
         """
         self._logger.info("Starting workflow", task_id=context.task_id)
+
+        async def emit_agent_work_event(event: Dict[str, Any]) -> None:
+            if agent_event_callback is None:
+                return
+            event.setdefault("task_id", context.task_id)
+            event.setdefault("timestamp", datetime.now().isoformat())
+            result = agent_event_callback(event)
+            if asyncio.iscoroutine(result):
+                await result
 
         try:
             service = _get_agent_factory()
@@ -390,16 +414,20 @@ class PatentWorkflowEngine:
                 await self._publish_progress_event(context, phase_state, "running")
 
                 # Agent 显示名映射
-                agent_display_names = {
-                    "requirement_analyst": "需求分析 Agent",
-                    "retrieval_analyst": "检索分析 Agent",
-                    "patent_writer": "专利撰写 Agent",
-                    "quality_reviewer": "质量审查 Agent",
-                }
-                agent_display_name = agent_display_names.get(agent_id, agent_id)
+                agent_display_name = SPECIALIST_AGENT_NAMES.get(agent_id, agent_id)
+                agent_action = SPECIALIST_AGENT_ACTIONS.get(agent_id, agent_id)
 
                 # 构建任务 prompt
                 task_desc = self._build_phase_prompt(context, phase_state)
+                await emit_agent_work_event({
+                    "event_type": "agent.work.started",
+                    "agent_id": agent_id,
+                    "agent_name": agent_display_name,
+                    "profile_id": profile_id,
+                    "action": agent_action,
+                    "status": "running",
+                    "data": {"task": agent_action, "phase": phase_state.value},
+                })
                 self._logger.info(f"Executing phase: {agent_id}")
 
                 # ═══ 失败自动重试（最多重试 max_retries 次）═══
@@ -437,7 +465,7 @@ class PatentWorkflowEngine:
                             ))
 
                         # patent_writer 使用分段生成
-                        if agent_id == "patent_writer":
+                        if agent_id == "patent_writer" and not hasattr(service, "run_conversation_stream"):
                             # 发射分段生成进度事件
                             if event_callback:
                                 event_callback(agent_display_name, "agent.thinking",
@@ -460,17 +488,12 @@ class PatentWorkflowEngine:
                             )
                             agent_text = agent_result.get("text", "")
                             agent_tool_results = agent_result.get("tool_results", [])
-
-                            # 解析 JSON
-                            parsed = self._try_parse_json(agent_text)
-                            if "raw_output" not in parsed:
-                                context_data = parsed
-                            else:
-                                context_data = {"agent": agent_id, "output": agent_text, "summary": agent_text[:500]}
-                            
-                            # 将工具调用结果整合到 context_data
-                            if agent_tool_results:
-                                context_data["tool_results"] = agent_tool_results
+                            context_data = self._build_context_data_from_agent_response(
+                                agent_id,
+                                agent_text,
+                                agent_tool_results,
+                                agent_result.get("structured_result"),
+                            )
 
 
                         context_data = self._normalize_phase_output(context_field, context_data)
@@ -544,6 +567,16 @@ class PatentWorkflowEngine:
                     await self._publish_progress_event(context, phase_state, "failed")
                     context.current_phase = WorkflowState.FAILED
                     await self._publish_progress_event(context, WorkflowState.FAILED, "failed")
+                    await emit_agent_work_event({
+                        "event_type": "agent.work.failed",
+                        "agent_id": agent_id,
+                        "agent_name": agent_display_name,
+                        "profile_id": profile_id,
+                        "action": agent_action,
+                        "status": "failed",
+                        "error": agent_error,
+                        "data": {"task": agent_action, "phase": phase_state.value},
+                    })
                     self._logger.error(
                         f"Workflow phase failed: {agent_id}: {agent_error}",
                         task_id=context.task_id,
@@ -558,6 +591,16 @@ class PatentWorkflowEngine:
                     output=context_data if isinstance(context_data, dict) else {},
                 ))
                 await self._publish_progress_event(context, phase_state, "completed")
+                await emit_agent_work_event({
+                    "event_type": "agent.work.completed",
+                    "agent_id": agent_id,
+                    "agent_name": agent_display_name,
+                    "profile_id": profile_id,
+                    "action": agent_action,
+                    "status": "completed",
+                    "summary": agent_text[:300] if agent_text else "",
+                    "data": {"task": agent_action, "phase": phase_state.value},
+                })
 
                 if phase_callback:
                     if asyncio.iscoroutinefunction(phase_callback):
@@ -643,14 +686,12 @@ class PatentWorkflowEngine:
                     )
                     agent_text = agent_result.get("text", "")
                     agent_tool_results = agent_result.get("tool_results", [])
-
-                    parsed = self._try_parse_json(agent_text)
-                    if "raw_output" not in parsed:
-                        context_data = parsed
-                    else:
-                        context_data = {"agent": "patent_writer", "output": agent_text, "summary": agent_text[:500]}
-                    if agent_tool_results:
-                        context_data["tool_results"] = agent_tool_results
+                    context_data = self._build_context_data_from_agent_response(
+                        "patent_writer",
+                        agent_text,
+                        agent_tool_results,
+                        agent_result.get("structured_result"),
+                    )
 
                     if event_callback:
                         event_callback("专利撰写 Agent", "agent.content",
@@ -688,14 +729,12 @@ class PatentWorkflowEngine:
                     )
                     agent_text = agent_result.get("text", "")
                     agent_tool_results = agent_result.get("tool_results", [])
-
-                    parsed = self._try_parse_json(agent_text)
-                    if "raw_output" not in parsed:
-                        context_data = parsed
-                    else:
-                        context_data = {"agent": "quality_reviewer", "output": agent_text, "summary": agent_text[:500]}
-                    if agent_tool_results:
-                        context_data["tool_results"] = agent_tool_results
+                    context_data = self._build_context_data_from_agent_response(
+                        "quality_reviewer",
+                        agent_text,
+                        agent_tool_results,
+                        agent_result.get("structured_result"),
+                    )
 
                     if event_callback:
                         event_callback("质量审查 Agent", "agent.content",
@@ -2418,6 +2457,29 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             return content.strip()
         return text
 
+    def _build_context_data_from_agent_response(
+        self,
+        agent_id: str,
+        agent_text: Any,
+        agent_tool_results: List[Dict[str, Any]],
+        structured_result: Any = None,
+    ) -> Dict[str, Any]:
+        """Build normalized phase input from text plus optional structured agent result."""
+        text = agent_text if isinstance(agent_text, str) else ""
+
+        if isinstance(structured_result, dict):
+            context_data = dict(structured_result)
+        else:
+            parsed = self._try_parse_json(text)
+            if "raw_output" not in parsed:
+                context_data = parsed
+            else:
+                context_data = {"agent": agent_id, "output": text, "summary": text[:500]}
+
+        if agent_tool_results:
+            context_data["tool_results"] = agent_tool_results
+        return context_data
+
     def _normalize_phase_output(self, context_field: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """将 Agent 输出规范化为前端期望的数据格式
 
@@ -3307,10 +3369,16 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             # 默认用 Google Patents
             return f"https://patents.google.com/patent/{pid}" if pid else ""
 
-    def _try_parse_json(self, text: str) -> Dict[str, Any]:
+    def _try_parse_json(self, text: Any) -> Dict[str, Any]:
         """尝试从文本中解析 JSON，支持处理截断的 JSON 和混合格式"""
         import re
 
+        if isinstance(text, dict):
+            return text
+        if isinstance(text, list):
+            return {"results": text}
+        if not isinstance(text, str):
+            return {"raw_output": "" if text is None else str(text)}
         if not text:
             return {"raw_output": ""}
 
@@ -3405,7 +3473,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 
     def _repair_truncated_json(self, json_str: str) -> Optional[str]:
         """尝试修复被截断的 JSON（补充缺失的闭合括号和引号）"""
-        if not json_str:
+        if not isinstance(json_str, str) or not json_str:
             return None
 
         # 统计未闭合的括号
@@ -3463,6 +3531,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 
         content_chunks: List[str] = []
         final_text = ""
+        structured_result = None
         tool_results: List[Dict[str, Any]] = []
         events: List[Dict[str, Any]] = []
         events_lock = threading.Lock()
@@ -3472,6 +3541,47 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             """通过callback直接发射事件"""
             if event_callback:
                 event_callback(agent_name, evt_type, message, data or {})
+
+        if hasattr(service, "run_conversation_stream"):
+            async for event in service.run_conversation_stream(profile_id, user_input, user_id=context.user_id):
+                event_type = event.get("type", "")
+                event_data = event.get("data", {}) if isinstance(event.get("data", {}), dict) else {}
+
+                if event_type == "tool_call_start":
+                    tool_name = event_data.get("name", "")
+                    params = event_data.get("parameters", {})
+                    _emit("agent.tool_call_start", f"🔧 调用工具: {tool_name}", {
+                        "agent_name": agent_name,
+                        "tool_name": tool_name,
+                        "parameters": params,
+                    })
+                elif event_type == "tool_call_end":
+                    tool_name = event_data.get("name", "")
+                    result = event_data.get("result", "")
+                    result_str = str(result) if result else ""
+                    success = event_data.get("success", True)
+                    status_icon = "✅" if success else "❌"
+                    _emit("agent.tool_call_end", f"{status_icon} {tool_name} 返回", {
+                        "agent_name": agent_name,
+                        "tool_name": tool_name,
+                        "parameters": event_data.get("parameters", {}),
+                        "result": result_str,
+                        "success": success,
+                    })
+                    tool_results.append({
+                        "tool": tool_name,
+                        "parameters": event_data.get("parameters", {}),
+                        "result": result,
+                        "result_preview": result_str,
+                        "success": success,
+                    })
+                elif event_type in {"content", "done"}:
+                    content = event_data.get("content")
+                    if isinstance(content, str):
+                        content_chunks.append(content)
+
+            final_text = "".join(content_chunks)
+            return {"text": final_text, "tool_results": tool_results}
 
         def on_thinking(data):
             text = str(data).strip() if data else ""
@@ -3625,10 +3735,15 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 )
                 # Fallback: 同步调用
                 raw = await _run_agent_conversation(profile_id, user_input)
-                final_text = raw
+                if isinstance(raw, dict):
+                    structured_result = raw
+                    final_text = raw.get("final_response", "") or raw.get("content", "") or json.dumps(raw, ensure_ascii=False)
+                else:
+                    final_text = str(raw) if raw else ""
             else:
                 result = result_holder["result"]
                 if isinstance(result, dict):
+                    structured_result = result
                     final_text = result.get("final_response", "") or result.get("content", "") or json.dumps(result, ensure_ascii=False)
                 else:
                     final_text = str(result) if result else ""
@@ -3648,6 +3763,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             # Fallback: 同步调用
             raw = await _run_agent_conversation(profile_id, user_input)
             if isinstance(raw, dict):
+                structured_result = raw
                 final_text = raw.get("final_response", "") or raw.get("content", "") or json.dumps(raw, ensure_ascii=False)
             else:
                 final_text = str(raw) if raw else ""
@@ -3663,6 +3779,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         return {
             "text": final_text,
             "tool_results": tool_results,
+            "structured_result": structured_result,
         }
 
     def _emit_process_logs_from_text(
