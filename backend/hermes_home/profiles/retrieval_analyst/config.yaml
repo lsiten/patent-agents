@@ -12,6 +12,10 @@ enabled_tools:
 - similarity_analyzer
 - patentability_scorer
 - risk_analyzer
+- web_access_read_page
+- web_access_find_url
+- web_access_browser
+- web_access_match_site
 memory:
   short_term: true
   long_term: true
