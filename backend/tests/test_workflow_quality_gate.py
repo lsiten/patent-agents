@@ -377,6 +377,60 @@ class TestNormalizePhaseOutput:
         # After normalization, _check_review_needs_revision MUST return True
         assert engine._check_review_needs_revision(normalized) is True
 
+
+    def test_try_parse_json_accepts_dict_without_split(self):
+        engine = PatentWorkflowEngine()
+        payload = {"failed": True, "error": "timeout", "completed": False}
+        assert engine._try_parse_json(payload) == payload
+
+    def test_agent_response_helper_prefers_structured_result(self):
+        engine = PatentWorkflowEngine()
+        structured = {"failed": True, "error": "timeout", "completed": False}
+        context_data = engine._build_context_data_from_agent_response(
+            "quality_reviewer",
+            "",
+            [],
+            structured,
+        )
+        normalized = engine._normalize_phase_output("review_report", context_data)
+        assert normalized.get("_agent_failed") is True
+        assert normalized.get("_agent_error") == "timeout"
+
+
+    @pytest.mark.asyncio
+    async def test_run_agent_stream_fallback_preserves_dict_result(self, monkeypatch):
+        import src.core.workflow_engine as workflow_module
+
+        engine = PatentWorkflowEngine()
+        context = WorkflowContext(task_id="stream-dict", user_id="u-stream")
+
+        def fake_create_ai_agent(profile_id, callbacks=None):
+            raise RuntimeError("stream unavailable")
+
+        async def fake_run_agent_conversation(profile_id, prompt):
+            return {"failed": True, "error": "timeout", "completed": False}
+
+        monkeypatch.setattr(
+            "src.agents.agent_config.create_ai_agent",
+            fake_create_ai_agent,
+        )
+        monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
+
+        result = await engine._run_agent_stream(
+            None,
+            "patent.quality_reviewer.v1",
+            "review prompt",
+            context,
+            "质量审查 Agent",
+        )
+
+        assert isinstance(result["text"], str)
+        assert result["structured_result"] == {
+            "failed": True,
+            "error": "timeout",
+            "completed": False,
+        }
+
     def test_patent_draft_agent_failure_propagates(self):
         engine = PatentWorkflowEngine()
         # Simulate the dict produced when agent.run_conversation fails
