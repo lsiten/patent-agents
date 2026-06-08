@@ -28,6 +28,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { workflowApi } from '@/lib/api';
+import { normalizeQualityScoreForDisplay } from '@/lib/quality-review-score';
 import { getRetrievalPatentReferences } from '@/lib/retrieval-report';
 import type { PatentDrawing } from '@/types';
 
@@ -726,10 +727,13 @@ interface QualityReviewViewProps {
 export function QualityReviewView({ data, roundIndex }: QualityReviewViewProps) {
   if (!data || Object.keys(data).length === 0) return null;
 
-  const overallScore = num(data.overall_score);
-  const overallRating = str(data.overall_rating);
+  const reviewSummaryData = isRecord(data.review_summary) ? data.review_summary : {};
+  const overallScore = normalizeQualityScoreForDisplay(
+    num(data.overall_score) ?? num(reviewSummaryData.overall_score)
+  );
+  const overallRating = str(data.overall_rating || reviewSummaryData.overall_rating);
   const recommendation = str(data.recommendation);
-  const reviewSummary = str(data.review_summary);
+  const reviewSummary = str(data.review_summary) || str(reviewSummaryData.reviewer_notes);
   const revisionSuggestions = arr(data.revision_suggestions).map((s) => str(s)).filter(Boolean);
 
   const formalCompliance = isRecord(data.formal_compliance) ? data.formal_compliance : {};
