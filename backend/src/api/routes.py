@@ -667,9 +667,23 @@ def _agent_tool_category(tool_name: str) -> str:
         return "search"
     if any(keyword in tool_name for keyword in ("format", "write", "draft", "document", "claim")):
         return "file"
-    if any(keyword in tool_name for keyword in ("delegate", "spawn", "workflow")):
+    if any(keyword in tool_name for keyword in ("delegate", "spawn", "workflow", "browser", "access")):
         return "external"
     return "analysis"
+
+
+def _tool_related_files(tool_name: str) -> List[str]:
+    rel_paths = _KNOWN_TOOL_IMPL_FILES.get(tool_name)
+    if not rel_paths:
+        return []
+    if isinstance(rel_paths, str):
+        return [rel_paths]
+    return list(rel_paths)
+
+
+def _tool_primary_file(tool_name: str) -> Optional[str]:
+    rel_paths = _tool_related_files(tool_name)
+    return rel_paths[0] if rel_paths else None
 
 
 def _require_agent_profile(agent_id: str):
@@ -2275,7 +2289,7 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
                 "config": {},
                 "is_hermes": True,
                 "source_code": None,
-                "related_files": [_KNOWN_TOOL_IMPL_FILES.get(tool_name)] if _KNOWN_TOOL_IMPL_FILES.get(tool_name) else [],
+                "related_files": _tool_related_files(tool_name),
             })
 
         # 用户添加的额外工具
@@ -4205,7 +4219,7 @@ def _extract_tool_structure(source_code: str | None, tool_name: str) -> dict:
             "description": None,
             "parameters": [],
             "methods": [],
-            "file_path": _KNOWN_TOOL_IMPL_FILES.get(tool_name),
+            "file_path": _tool_primary_file(tool_name),
             "template": _get_tool_template(),
         }
 
@@ -4266,7 +4280,7 @@ def _extract_tool_structure(source_code: str | None, tool_name: str) -> dict:
         "description": description,
         "parameters": parameters,
         "methods": methods,
-        "file_path": _KNOWN_TOOL_IMPL_FILES.get(tool_name),
+        "file_path": _tool_primary_file(tool_name),
         "template": _get_tool_template(),
     }
 
@@ -4357,7 +4371,7 @@ metadata:
 使用该技能时的注意点。
 '''
 
-_KNOWN_TOOL_IMPL_FILES: dict[str, str] = {
+_KNOWN_TOOL_IMPL_FILES: dict[str, str | list[str]] = {
     "task_planner": "backend/src/agents/hermes/tools/task_planner.py",
     "quality_assessor": "backend/src/agents/hermes/tools/quality_assessor.py",
     "report_generator": "backend/src/agents/hermes/tools/report_generator.py",
@@ -4383,6 +4397,23 @@ _KNOWN_TOOL_IMPL_FILES: dict[str, str] = {
     "prior_art_comparator": "backend/src/agents/hermes/tools/prior_art_comparator.py",
     "patent_drawing_generator": "backend/src/agents/hermes/tools/patent_drawing_generator.py",
     "patent_docx_generator": "backend/src/agents/hermes/tools/patent_docx_generator.py",
+    "web_access_read_page": [
+        "backend/src/agents/hermes/tools/web_access.py",
+        "backend/src/agents/hermes/tools/web_access_common.py",
+    ],
+    "web_access_find_url": [
+        "backend/src/agents/hermes/tools/web_access.py",
+        "backend/src/agents/hermes/tools/web_access_common.py",
+    ],
+    "web_access_browser": [
+        "backend/src/agents/hermes/tools/web_access.py",
+        "backend/src/agents/hermes/tools/web_access_common.py",
+    ],
+    "web_access_match_site": [
+        "backend/src/agents/hermes/tools/web_access.py",
+        "backend/src/agents/hermes/tools/web_access_common.py",
+        "backend/src/agents/hermes/web_access_runtime/references/site-patterns",
+    ],
 }
 
 
@@ -4424,31 +4455,33 @@ async def get_agent_related_files(
             if not any(t.get("id") == tool_id or t.get("name") == tool_id for t in added_tools):
                 raise HTTPException(status_code=404, detail=f"工具未找到: {tool_id}")
 
-        rel_path = _KNOWN_TOOL_IMPL_FILES.get(tool_id)
-        if not rel_path:
+        rel_paths = _tool_related_files(tool_id)
+        if not rel_paths:
             raise HTTPException(status_code=404, detail=f"工具实现文件未配置: {tool_id}")
-        source_code = _read_file(rel_path)
+        source_code = _read_file(rel_paths[0])
         if source_code is None:
-            raise HTTPException(status_code=404, detail=f"工具实现文件不存在: {rel_path}")
+            raise HTTPException(status_code=404, detail=f"工具实现文件不存在: {rel_paths[0]}")
 
         # 提取工具结构元数据
         structure_info = _extract_tool_structure(source_code, tool_id)
-        
-        tool_filename = _os.path.basename(rel_path)
-        
-        # 只返回工具主文件
-        dir_tree = [{
-            "name": tool_filename,
-            "path": rel_path,
-            "type": "file",
-            "is_main": True,
-        }]
-        
-        all_files = [{
-            "path": rel_path,
-            "content": source_code,
-            "size": len(source_code.encode('utf-8')),
-        }]
+
+        dir_tree = []
+        all_files = []
+        for index, rel_path in enumerate(rel_paths):
+            file_content = source_code if index == 0 else _read_file(rel_path)
+            if file_content is None:
+                raise HTTPException(status_code=404, detail=f"工具实现文件不存在: {rel_path}")
+            dir_tree.append({
+                "name": _os.path.basename(rel_path),
+                "path": rel_path,
+                "type": "file",
+                "is_main": index == 0,
+            })
+            all_files.append({
+                "path": rel_path,
+                "content": file_content,
+                "size": len(file_content.encode('utf-8')),
+            })
 
         return {
             "type": "tool",

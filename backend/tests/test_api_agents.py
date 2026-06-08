@@ -56,6 +56,37 @@ class TestAgentDetail:
         assert response.status_code == 404
         assert "detail" in response.json()
 
+    def test_retrieval_agent_exposes_web_access_tools_with_related_files(self, client, api_prefix):
+        response = client.get(f"{api_prefix}/agents/patent.retrieval_analyst.v1")
+        assert response.status_code == 200
+
+        tools = {tool["id"]: tool for tool in response.json()["tools"]}
+        assert "web_access_read_page" in tools
+        assert "web_access_find_url" in tools
+        assert "web_access_browser" in tools
+        assert "web_access_match_site" in tools
+        assert tools["web_access_browser"]["related_files"] == [
+            "backend/src/agents/hermes/tools/web_access.py",
+            "backend/src/agents/hermes/tools/web_access_common.py",
+        ]
+
+
+class TestAgentRelatedFiles:
+    def test_related_files_returns_web_access_tool_and_helper(self, client, api_prefix):
+        response = client.get(
+            f"{api_prefix}/agents/patent.retrieval_analyst.v1/related-files",
+            params={"tool_id": "web_access_browser"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["type"] == "tool"
+        assert data["name"] == "web_access_browser"
+        assert len(data["files"]) == 2
+        assert data["files"][0]["path"] == "backend/src/agents/hermes/tools/web_access.py"
+        assert data["files"][1]["path"] == "backend/src/agents/hermes/tools/web_access_common.py"
+        assert any(entry["is_main"] is True for entry in data["directory_tree"])
+
 
 class TestToggleAgent:
     def test_toggle_agent_tool_changes_state(self, client, api_prefix):

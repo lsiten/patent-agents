@@ -267,6 +267,34 @@ def _handle_prior_art_comparator(args: Dict[str, Any], **kw) -> str:
     return _json_result(result)
 
 
+def _handle_web_access_read_page(args: Dict[str, Any], **kw) -> str:
+    from src.agents.hermes.tools.web_access import WebAccessReadPageTool
+    tool = WebAccessReadPageTool()
+    result = _run_async(tool.execute(**args))
+    return _json_result(result)
+
+
+def _handle_web_access_find_url(args: Dict[str, Any], **kw) -> str:
+    from src.agents.hermes.tools.web_access import WebAccessFindUrlTool
+    tool = WebAccessFindUrlTool()
+    result = _run_async(tool.execute(**args))
+    return _json_result(result)
+
+
+def _handle_web_access_browser(args: Dict[str, Any], **kw) -> str:
+    from src.agents.hermes.tools.web_access import WebAccessBrowserTool
+    tool = WebAccessBrowserTool()
+    result = _run_async(tool.execute(**args))
+    return _json_result(result)
+
+
+def _handle_web_access_match_site(args: Dict[str, Any], **kw) -> str:
+    from src.agents.hermes.tools.web_access import WebAccessMatchSiteTool
+    tool = WebAccessMatchSiteTool()
+    result = _run_async(tool.execute(**args))
+    return _json_result(result)
+
+
 # ============ Tool Schemas ============
 
 PATENT_TOOL_DEFINITIONS = [
@@ -640,6 +668,92 @@ PATENT_TOOL_DEFINITIONS = [
         },
         "handler": _handle_prior_art_comparator,
         "emoji": "📋",
+    },
+    {
+        "name": "web_access_read_page",
+        "schema": {
+            "name": "web_access_read_page",
+            "description": "运行 web-access 前置检查，并可选打开页面返回基础信息与 DOM eval 结果",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "可选。需要后台打开的页面 URL"},
+                    "browser": {"type": "string", "description": "可选。一次性指定浏览器 chrome 或 edge", "enum": ["chrome", "edge"]},
+                    "eval_expression": {"type": "string", "description": "可选。打开后执行的 JS 表达式"},
+                    "auto_close": {"type": "string", "description": "可选。默认 true，读取后关闭新建 tab"},
+                },
+                "required": [],
+            },
+        },
+        "handler": _handle_web_access_read_page,
+        "emoji": "🌐",
+    },
+    {
+        "name": "web_access_find_url",
+        "schema": {
+            "name": "web_access_find_url",
+            "description": "通过 web-access 的 find-url.mjs 查询本地 Chrome 书签与历史记录",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keywords": {"type": "string", "description": "可选。空格分词关键字"},
+                    "only": {"type": "string", "description": "可选。bookmarks 或 history", "enum": ["bookmarks", "history"]},
+                    "browser": {"type": "string", "description": "可选。限定浏览器 chrome 或 edge", "enum": ["chrome", "edge"]},
+                    "limit": {"type": "string", "description": "可选。结果上限，默认 20"},
+                    "since": {"type": "string", "description": "可选。1d / 7h / YYYY-MM-DD"},
+                    "sort": {"type": "string", "description": "可选。recent 或 visits", "enum": ["recent", "visits"]},
+                },
+                "required": [],
+            },
+        },
+        "handler": _handle_web_access_find_url,
+        "emoji": "🔗",
+    },
+    {
+        "name": "web_access_browser",
+        "schema": {
+            "name": "web_access_browser",
+            "description": "通过 web-access CDP Proxy 执行 tab 管理、导航、DOM eval、交互、截图与健康检查",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "代理操作",
+                        "enum": ["health", "targets", "new", "navigate", "back", "info", "eval", "click", "clickAt", "setFiles", "scroll", "screenshot", "close", "preflight"],
+                    },
+                    "target": {"type": "string", "description": "目标 tab 的 targetId"},
+                    "url": {"type": "string", "description": "new/navigate 使用的 URL"},
+                    "browser": {"type": "string", "description": "可选。preflight 时一次性指定浏览器 chrome 或 edge", "enum": ["chrome", "edge"]},
+                    "expression": {"type": "string", "description": "eval 使用的 JS 表达式"},
+                    "selector": {"type": "string", "description": "click/clickAt/setFiles 使用的 CSS selector"},
+                    "files_json": {"type": "string", "description": "setFiles 用 JSON 字符串，如 [\"/tmp/a.png\"]"},
+                    "file_path": {"type": "string", "description": "screenshot 输出路径；缺省时自动生成临时文件"},
+                    "y": {"type": "string", "description": "scroll 像素值"},
+                    "direction": {"type": "string", "description": "scroll 方向 down/up/top/bottom"},
+                    "format": {"type": "string", "description": "截图格式 png/jpeg", "enum": ["png", "jpeg"]},
+                },
+                "required": ["action"],
+            },
+        },
+        "handler": _handle_web_access_browser,
+        "emoji": "🧭",
+    },
+    {
+        "name": "web_access_match_site",
+        "schema": {
+            "name": "web_access_match_site",
+            "description": "根据查询内容匹配 bundled web-access 的站点经验文件",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "需要匹配站点经验的查询文本"},
+                },
+                "required": ["query"],
+            },
+        },
+        "handler": _handle_web_access_match_site,
+        "emoji": "🗂️",
     },
     {
         "name": "dispatch_specialist",
