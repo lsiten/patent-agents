@@ -16,7 +16,70 @@ import { DispatchPanel, type DispatchActivity } from '@/components/chat/Dispatch
 import { clsx } from 'clsx';
 import { conversationApi, workflowApi } from '@/lib/api';
 import type { ConversationSummary } from '@/lib/api';
-import type { ChatMessage } from '@/types';
+import type { AgentWorkEvent, ChatMessage } from '@/types';
+
+const terminalWorkflowStates = new Set(['completed', 'failed', 'cancelled']);
+
+function getAgentMessageStatus(message: ChatMessage): string | undefined {
+  const status = message.metadata?.status;
+  return typeof status === 'string' ? status : undefined;
+}
+
+function upsertMessage(messages: ChatMessage[], nextMessage: ChatMessage): ChatMessage[] {
+  if (messages.some((message) => message.id === nextMessage.id)) return messages;
+  return [...messages, nextMessage];
+}
+
+function updateDispatchActivities(activities: DispatchActivity[], event: AgentWorkEvent): DispatchActivity[] {
+  const task = typeof event.data?.task === 'string' ? event.data.task : event.action;
+
+  if (event.event_type === 'agent.work.started') {
+    if (activities.some((activity) => activity.agentId === event.agent_id && activity.task === task && activity.status === 'running')) {
+      return activities;
+    }
+    return [
+      ...activities,
+      {
+        id: `workflow-${event.timestamp}-${event.agent_id}`,
+        agentId: event.agent_id,
+        agentName: event.agent_name,
+        task,
+        status: 'running',
+        startedAt: event.timestamp,
+      },
+    ];
+  }
+
+  if (event.event_type === 'agent.work.completed' || event.event_type === 'agent.work.failed') {
+    const nextStatus = event.event_type === 'agent.work.completed' ? 'completed' : 'failed';
+    const idx = activities.findLastIndex((activity) => activity.agentId === event.agent_id && activity.task === task && activity.status === 'running');
+    if (idx === -1) {
+      return [
+        ...activities,
+        {
+          id: `workflow-${event.timestamp}-${event.agent_id}`,
+          agentId: event.agent_id,
+          agentName: event.agent_name,
+          task,
+          status: nextStatus,
+          result: event.summary || event.error,
+          startedAt: event.timestamp,
+          completedAt: event.timestamp,
+        },
+      ];
+    }
+    const updated = [...activities];
+    updated[idx] = {
+      ...updated[idx],
+      status: nextStatus,
+      result: event.summary || event.error,
+      completedAt: event.timestamp,
+    };
+    return updated;
+  }
+
+  return activities;
+}
 
 function createWelcomeMessage(): ChatMessage {
   return {
@@ -99,7 +162,7 @@ function ChatPageContent() {
     try {
       const detail = await conversationApi.get(convId);
       setMessages(detail.messages.length > 0 ? detail.messages : [createWelcomeMessage()]);
-      setWorkflowTaskId(detail.workflow_task_id ?? null);
+      setWorkflowTaskId(detail.workflow_task_id ?? detail.linked_workflow_id ?? null);
       setWorkflowState(detail.workflow_state ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载对话失败');
@@ -141,6 +204,30 @@ function ChatPageContent() {
       setWorkflowState(workflow.current_state);
     }).catch(() => {});
   }, [taskIdFromParam, convIdFromParam]);
+
+  useEffect(() => {
+    if (!activeConvId || !workflowTaskId || (workflowState && terminalWorkflowStates.has(workflowState))) return;
+
+    const stream = conversationApi.eventStream(activeConvId, {
+      onAgentWork: (event) => {
+        setDispatchActivities((current) => updateDispatchActivities(current, event));
+        if (event.event_type === 'agent.work.failed') {
+          setWorkflowState('failed');
+        }
+      },
+      onConversationMessage: (message) => {
+        setMessages((current) => upsertMessage(current, message));
+      },
+      onDone: () => {
+        void loadConversation(activeConvId);
+      },
+      onError: (errorMsg) => {
+        setError(errorMsg);
+      },
+    });
+
+    return () => stream.abort();
+  }, [activeConvId, loadConversation, workflowState, workflowTaskId]);
 
   // Create new conversation
   const handleNewConversation = async () => {
@@ -463,11 +550,11 @@ function ChatPageContent() {
                            conv.workflow_state === 'failed' ? '已失败' :
                            conv.workflow_state === 'initial' ? '待启动' : '进行中'}
                         </span>
-                        {conv.workflow_task_id && (
+                        {(conv.workflow_task_id || conv.linked_workflow_id) && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              router.push(`/workflow/${encodeURIComponent(conv.workflow_task_id!)}`);
+                              router.push(`/workflow/${encodeURIComponent((conv.workflow_task_id || conv.linked_workflow_id)!)}`);
                             }}
                             className="ml-2 text-xs text-brand-green-dark hover:text-brand-green font-medium underline-offset-2 hover:underline"
                           >
@@ -578,10 +665,13 @@ function ChatPageContent() {
                     msg.role === 'user' ? 'justify-end' : 'justify-start'
                   )}
                 >
-                  {msg.role === 'assistant' && (
+                  {(msg.role === 'assistant' || msg.role === 'agent') && (
                     <div className="flex-shrink-0 mt-1">
-                      <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
-                        <Bot className="w-4.5 h-4.5 text-ink" />
+                      <div className={clsx(
+                        'w-9 h-9 rounded-full flex items-center justify-center',
+                        msg.role === 'agent' ? 'bg-blue-50 border border-blue-200' : 'bg-brand-green'
+                      )}>
+                        <Bot className={clsx('w-4.5 h-4.5', msg.role === 'agent' ? 'text-blue-600' : 'text-ink')} />
                       </div>
                     </div>
                   )}
@@ -592,9 +682,19 @@ function ChatPageContent() {
                         'p-3.5 rounded-xl text-sm leading-relaxed whitespace-pre-wrap',
                         msg.role === 'user'
                           ? 'bg-brand-green text-ink rounded-br-md'
+                          : msg.role === 'agent'
+                          ? 'bg-blue-50 border border-blue-200 rounded-bl-md'
                           : 'bg-canvas border border-hairline rounded-bl-md'
                       )}
                     >
+                      {msg.role === 'agent' && (
+                        <div className="flex items-center gap-2 mb-1.5 text-xs font-medium text-blue-700">
+                          {getAgentMessageStatus(msg) === 'running' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                          {getAgentMessageStatus(msg) === 'completed' && <CheckCircle2 className="w-3.5 h-3.5" />}
+                          {getAgentMessageStatus(msg) === 'failed' && <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
+                          <span>{msg.agent_name || 'Hermes Agent'}</span>
+                        </div>
+                      )}
                       {msg.content}
                       {msg.role === 'assistant' && (msg.tool_calls?.length || msg.skill_uses?.length) ? (
                         <ToolCallCard
