@@ -123,6 +123,10 @@
       "mitigation_suggestion": "缓解建议"
     }
   ],
+  "root_cause": "content_incomplete | requirement_unclear | evidence_missing | external_info_missing | system_failure",
+  "missing_information": [
+    "仍需用户补充的信息，若无需补充则返回空数组"
+  ],
   "revision_priority": "critical | high | medium | low",
   "detailed_revision_suggestions": [
     {
@@ -133,3 +137,11 @@
     }
   ]
 }
+
+额外要求：
+- 当问题主要是章节缺失、权利要求/摘要/实施方式不完整时，`root_cause` 必须使用 `content_incomplete`
+- 当问题主要是技术方案定义不清、关键术语/参数/应用场景不明确时，`root_cause` 必须使用 `requirement_unclear`
+- 当问题主要是现有技术对比、证据、检索覆盖不足时，`root_cause` 必须使用 `evidence_missing`
+- 只有在确实缺少用户提供的关键事实、业务约束、参数范围、目标法域要求时，才能使用 `external_info_missing`
+- `missing_information` 必须写成用户可直接补充的短句列表；如果不需要用户补充，返回空数组
+- 保持所有分数字段继续使用 `0-1` 浮点制，不要改成百分制

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.core.workflow_engine import PatentWorkflowEngine
+from src.core.workflow_engine import PatentWorkflowEngine, PhaseResult, WorkflowContext, WorkflowPhase
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -135,6 +135,144 @@ class TestQualityGateTriggersRevision:
             "Currently the workflow silently skips the iteration loop and produces "
             "garbage outputs — this is the root cause of Bug #1."
         )
+
+
+class TestLowScoreRemediationContracts:
+    """Low-score remediation contract tests for the next workflow iteration."""
+
+    def test_extract_normalized_review_score_accepts_zero_to_one(self):
+        engine = PatentWorkflowEngine()
+        review = {"review_summary": {"overall_score": 0.78}}
+        assert engine._extract_normalized_review_score(review) == 0.78
+
+    def test_extract_normalized_review_score_accepts_percent_input(self):
+        engine = PatentWorkflowEngine()
+        review = {"review_summary": {"overall_score": 78}}
+        assert engine._extract_normalized_review_score(review) == 0.78
+
+    def test_low_score_incomplete_content_routes_to_writer(self):
+        engine = PatentWorkflowEngine()
+        review = {
+            "review_summary": {
+                "overall_score": 0.45,
+                "overall_rating": "poor",
+                "recommendation": "revise",
+            },
+            "root_cause": "content_incomplete",
+            "missing_information": [],
+        }
+        ctx = WorkflowContext(task_id="t1", user_id="u1")
+        assert engine._classify_remediation_path(review, ctx) == "WRITE_MORE"
+
+    def test_requirement_unclear_routes_to_analysis(self):
+        engine = PatentWorkflowEngine()
+        review = {
+            "review_summary": {
+                "overall_score": 0.61,
+                "overall_rating": "needs_revision",
+                "recommendation": "revise",
+            },
+            "root_cause": "requirement_unclear",
+            "missing_information": [],
+        }
+        ctx = WorkflowContext(task_id="t-analysis", user_id="u-analysis")
+        assert engine._classify_remediation_path(review, ctx) == "ANALYZE_MORE"
+
+    def test_evidence_missing_routes_to_search(self):
+        engine = PatentWorkflowEngine()
+        review = {
+            "review_summary": {
+                "overall_score": 0.58,
+                "overall_rating": "needs_revision",
+                "recommendation": "revise",
+            },
+            "root_cause": "evidence_missing",
+            "missing_information": [],
+        }
+        ctx = WorkflowContext(task_id="t-search", user_id="u-search")
+        assert engine._classify_remediation_path(review, ctx) == "SEARCH_MORE"
+
+    def test_missing_information_enters_awaiting_user_decision(self):
+        engine = PatentWorkflowEngine()
+        review = {
+            "review_summary": {
+                "overall_score": 0.62,
+                "overall_rating": "needs_revision",
+                "recommendation": "revise",
+            },
+            "root_cause": "external_info_missing",
+            "missing_information": ["核心实施例的参数范围"],
+        }
+        ctx = WorkflowContext(task_id="t2", user_id="u2")
+        assert engine._classify_remediation_path(review, ctx) == "NEEDS_USER_INPUT"
+
+    def test_system_failure_routes_to_terminal_failure(self):
+        engine = PatentWorkflowEngine()
+        review = {
+            "review_summary": {
+                "overall_score": 0.2,
+                "overall_rating": "poor",
+                "recommendation": "reject",
+            },
+            "root_cause": "system_failure",
+            "missing_information": [],
+        }
+        ctx = WorkflowContext(task_id="t-fail", user_id="u-fail")
+        assert engine._classify_remediation_path(review, ctx) == "TERMINAL_FAILURE"
+
+    def test_no_progress_still_fails(self):
+        engine = PatentWorkflowEngine()
+        ctx = WorkflowContext(task_id="t3", user_id="u3")
+        ctx.iteration_count = 2
+        shared_error = "Error code: 403 - Gemini API not enabled"
+        ctx.patent_draft = {"_agent_failed": True, "_agent_error": shared_error}
+        ctx.review_report = {"_agent_failed": True, "_agent_error": shared_error}
+        ctx.phase_history = [
+            PhaseResult(
+                phase=WorkflowPhase.WRITING,
+                success=False,
+                duration_seconds=0,
+                output={"_agent_failed": True, "_agent_error": shared_error},
+                issues=[shared_error],
+            ),
+            PhaseResult(
+                phase=WorkflowPhase.REVIEW,
+                success=False,
+                duration_seconds=0,
+                output={"_agent_failed": True, "_agent_error": shared_error},
+                issues=[shared_error],
+            ),
+        ]
+        assert engine._iteration_making_no_progress(ctx) is True
+
+    def test_awaiting_user_decision_does_not_silent_pass_completion_gate(self):
+        engine = PatentWorkflowEngine()
+        ctx = WorkflowContext(task_id="t-await", user_id="u-await")
+        ctx.current_phase = "awaiting_user_decision"
+        ctx.patent_draft = self._complete_draft() if hasattr(self, "_complete_draft") else {
+            "claims": {
+                "independent_claim": "1. 一种方法，包括步骤A。",
+                "dependent_claims": ["2. 根据权利要求1所述的方法..."],
+            },
+            "description": {
+                "technical_field": "人工智能",
+                "background_art": "背景技术。",
+                "summary_of_invention": "发明内容。",
+                "drawings_description": "",
+                "detailed_description": "实施方式。",
+            },
+            "abstract": "摘要。",
+        }
+        ctx.review_report = {
+            "review_summary": {
+                "overall_score": 0.55,
+                "overall_rating": "needs_revision",
+                "recommendation": "revise",
+            },
+            "root_cause": "external_info_missing",
+            "missing_information": ["关键参数范围"],
+        }
+        assert engine._has_unresolved_critical_issues(ctx) is True
 
 
 # ── Bug #2: Writer fallback must never inject "待生成" placeholders ───────────

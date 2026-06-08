@@ -99,6 +99,8 @@ async def _run_agent_conversation(profile_id: str, prompt: str, session_id: str 
 logger = get_logger("workflow_engine")
 T = TypeVar("T", bound=BaseModel)
 
+QUALITY_REMEDIATION_THRESHOLD = 0.8
+
 
 class WorkflowState(str, Enum):
     """工作流状态枚举"""
@@ -115,6 +117,8 @@ class WorkflowState(str, Enum):
     QUALITY_REVIEW = "quality_review"
     # 迭代修正阶段
     ITERATION = "iteration"
+    # 等待用户决策
+    AWAITING_USER_DECISION = "awaiting_user_decision"
     # 已完成
     COMPLETED = "completed"
     # 失败
@@ -253,6 +257,20 @@ _PHASE_TO_WORKFLOW_PHASE = {
     WorkflowState.RETRIEVAL_ANALYSIS: WorkflowPhase.RETRIEVAL,
     WorkflowState.PATENT_WRITING: WorkflowPhase.WRITING,
     WorkflowState.QUALITY_REVIEW: WorkflowPhase.REVIEW,
+}
+
+_PHASE_CONTEXT_FIELDS = {
+    WorkflowState.REQUIREMENT_ANALYSIS: "requirement_analysis",
+    WorkflowState.RETRIEVAL_ANALYSIS: "retrieval_report",
+    WorkflowState.PATENT_WRITING: "patent_draft",
+    WorkflowState.QUALITY_REVIEW: "review_report",
+}
+
+_PHASE_DISPLAY_NAMES = {
+    WorkflowState.REQUIREMENT_ANALYSIS: "需求分析 Agent",
+    WorkflowState.RETRIEVAL_ANALYSIS: "检索分析 Agent",
+    WorkflowState.PATENT_WRITING: "专利撰写 Agent",
+    WorkflowState.QUALITY_REVIEW: "质量审查 Agent",
 }
 
 
@@ -552,25 +570,60 @@ class PatentWorkflowEngine:
             review_passed = False
 
             if context.review_report:
-                needs_revision = self._check_review_needs_revision(context.review_report)
-                if not needs_revision:
+                needs_remediation = self._needs_quality_remediation(context.review_report)
+                if not needs_remediation:
                     review_passed = True
+                context.latest_review_score = self._extract_normalized_review_score(context.review_report) or 0.0
 
             while not review_passed and context.iteration_count < max_iterations:
                 if context.review_report:
-                    # 审查未通过 — 提取问题并让 writer 修正
+                    # 审查未通过 — 提取问题并进入补救分流
                     context.iteration_count += 1
                     review_issues = self._extract_review_issues(context.review_report)
                     context.latest_revision_suggestions = review_issues
+                    context.latest_review_score = self._extract_normalized_review_score(context.review_report) or 0.0
+                    remediation_path = self._classify_remediation_path(context.review_report, context)
 
                     self._logger.info(
-                        f"Quality review requires revision (round {context.iteration_count})",
+                        f"Quality review requires remediation (round {context.iteration_count}, path={remediation_path})",
                         task_id=context.task_id,
                     )
                     if event_callback:
                         event_callback("CEO Agent", "agent.thinking",
                             f"⚠️ 质量审查发现问题，启动修正迭代（第{context.iteration_count}轮）",
                             {"agent_name": "CEO Agent", "thought": "质量审查未通过，需要修正"})
+
+                    if remediation_path == "TERMINAL_FAILURE":
+                        break
+
+                    if remediation_path == "NEEDS_USER_INPUT":
+                        self._enter_quality_remediation_hold(context, context.review_report, remediation_path)
+                        context.current_phase = WorkflowState.AWAITING_USER_DECISION
+                        await self._publish_progress_event(context, WorkflowState.AWAITING_USER_DECISION, "waiting")
+                        if event_callback:
+                            remediation = context.metadata.get("quality_remediation", {})
+                            missing_information = remediation.get("missing_information", [])
+                            detail = "；".join(str(item) for item in missing_information) if missing_information else "缺少额外信息"
+                            event_callback(
+                                "CEO Agent",
+                                "agent.thinking",
+                                f"⏸️ 当前质量未达标，需用户补充信息后继续：{detail}",
+                                {"agent_name": "CEO Agent", "thought": "awaiting_user_decision", "missing_information": missing_information},
+                            )
+                        return context
+
+                    if remediation_path == "ANALYZE_MORE":
+                        await self._execute_remediation_phase(
+                            context,
+                            WorkflowState.REQUIREMENT_ANALYSIS,
+                            event_callback=event_callback,
+                        )
+                    elif remediation_path == "SEARCH_MORE":
+                        await self._execute_remediation_phase(
+                            context,
+                            WorkflowState.RETRIEVAL_ANALYSIS,
+                            event_callback=event_callback,
+                        )
 
                     # ── 修正撰写 ──
                     context.current_phase = WorkflowState.PATENT_WRITING
@@ -663,9 +716,11 @@ class PatentWorkflowEngine:
                     await self._publish_progress_event(context, WorkflowState.QUALITY_REVIEW, "completed")
 
                 # 检查审查是否通过
-                needs_revision = self._check_review_needs_revision(context.review_report)
-                if not needs_revision:
+                needs_remediation = self._needs_quality_remediation(context.review_report)
+                context.latest_review_score = self._extract_normalized_review_score(context.review_report) or 0.0
+                if not needs_remediation:
                     review_passed = True
+                    context.metadata.pop("quality_remediation", None)
                     self._logger.info("Quality review passed", task_id=context.task_id)
                     if event_callback:
                         event_callback("CEO Agent", "agent.thinking",
@@ -702,6 +757,13 @@ class PatentWorkflowEngine:
             # 关键修复 (Bug #1 用户可见层): 在生成 .docx 之前,必须先确认
             # patent_draft 真的有内容、review 没有未解决的关键问题。
             # 如果有问题,流程必须以 FAILED 结束,而不是 COMPLETED。
+            if context.current_phase == WorkflowState.AWAITING_USER_DECISION:
+                self._logger.info(
+                    "Workflow paused for user decision before final document generation",
+                    task_id=context.task_id,
+                )
+                return context
+
             if self._has_unresolved_critical_issues(context):
                 self._logger.error(
                     "Workflow cannot complete: unresolved critical issues remain "
@@ -805,6 +867,17 @@ class PatentWorkflowEngine:
             task_id=context.task_id,
             force_start_from=force_start_from.value if force_start_from else None,
         )
+
+        if not force_start_from and context.current_phase == WorkflowState.AWAITING_USER_DECISION:
+            remediation = context.metadata.get("quality_remediation", {})
+            resume_phase = remediation.get("resume_phase")
+            if isinstance(resume_phase, str):
+                try:
+                    force_start_from = WorkflowState(resume_phase)
+                except ValueError:
+                    force_start_from = WorkflowState.REQUIREMENT_ANALYSIS
+            else:
+                force_start_from = WorkflowState.REQUIREMENT_ANALYSIS
 
         if force_start_from:
             context.current_phase = WorkflowState.ITERATION
@@ -1298,6 +1371,208 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 
         return False
 
+    def _extract_normalized_review_score(self, review_report: Dict[str, Any]) -> Optional[float]:
+        """提取并归一化审查分数到 0-1 区间。"""
+        if not isinstance(review_report, dict):
+            return None
+
+        score_candidates = [
+            review_report.get("overall_score"),
+            (review_report.get("review_summary") or {}).get("overall_score")
+            if isinstance(review_report.get("review_summary"), dict)
+            else None,
+            review_report.get("score"),
+        ]
+
+        for raw_score in score_candidates:
+            if isinstance(raw_score, (int, float)):
+                score = float(raw_score)
+                if 0 <= score <= 1:
+                    return score
+                if 1 < score <= 100:
+                    return score / 100
+        return None
+
+    def _needs_quality_remediation(self, review_report: Dict[str, Any]) -> bool:
+        """统一判断质量问题是否还需要补救。"""
+        if self._check_review_needs_revision(review_report):
+            return True
+        normalized_score = self._extract_normalized_review_score(review_report)
+        if normalized_score is None:
+            return False
+        return normalized_score < QUALITY_REMEDIATION_THRESHOLD
+
+    def _classify_remediation_path(self, review_report: Dict[str, Any], context: WorkflowContext) -> str:
+        """按根因把补救动作分流为写/分析/检索/等用户/终止。"""
+        if self._iteration_making_no_progress(context):
+            return "TERMINAL_FAILURE"
+
+        if not isinstance(review_report, dict):
+            return "TERMINAL_FAILURE"
+
+        root_cause = str(review_report.get("root_cause") or "").strip().lower()
+        mapping = {
+            "content_incomplete": "WRITE_MORE",
+            "requirement_unclear": "ANALYZE_MORE",
+            "evidence_missing": "SEARCH_MORE",
+            "external_info_missing": "NEEDS_USER_INPUT",
+            "system_failure": "TERMINAL_FAILURE",
+        }
+        if root_cause in mapping:
+            return mapping[root_cause]
+
+        missing_information = review_report.get("missing_information", [])
+        if isinstance(missing_information, list) and any(str(item).strip() for item in missing_information):
+            return "NEEDS_USER_INPUT"
+
+        draft_issues = self._validate_patent_draft_completeness(context.patent_draft)
+        if any(
+            issue in draft_issues
+            for issue in (
+                "claims_missing",
+                "independent_claim_missing",
+                "dependent_claims_missing",
+                "description_missing",
+                "description_technical_field_missing",
+                "description_background_art_missing",
+                "description_summary_of_invention_missing",
+                "description_detailed_description_missing",
+                "abstract_missing",
+                "drawing_artifacts_missing",
+            )
+        ):
+            return "WRITE_MORE"
+
+        review_issues = self._extract_review_issues(review_report)
+        combined_issue_text = "\n".join(review_issues).lower()
+        if any(keyword in combined_issue_text for keyword in ("参数", "术语", "场景", "需求", "不明确", "定义不清")):
+            return "ANALYZE_MORE"
+        if any(keyword in combined_issue_text for keyword in ("prior art", "现有技术", "检索", "证据", "novelty", "创造性")):
+            return "SEARCH_MORE"
+
+        if self._needs_quality_remediation(review_report):
+            return "WRITE_MORE"
+        return "TERMINAL_FAILURE"
+
+    def _resolve_remediation_resume_phase(self, classification: str) -> WorkflowState:
+        mapping = {
+            "WRITE_MORE": WorkflowState.PATENT_WRITING,
+            "ANALYZE_MORE": WorkflowState.REQUIREMENT_ANALYSIS,
+            "SEARCH_MORE": WorkflowState.RETRIEVAL_ANALYSIS,
+            "NEEDS_USER_INPUT": WorkflowState.REQUIREMENT_ANALYSIS,
+        }
+        return mapping.get(classification, WorkflowState.PATENT_WRITING)
+
+    def _enter_quality_remediation_hold(
+        self,
+        context: WorkflowContext,
+        review_report: Dict[str, Any],
+        classification: str,
+    ) -> None:
+        normalized_score = self._extract_normalized_review_score(review_report)
+        missing_information = review_report.get("missing_information", [])
+        if not isinstance(missing_information, list):
+            missing_information = []
+
+        context.metadata["quality_remediation"] = {
+            "current_score": normalized_score,
+            "threshold": QUALITY_REMEDIATION_THRESHOLD,
+            "classification": classification.lower(),
+            "missing_information": [str(item).strip() for item in missing_information if str(item).strip()],
+            "attempt_count": context.iteration_count,
+            "recommended_next_action": "provide_info" if classification == "NEEDS_USER_INPUT" else "continue_auto_fix",
+            "resume_phase": self._resolve_remediation_resume_phase(classification).value,
+        }
+
+    async def _execute_remediation_phase(
+        self,
+        context: WorkflowContext,
+        phase_state: WorkflowState,
+        event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        """复用现有 phase prompt/normalize 逻辑执行单个补救阶段。"""
+        if phase_state not in _PHASE_TO_PROFILE or phase_state not in _PHASE_CONTEXT_FIELDS:
+            raise ValueError(f"Unsupported remediation phase: {phase_state.value}")
+
+        service = _get_agent_factory()
+        context.current_phase = phase_state
+        await self._publish_progress_event(context, phase_state, "running")
+
+        task_desc = self._build_phase_prompt(context, phase_state)
+        agent_display_name = _PHASE_DISPLAY_NAMES.get(phase_state, phase_state.value)
+
+        if event_callback:
+            event_callback(
+                "CEO Agent",
+                "agent.dispatch",
+                f"🎯 调度 → {agent_display_name}: {task_desc[:100]}",
+                {"from_agent": "CEO Agent", "to_agent": agent_display_name, "task_description": task_desc[:300]},
+            )
+
+        if phase_state == WorkflowState.PATENT_WRITING:
+            context_data = await self._generate_patent_in_sections(
+                service,
+                _PHASE_TO_PROFILE[phase_state],
+                task_desc,
+                context,
+                event_callback=event_callback,
+            )
+            agent_text = json.dumps(context_data, ensure_ascii=False)[:500] if isinstance(context_data, dict) else str(context_data)[:500]
+        else:
+            agent_result = await self._run_agent_stream(
+                service,
+                _PHASE_TO_PROFILE[phase_state],
+                task_desc,
+                context,
+                agent_name=agent_display_name,
+                event_callback=event_callback,
+            )
+            agent_text = agent_result.get("text", "")
+            agent_tool_results = agent_result.get("tool_results", [])
+            parsed = self._try_parse_json(agent_text)
+            if "raw_output" not in parsed:
+                context_data = parsed
+            else:
+                context_data = {"agent": phase_state.value, "output": agent_text, "summary": agent_text[:500]}
+            if agent_tool_results:
+                context_data["tool_results"] = agent_tool_results
+
+        context_field = _PHASE_CONTEXT_FIELDS[phase_state]
+        context_data = self._normalize_phase_output(context_field, context_data)
+        setattr(context, context_field, context_data)
+
+        try:
+            _persist_phase_result(
+                context.task_id,
+                context_field,
+                context_data if isinstance(context_data, dict) else {"output": str(context_data)},
+            )
+        except Exception:
+            pass
+
+        phase_enum = _PHASE_TO_WORKFLOW_PHASE.get(phase_state, WorkflowPhase.BRAINSTORM)
+        agent_failed = isinstance(context_data, dict) and context_data.get("_agent_failed") is True
+        context.add_phase_result(
+            PhaseResult(
+                phase=phase_enum,
+                success=not agent_failed,
+                duration_seconds=0,
+                output=context_data if isinstance(context_data, dict) else {},
+                issues=[str(context_data.get("_agent_error", ""))] if agent_failed and isinstance(context_data, dict) else [],
+            )
+        )
+
+        if event_callback:
+            event_callback(
+                agent_display_name,
+                "agent.content",
+                "📄 输出",
+                {"agent_name": agent_display_name, "content": agent_text if agent_text else "", "phase": phase_state.value},
+            )
+
+        await self._publish_progress_event(context, phase_state, "failed" if agent_failed else "completed")
+        return context_data if isinstance(context_data, dict) else {}
+
     def _extract_review_issues(self, review_report: Dict[str, Any]) -> List[str]:
         """提取质量审查中的严重/高级别问题列表"""
         issues = []
@@ -1422,7 +1697,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             return True
         if review.get("_agent_failed") is True:
             return True
-        if self._check_review_needs_revision(review):
+        if self._needs_quality_remediation(review):
             return True
 
         return False
