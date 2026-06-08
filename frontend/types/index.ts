@@ -5,8 +5,21 @@ export type WorkflowState =
   | 'writing'
   | 'reviewing'
   | 'iteration'
+  | 'awaiting_user_decision'
   | 'completed'
   | 'failed';
+
+export interface QualityRemediationInfo {
+  current_score?: number | null;
+  threshold?: number | null;
+  classification?: string;
+  missing_information?: string[];
+  attempt_count?: number;
+  recommended_next_action?: string;
+  resume_phase?: string;
+  user_supplied_at?: string;
+  user_supplied_info?: string;
+}
 
 export type PatentType = 'invention' | 'utility' | 'design';
 

@@ -162,6 +162,15 @@ export interface WorkflowResponse {
     patent_draft: Record<string, unknown>;
     review_report: Record<string, unknown>;
   };
+  quality_remediation?: Record<string, unknown>;
+}
+
+export interface WorkflowDecisionResponse {
+  task_id: string;
+  status: string;
+  current_phase: string;
+  action: 'continue_auto_fix' | 'provide_info';
+  resume_phase: string;
 }
 
 export interface WorkflowChatResponse {
@@ -245,6 +254,7 @@ function parseWorkflowResponse(value: unknown): WorkflowResponse {
       patent_draft: safeRecord(outputs.patent_draft),
       review_report: safeRecord(outputs.review_report),
     },
+    quality_remediation: isRecord(value.quality_remediation) ? value.quality_remediation : undefined,
   };
 }
 
@@ -298,8 +308,20 @@ export const workflowApi = {
   pause: (taskId: string) =>
     request<{ task_id: string; status: string }>(`/workflows/${encodeURIComponent(taskId)}/pause`, { method: 'POST' }),
 
+  unpause: (taskId: string) =>
+    request<{ task_id: string; status: string }>(`/workflows/${encodeURIComponent(taskId)}/unpause`, { method: 'POST' }),
+
   resume: (taskId: string) =>
     request<{ task_id: string; status: string }>(`/workflows/${encodeURIComponent(taskId)}/resume`, { method: 'POST' }),
+
+  decision: (taskId: string, action: 'continue_auto_fix' | 'provide_info', supplementalInfo?: string) =>
+    request<WorkflowDecisionResponse>(`/workflows/${encodeURIComponent(taskId)}/decision`, {
+      method: 'POST',
+      body: JSON.stringify({
+        action,
+        ...(supplementalInfo ? { supplemental_info: supplementalInfo } : {}),
+      }),
+    }),
 
   restart: (taskId: string) =>
     request<{ task_id: string; status: string }>(`/workflows/${encodeURIComponent(taskId)}/restart`, { method: 'POST' }),
