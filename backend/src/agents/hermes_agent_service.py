@@ -365,13 +365,31 @@ class HermesAgentService:
 
         def on_tool_complete(call_id, name, args, result):
             with events_lock:
-                result_str = str(result)[:500] if result else ""
+                params = {}
+                if isinstance(args, str):
+                    try:
+                        params = json.loads(args)
+                    except Exception:
+                        params = {"raw": args[:200]}
+                elif isinstance(args, dict):
+                    params = args
+
+                result_payload = result
+                if name != "dispatch_specialist":
+                    result_payload = str(result)[:500] if result else ""
+
+                success = True
+                error = None
+                if isinstance(result, dict):
+                    success = result.get("status") != "failed" and not result.get("error")
+                    error = result.get("error")
+
                 events.append({"type": "tool_call_end", "data": {
                     "name": name,
-                    "parameters": {},
-                    "result": result_str,
-                    "success": True,
-                    "error": None,
+                    "parameters": params,
+                    "result": result_payload,
+                    "success": success,
+                    "error": error,
                 }})
 
         def on_stream_delta(delta):

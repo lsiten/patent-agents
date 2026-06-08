@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Type, TypeVar
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,15 @@ def _get_agent_factory():
 
 logger = get_logger("workflow_engine")
 T = TypeVar("T", bound=BaseModel)
+
+SPECIALIST_AGENT_NAMES = {
+    "brainstorm_partner": "头脑风暴伙伴",
+    "requirement_analyst": "需求分析师",
+    "retrieval_analyst": "检索分析师",
+    "patent_writer": "专利撰写师",
+    "quality_reviewer": "质量审查师",
+}
+
 
 
 class WorkflowState(str, Enum):
@@ -243,6 +252,7 @@ class PatentWorkflowEngine:
         self,
         context: WorkflowContext,
         phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None]] = None,
+        agent_event_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None] | None]] = None,
     ) -> WorkflowContext:
         """
         执行完整工作流 — 由 CEO Agent 动态编排
@@ -267,7 +277,12 @@ class PatentWorkflowEngine:
 
             # CEO Agent 执行完整流程（内部通过 dispatch_specialist 调度各 Agent）
             self._logger.info("Delegating to CEO Agent", task_id=context.task_id)
-            result_text = await service.run_conversation("patent.ceo.v1", prompt)
+            result_text = await self._run_observable_ceo_conversation(
+                service=service,
+                context=context,
+                prompt=prompt,
+                agent_event_callback=agent_event_callback,
+            )
 
             # CEO 完成后，尝试解析结构化输出并填充 context
             self._parse_ceo_output(context, result_text)
@@ -317,6 +332,7 @@ class PatentWorkflowEngine:
         context: WorkflowContext,
         phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None]] = None,
         force_start_from: Optional[WorkflowState] = None,
+        agent_event_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None] | None]] = None,
     ) -> WorkflowContext:
         """
         恢复工作流 — 重新启动 CEO 编排
@@ -340,7 +356,12 @@ class PatentWorkflowEngine:
             # 构建带已有成果的恢复 prompt
             prompt = self._build_ceo_resume_prompt(context, force_start_from)
 
-            result_text = await service.run_conversation("patent.ceo.v1", prompt)
+            result_text = await self._run_observable_ceo_conversation(
+                service=service,
+                context=context,
+                prompt=prompt,
+                agent_event_callback=agent_event_callback,
+            )
 
             self._parse_ceo_output(context, result_text)
 
@@ -557,6 +578,125 @@ class PatentWorkflowEngine:
         context.brainstorming_output = context.brainstorming_output or {
             "summary": result_text[:500],
         }
+
+
+    async def _run_observable_ceo_conversation(
+        self,
+        service: Any,
+        context: WorkflowContext,
+        prompt: str,
+        agent_event_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None] | None]],
+    ) -> str:
+        if not hasattr(service, "run_conversation_stream"):
+            return await service.run_conversation("patent.ceo.v1", prompt)
+
+        final_text = ""
+        async for event in service.run_conversation_stream(
+            profile_id="patent.ceo.v1",
+            user_input=prompt,
+            session_id=f"workflow_{context.task_id}",
+            user_id=context.user_id,
+        ):
+            event_type = event.get("type")
+            data = event.get("data") or {}
+
+            if event_type in {"thinking", "status"}:
+                message = data.get("message") if isinstance(data, dict) else str(data)
+                if message:
+                    await self._emit_agent_work_event(agent_event_callback, {
+                        "event_type": "agent.work.thinking",
+                        "task_id": context.task_id,
+                        "agent_id": "patent.ceo.v1",
+                        "agent_name": "CEO Agent",
+                        "profile_id": "patent.ceo.v1",
+                        "action": str(message),
+                        "status": "running",
+                        "data": data,
+                    })
+
+            if event_type == "tool_call_start" and data.get("name") == "dispatch_specialist":
+                params = data.get("parameters") or {}
+                agent_id = str(params.get("agent_id") or "unknown")
+                task = str(params.get("task") or "正在执行专业任务")
+                await self._emit_agent_work_event(agent_event_callback, {
+                    "event_type": "agent.work.started",
+                    "task_id": context.task_id,
+                    "agent_id": agent_id,
+                    "agent_name": SPECIALIST_AGENT_NAMES.get(agent_id, agent_id),
+                    "profile_id": self._profile_id_for_agent(agent_id),
+                    "action": task,
+                    "status": "running",
+                    "data": {"source": "dispatch_specialist", "task": task},
+                })
+
+            if event_type == "tool_call_end" and data.get("name") == "dispatch_specialist":
+                result = self._coerce_dispatch_result(data.get("result"))
+                params = data.get("parameters") or {}
+                agent_id = str(result.get("agent_id") or params.get("agent_id") or "unknown")
+                task = str(result.get("task") or params.get("task") or "专业任务已结束")
+                success = bool(data.get("success", True)) and result.get("status") != "failed"
+                status = "completed" if success else "failed"
+                event_payload = {
+                    "event_type": f"agent.work.{status}",
+                    "task_id": context.task_id,
+                    "agent_id": agent_id,
+                    "agent_name": str(result.get("agent") or SPECIALIST_AGENT_NAMES.get(agent_id, agent_id)),
+                    "profile_id": result.get("profile_id") or self._profile_id_for_agent(agent_id),
+                    "action": task,
+                    "status": status,
+                    "summary": self._summarize_result(result.get("result")),
+                    "data": {"source": "dispatch_specialist", "task": task},
+                }
+                if not success:
+                    event_payload["error"] = str(result.get("error") or data.get("error") or "专业 Agent 执行失败")
+                await self._emit_agent_work_event(agent_event_callback, event_payload)
+
+            if event_type == "content":
+                final_text = str(data.get("content") or final_text)
+            elif event_type == "content_delta":
+                final_text += str(data.get("delta") or "")
+            elif event_type == "done" and isinstance(data.get("message"), dict):
+                final_text = str(data["message"].get("content") or final_text)
+
+        return final_text
+
+    async def _emit_agent_work_event(
+        self,
+        callback: Optional[Callable[[Dict[str, Any]], Awaitable[None] | None]],
+        event: Dict[str, Any],
+    ) -> None:
+        if callback is None:
+            return
+        event.setdefault("timestamp", datetime.now().isoformat())
+        result = callback(event)
+        if asyncio.iscoroutine(result):
+            await result
+
+    def _coerce_dispatch_result(self, raw: Any) -> Dict[str, Any]:
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+                return parsed if isinstance(parsed, dict) else {"result": raw}
+            except json.JSONDecodeError:
+                return {"result": raw}
+        return {"result": raw}
+
+    def _summarize_result(self, raw: Any) -> str:
+        if raw is None:
+            return ""
+        return str(raw)[:300]
+
+    def _profile_id_for_agent(self, agent_id: str) -> str:
+        mapping = {
+            "brainstorm_partner": "patent.brainstorm_partner.v1",
+            "requirement_analyst": "patent.requirement_analyst.v1",
+            "retrieval_analyst": "patent.retrieval_analyst.v1",
+            "patent_writer": "patent.writer.v1",
+            "quality_reviewer": "patent.quality_reviewer.v1",
+        }
+        return mapping.get(agent_id, agent_id)
 
     def _try_parse_json(self, text: str) -> Dict[str, Any]:
         """尝试从文本中解析 JSON"""
