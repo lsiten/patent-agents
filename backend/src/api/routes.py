@@ -52,6 +52,7 @@ from .schemas import (
     ConversationChatRequest,
     CreateWorkflowFromConversationRequest,
     FileUploadResponse,
+    WorkflowDecisionRequest,
 )
 from ..models.domain import PatentTask
 from ..models.enums import WorkflowState
@@ -521,6 +522,11 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
             "review_report": rev_norm,
         },
         target_country=context.target_country,
+        quality_remediation=(
+            context.metadata.get("quality_remediation")
+            if isinstance(context.metadata.get("quality_remediation"), dict)
+            else None
+        ),
     )
 
 
@@ -1046,6 +1052,11 @@ async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
             status_code=400,
             detail=f"工作流已终止，无法恢复（状态: {context.current_phase.value}）",
         )
+    elif context.current_phase == EngineWorkflowState.AWAITING_USER_DECISION:
+        raise HTTPException(
+            status_code=400,
+            detail="当前工作流正在等待用户决策，请调用 /workflows/{task_id}/decision",
+        )
 
     async def phase_callback(phase, result):
         async with workflow_lock:
@@ -1083,7 +1094,7 @@ async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
                     event_type="workflow.failed",
                 )
             await _persist_events(task_id)
-            raise
+            logger.exception("工作流恢复后台任务失败", exc_info=e)
 
     background_tasks.add_task(run_resume)
     async with workflow_lock:
@@ -1099,6 +1110,114 @@ async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
         "task_id": task_id,
         "status": "resumed",
         "current_phase": context.current_phase.value,
+    }
+
+
+@router.post("/workflows/{task_id}/decision")
+async def workflow_decision(
+    task_id: str,
+    payload: WorkflowDecisionRequest,
+    background_tasks: BackgroundTasks,
+):
+    """处理质量补救阶段的用户决策。"""
+    async with workflow_lock:
+        context = workflow_engine.get_workflow(task_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+
+    if context.current_phase != EngineWorkflowState.AWAITING_USER_DECISION:
+        raise HTTPException(status_code=400, detail="当前工作流不处于等待用户决策状态")
+
+    remediation = context.metadata.get("quality_remediation")
+    if not isinstance(remediation, dict):
+        raise HTTPException(status_code=400, detail="当前工作流缺少补救上下文，无法继续")
+
+    resume_phase_value = remediation.get("resume_phase") or EngineWorkflowState.REQUIREMENT_ANALYSIS.value
+    try:
+        resume_phase = EngineWorkflowState(resume_phase_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="补救恢复阶段无效") from exc
+
+    supplemental_info = (payload.supplemental_info or "").strip()
+    if payload.action == "provide_info":
+        if not supplemental_info:
+            raise HTTPException(status_code=400, detail="provide_info 需要 supplemental_info")
+        context.add_message("user", supplemental_info, source="workflow_decision")
+        user_supplies = context.metadata.setdefault("user_supplemental_info", [])
+        if isinstance(user_supplies, list):
+            user_supplies.append(supplemental_info)
+        remediation["recommended_next_action"] = "continue_auto_fix"
+        remediation["user_supplied_at"] = datetime.now().isoformat()
+        remediation["user_supplied_info"] = supplemental_info
+        resume_phase = EngineWorkflowState.REQUIREMENT_ANALYSIS
+        remediation["resume_phase"] = resume_phase.value
+
+    async def phase_callback(phase, result):
+        async with workflow_lock:
+            _append_workflow_event(
+                task_id=task_id,
+                agent=phase.value,
+                message=f"阶段 {phase.value} 已完成",
+                event_type="workflow.phase.completed",
+                data={
+                    "phase": phase.value,
+                    "success": result.success,
+                    "duration_seconds": result.duration_seconds,
+                    "issues": result.issues,
+                },
+            )
+        await _persist_events(task_id)
+        await _persist_workflow(task_id)
+
+    async def run_decision_resume():
+        try:
+            await workflow_engine.resume_workflow(
+                context,
+                phase_callback=phase_callback,
+                force_start_from=resume_phase,
+            )
+            async with workflow_lock:
+                _append_workflow_terminal_event(task_id, context, "专利工作流已根据用户决策继续执行")
+            await _persist_events(task_id)
+        except Exception as e:
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent="workflow_engine",
+                    message=str(e),
+                    event_type="workflow.failed",
+                )
+            await _persist_events(task_id)
+            logger.exception("工作流决策恢复后台任务失败", exc_info=e)
+
+    background_tasks.add_task(run_decision_resume)
+    async with workflow_lock:
+        _append_workflow_event(
+            task_id=task_id,
+            agent="workflow_engine",
+            message=(
+                "用户选择继续自动修复"
+                if payload.action == "continue_auto_fix"
+                else "用户已补充信息，工作流继续执行"
+            ),
+            event_type="workflow.remediation.decision",
+            data={
+                "action": payload.action,
+                "resume_phase": resume_phase.value,
+                "has_supplemental_info": bool(supplemental_info),
+            },
+        )
+    await _persist_events(task_id)
+    return {
+        "task_id": task_id,
+        "status": "resumed",
+        "current_phase": (
+            context.current_phase.value
+            if hasattr(context.current_phase, "value")
+            else str(context.current_phase)
+        ),
+        "action": payload.action,
+        "resume_phase": resume_phase.value,
     }
 
 
@@ -4919,8 +5038,8 @@ async def pause_workflow(task_id: str):
     return {"task_id": task_id, "status": "paused"}
 
 
-@router.post("/workflows/{task_id}/resume")
-async def resume_workflow(task_id: str):
+@router.post("/workflows/{task_id}/unpause")
+async def unpause_workflow(task_id: str):
     """恢复暂停的工作流"""
     async with workflow_lock:
         context = workflow_engine.get_workflow(task_id)

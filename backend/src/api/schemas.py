@@ -48,6 +48,12 @@ class SearchPatentRequest(BaseModel):
     databases: List[str] = Field(default_factory=list)
 
 
+class WorkflowDecisionRequest(BaseModel):
+    """工作流补救决策请求"""
+    action: Literal["continue_auto_fix", "provide_info"]
+    supplemental_info: Optional[str] = None
+
+
 # ==================== 响应模型 ====================
 
 class TaskResponse(BaseModel):
@@ -102,6 +108,7 @@ class WorkflowResponse(BaseModel):
     phase_history: List[WorkflowPhaseResultResponse]
     outputs: Dict[str, Dict[str, Any]]
     target_country: str = "中国"
+    quality_remediation: Optional[Dict[str, Any]] = None
 
 
 class WorkflowListResponse(BaseModel):
