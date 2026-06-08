@@ -19,6 +19,7 @@ import {
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Textarea } from '@/components/ui/Textarea';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { CodeBlock } from '@/components/ui/CodeBlock';
 import { workflowApi, type WorkflowResponse } from '@/lib/api';
@@ -38,6 +39,7 @@ const workflowSteps: { state: WorkflowState; label: string; icon: typeof Brain }
   { state: 'retrieval', label: '检索分析', icon: Search },
   { state: 'writing', label: '文件撰写', icon: FileEdit },
   { state: 'reviewing', label: '质量审查', icon: CheckSquare },
+  { state: 'awaiting_user_decision', label: '待补充信息', icon: MessageSquare },
   { state: 'completed', label: '完成', icon: CheckSquare },
 ];
 
@@ -54,6 +56,7 @@ const stateMap: Record<string, WorkflowState> = {
   quality_review: 'reviewing',
   review: 'reviewing',
   iteration: 'reviewing',
+  awaiting_user_decision: 'awaiting_user_decision',
   completed: 'completed',
   failed: 'failed',
   cancelled: 'failed',
@@ -97,7 +100,10 @@ function getAgentStatus(
     retrieval: 'retrieval',
     writing: 'writing',
     reviewing: 'review',
+    iteration: 'review',
+    awaiting_user_decision: 'review',
     completed: 'completed',
+    failed: 'review',
   };
   
   const agentPhase = stateToPhase[agentState];
@@ -242,6 +248,8 @@ function getStatusLabel(workflow: WorkflowResponse | null): string {
       return '待启动';
     case 'completed':
       return '已完成';
+    case 'awaiting_user_decision':
+      return '等待补充信息';
     case 'failed':
       return '已失败';
     case 'cancelled':
@@ -263,7 +271,8 @@ function EmptyOutput({ icon: Icon, message }: { icon: typeof Brain; message: str
 export default function WorkflowPage() {
   const params = useParams();
   const router = useRouter();
-  const taskId = params.taskId as string;
+  const taskIdParam = params?.taskId;
+  const taskId = Array.isArray(taskIdParam) ? taskIdParam[0] : taskIdParam ?? null;
   const [workflow, setWorkflow] = useState<WorkflowResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -271,9 +280,13 @@ export default function WorkflowPage() {
   const [pollIntervalMs, setPollIntervalMs] = useState(3000);
   const [isPaused, setIsPaused] = useState(false);
   const [agentLogs, setAgentLogs] = useState<AgentLogEntry[]>([]);
+  const [supplementalInfo, setSupplementalInfo] = useState('');
+  const [decisionPending, setDecisionPending] = useState(false);
 
   // SSE连接：监听agent级别实时事件，自动重连（指数退避）
   useEffect(() => {
+    if (!taskId) return;
+
     const baseUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1').replace(/\/+$/, '');
     const SSE_MAX_RETRIES = 8;
     const SSE_INITIAL_DELAY = 1000;
@@ -462,7 +475,7 @@ export default function WorkflowPage() {
     return workflowSteps.findIndex((step) => step.state === currentState);
   }, [currentState, workflow]);
   const agents = useMemo(() => createAgents(currentState, workflow), [currentState, workflow]);
-  const historyLogs = useMemo(() => createHistoryLogs(workflow, taskId), [workflow, taskId]);
+  const historyLogs = useMemo(() => (taskId ? createHistoryLogs(workflow, taskId) : []), [workflow, taskId]);
   // SSE事件优先；如果有实时事件则只用SSE数据（更详细），否则用历史回放
   const allLogs = useMemo(
     () => (agentLogs.length > 0 ? agentLogs : historyLogs),
@@ -474,6 +487,13 @@ export default function WorkflowPage() {
   const canRestart = Boolean(workflow && workflow.current_state !== 'completed');
 
   const loadWorkflow = useCallback(async (showLoading = false) => {
+    if (!taskId) {
+      setError('缺少任务 ID');
+      setIsLoading(false);
+      setIsRefreshing(false);
+      return;
+    }
+
     if (showLoading) {
       setIsLoading(true);
     } else {
@@ -495,13 +515,15 @@ export default function WorkflowPage() {
   }, [taskId]);
 
   useEffect(() => {
+    if (!taskId) return;
+
     loadWorkflow(true).catch((requestError) => {
       setError(requestError instanceof Error ? requestError.message : '获取工作流状态失败');
     });
-  }, [loadWorkflow]);
+  }, [loadWorkflow, taskId]);
 
   useEffect(() => {
-    if (isTerminal) return;
+    if (!taskId || isTerminal) return;
 
     const timer = window.setInterval(() => {
       loadWorkflow(false).catch((requestError) => {
@@ -510,7 +532,7 @@ export default function WorkflowPage() {
     }, pollIntervalMs);
 
     return () => window.clearInterval(timer);
-  }, [isTerminal, loadWorkflow, pollIntervalMs]);
+  }, [isTerminal, loadWorkflow, pollIntervalMs, taskId]);
 
   const getStatusBadge = (status: AgentInfo['status']) => {
     switch (status) {
@@ -524,6 +546,23 @@ export default function WorkflowPage() {
         return <Badge variant="gray">等待中</Badge>;
     }
   };
+
+  if (!taskId) {
+    return (
+      <div className="py-section-lg bg-surface min-h-screen">
+        <div className="container mx-auto px-md">
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="pt-lg">
+              <div className="flex items-center gap-2 text-red-700">
+                <AlertCircle className="w-5 h-5" />
+                <span className="text-body-sm-medium">缺少任务 ID，无法加载工作流详情。</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   const renderAgentOutput = (
     type: 'requirement' | 'retrieval' | 'draft' | 'review',
@@ -605,9 +644,11 @@ export default function WorkflowPage() {
                 error ? 'orange' :
                 workflow?.current_state === 'failed' ? 'red-soft' :
                 workflow?.current_state === 'cancelled' ? 'orange' :
+                workflow?.current_state === 'awaiting_user_decision' ? 'soft' :
                 workflow?.current_state === 'completed' ? 'green-soft' :
                 'green-soft'
               } 
+              color={workflow?.current_state === 'awaiting_user_decision' ? 'purple' : undefined}
               className="text-sm"
             >
               {error ? '获取失败' : getStatusLabel(workflow)}
@@ -650,7 +691,7 @@ export default function WorkflowPage() {
                 onClick={async () => {
                   try {
                     if (isPaused) {
-                      await workflowApi.resume(taskId);
+                      await workflowApi.unpause(taskId);
                       setIsPaused(false);
                     } else {
                       await workflowApi.pause(taskId);
@@ -725,6 +766,71 @@ export default function WorkflowPage() {
               <div className="flex items-center gap-2 text-red-700">
                 <AlertCircle className="w-5 h-5" />
                 <span className="text-body-sm-medium">{error}</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {workflow?.current_state === 'awaiting_user_decision' && (
+          <Card className="mb-xl border-purple-200 bg-purple-50" data-testid="quality-remediation-card">
+            <CardContent className="pt-lg space-y-md">
+              <div>
+                <h2 className="text-body-md-medium font-medium text-purple-900">质量未达标，等待补充信息</h2>
+                <p className="text-body-sm text-purple-800 mt-xs">
+                  当前流程没有失败，但还缺少继续自动修复所需的信息。你可以直接继续自动修复，或先补充信息再继续。
+                </p>
+              </div>
+              {Array.isArray(workflow.quality_remediation?.missing_information) && workflow.quality_remediation.missing_information.length > 0 && (
+                <div>
+                  <p className="text-body-sm-medium text-purple-900 mb-xs">建议补充：</p>
+                  <ul className="list-disc pl-5 text-body-sm text-purple-800 space-y-1">
+                    {workflow.quality_remediation.missing_information.map((item, idx) => (
+                      <li key={`${item}-${idx}`}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <Textarea
+                value={supplementalInfo}
+                onChange={(event) => setSupplementalInfo(event.target.value)}
+                placeholder="如果你已掌握缺失信息，可在这里补充后继续。"
+              />
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  onClick={async () => {
+                    try {
+                      setDecisionPending(true);
+                      await workflowApi.decision(taskId, 'continue_auto_fix');
+                      setSupplementalInfo('');
+                      loadWorkflow(false);
+                    } catch (requestError) {
+                      setError(requestError instanceof Error ? requestError.message : '继续自动修复失败');
+                    } finally {
+                      setDecisionPending(false);
+                    }
+                  }}
+                  disabled={decisionPending}
+                >
+                  继续自动修复
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    try {
+                      setDecisionPending(true);
+                      await workflowApi.decision(taskId, 'provide_info', supplementalInfo.trim());
+                      setSupplementalInfo('');
+                      loadWorkflow(false);
+                    } catch (requestError) {
+                      setError(requestError instanceof Error ? requestError.message : '补充信息后继续失败');
+                    } finally {
+                      setDecisionPending(false);
+                    }
+                  }}
+                  disabled={decisionPending || !supplementalInfo.trim()}
+                >
+                  补充信息后继续
+                </Button>
               </div>
             </CardContent>
           </Card>

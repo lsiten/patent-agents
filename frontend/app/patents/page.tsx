@@ -35,6 +35,7 @@ const stateMap: Record<string, WorkflowState> = {
   patent_writing: 'writing',
   quality_review: 'reviewing',
   iteration: 'iteration',
+  awaiting_user_decision: 'awaiting_user_decision',
   completed: 'completed',
   failed: 'failed',
   cancelled: 'failed',
@@ -47,6 +48,7 @@ const progressMap: Record<WorkflowState, number> = {
   writing: 65,
   reviewing: 85,
   iteration: 90,
+  awaiting_user_decision: 92,
   completed: 100,
   failed: 45,
 };
@@ -58,6 +60,7 @@ const stateLabels: Record<WorkflowState, string> = {
   writing: '撰写中',
   reviewing: '质量审查中',
   iteration: '迭代优化中',
+  awaiting_user_decision: '待补充信息',
   completed: '已完成',
   failed: '已终止',
 };
@@ -69,6 +72,7 @@ const stateColors: Record<WorkflowState, string> = {
   writing: 'bg-yellow-100 text-yellow-700',
   reviewing: 'bg-orange-100 text-orange-700',
   iteration: 'bg-cyan-100 text-cyan-700',
+  awaiting_user_decision: 'bg-purple-100 text-purple-700',
   completed: 'bg-green-100 text-green-700',
   failed: 'bg-red-100 text-red-700',
 };
@@ -80,6 +84,7 @@ const stateIcons: Record<WorkflowState, React.ReactNode> = {
   writing: <FileText className="w-4 h-4" />,
   reviewing: <Eye className="w-4 h-4" />,
   iteration: <Loader className="w-4 h-4" />,
+  awaiting_user_decision: <MessageSquare className="w-4 h-4" />,
   completed: <CheckCircle2 className="w-4 h-4" />,
   failed: <AlertCircle className="w-4 h-4" />,
 };

@@ -152,6 +152,7 @@ export function WorkflowProgressStrip({
     retrieval_analysis: 'retrieval_analyst',
     patent_writing: 'patent_writer',
     quality_review: 'quality_reviewer',
+    awaiting_user_decision: 'quality_reviewer',
   };
 
   useEffect(() => {
@@ -235,6 +236,7 @@ export function WorkflowProgressStrip({
 
   const { activeIndex, completedSet } = resolveStageIndex(latestState, phaseHistory);
   const isInitial = latestState === 'initial' || latestState === 'created';
+  const isAwaitingDecision = latestState === 'awaiting_user_decision';
   const isTerminal = latestState === 'completed' || latestState === 'failed' || latestState === 'cancelled';
 
   const handleStart = async () => {
@@ -292,6 +294,12 @@ export function WorkflowProgressStrip({
                   <span className="inline-flex items-center gap-1 text-[11px] text-orange-600">
                     <XCircle className="w-3 h-3" />
                     已取消
+                  </span>
+                )}
+                {taskId && isAwaitingDecision && (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-purple-600">
+                    <Lightbulb className="w-3 h-3" />
+                    等待用户决策
                   </span>
                 )}
                 {!isTerminal && !isInitial && !starting && (
