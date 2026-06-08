@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.core.workflow_engine import PatentWorkflowEngine, PhaseResult, WorkflowContext, WorkflowPhase
+from src.core.workflow_engine import PatentWorkflowEngine, PhaseResult, WorkflowContext, WorkflowPhase, WorkflowState
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -135,6 +135,43 @@ class TestQualityGateTriggersRevision:
             "Currently the workflow silently skips the iteration loop and produces "
             "garbage outputs — this is the root cause of Bug #1."
         )
+
+
+class TestRetrievalPromptContracts:
+    def test_retrieval_phase_prompt_includes_web_access_guidance(self):
+        engine = PatentWorkflowEngine()
+        context = WorkflowContext(task_id="retrieval-web", user_id="u-web")
+        context.original_description = "一种结合产品文档与专利证据的技术检索方案。"
+        context.requirement_analysis = {
+            "tech_field": "人工智能",
+            "key_innovative_features": ["网页证据补强"],
+        }
+
+        prompt = engine._build_phase_prompt(context, WorkflowState.RETRIEVAL_ANALYSIS)
+
+        assert "web_access_match_site" in prompt
+        assert "web_access_find_url" in prompt
+        assert "web_access_read_page" in prompt
+        assert "web_access_browser" in prompt
+        assert "web_evidence" in prompt
+        assert "non_patent_prior_art" in prompt
+        assert "evidence_sources" in prompt
+        assert "evidence_gaps" in prompt
+
+    def test_retrieval_quality_gate_mentions_web_evidence_fields(self):
+        engine = PatentWorkflowEngine()
+        context = WorkflowContext(task_id="retrieval-gate", user_id="u-gate")
+        context.retrieval_report = {
+            "overall_patentability": "medium",
+            "web_evidence": [],
+        }
+
+        prompt = engine._build_quality_gate_prompt("retrieval", context)
+
+        assert "web_evidence" in prompt
+        assert "non_patent_prior_art" in prompt
+        assert "evidence_sources" in prompt
+        assert "evidence_gaps" in prompt
 
 
 class TestLowScoreRemediationContracts:
