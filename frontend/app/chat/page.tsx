@@ -113,8 +113,8 @@ function InteractionPanel({ interaction }: InteractionPanelProps) {
 function ChatPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const convIdFromParam = searchParams.get('conv_id');
-  const taskIdFromParam = searchParams.get('task_id');
+  const convIdFromParam = searchParams?.get('conv_id') ?? null;
+  const taskIdFromParam = searchParams?.get('task_id') ?? null;
 
   // Conversation list
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
