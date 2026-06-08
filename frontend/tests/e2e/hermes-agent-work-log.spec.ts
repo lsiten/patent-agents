@@ -308,3 +308,81 @@ test('chat activity log maps raw Hermes profile ids to display names', async ({ 
   await expect(page.getByText('CEO Agent')).toBeVisible();
   await expect(page.getByText('patent.ceo.v1')).toHaveCount(0);
 });
+
+test('chat task_id route loads the linked conversation history', async ({ page }) => {
+  const convId = 'conv-linked-task-history';
+  const taskId = 'workflow-linked-task';
+  const now = new Date().toISOString();
+
+  await page.route('**/api/v1/conversations?user_id=default_user', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        total: 1,
+        items: [
+          {
+            id: convId,
+            user_id: 'default_user',
+            title: '智能专利撰写系统',
+            created_at: now,
+            updated_at: now,
+            message_count: 1,
+            status: 'workflow_linked',
+            workflow_task_id: taskId,
+            linked_workflow_id: taskId,
+            workflow_state: 'brainstorming',
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route(`**/api/v1/conversations/${convId}`, async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: convId,
+        user_id: 'default_user',
+        title: '智能专利撰写系统',
+        created_at: now,
+        updated_at: now,
+        message_count: 1,
+        status: 'workflow_linked',
+        workflow_task_id: taskId,
+        linked_workflow_id: taskId,
+        workflow_state: 'brainstorming',
+        messages: [
+          {
+            id: 'assistant-linked-history',
+            role: 'assistant',
+            content: '这是通过 task_id 打开的历史对话记录',
+            timestamp: now,
+            type: 'text',
+            metadata: null,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route(`**/api/v1/workflows/${taskId}`, async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        task_id: taskId,
+        user_id: 'default_user',
+        current_state: 'brainstorming',
+        created_at: now,
+        updated_at: now,
+        iteration_count: 0,
+        progress: 10,
+        phase_history: [],
+      }),
+    });
+  });
+
+  await page.goto(`/chat?task_id=${taskId}`);
+
+  await expect(page.getByText('这是通过 task_id 打开的历史对话记录')).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/chat\\?conv_id=${convId}$`));
+});

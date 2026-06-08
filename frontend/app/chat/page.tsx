@@ -437,13 +437,33 @@ function ChatPageContent() {
   useEffect(() => {
     if (!taskIdFromParam || convIdFromParam) return;
 
+    const linkedConversation = conversations.find((conversation) => (
+      conversation.linked_workflow_id === taskIdFromParam
+      || conversation.workflow_task_id === taskIdFromParam
+    ));
+
+    if (linkedConversation) {
+      if (activeConvId === linkedConversation.id) return;
+
+      setActiveConvId(linkedConversation.id);
+      setConnectionStatus('idle');
+      setIsLoading(false);
+      setPendingConfirmation(null);
+      setRecommendStartWorkflow(false);
+      setDispatchActivities([]);
+      setError(null);
+      window.history.replaceState(null, '', `/chat?conv_id=${encodeURIComponent(linkedConversation.id)}`);
+      void loadConversation(linkedConversation.id);
+      return;
+    }
+
     setWorkflowTaskId(taskIdFromParam);
     setWorkflowState(null);
 
     workflowApi.get(taskIdFromParam).then((workflow) => {
       setWorkflowState(workflow.current_state);
     }).catch(() => {});
-  }, [taskIdFromParam, convIdFromParam]);
+  }, [activeConvId, conversations, convIdFromParam, loadConversation, taskIdFromParam]);
 
   useEffect(() => {
     if (!activeConvId || !workflowTaskId || (workflowState && terminalWorkflowStates.has(workflowState))) return;
