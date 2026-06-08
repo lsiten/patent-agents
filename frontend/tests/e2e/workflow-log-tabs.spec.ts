@@ -92,3 +92,50 @@ test('workflow log filters include the agent targeted by a live dispatch event',
   await expect(page.getByText('专利撰写 Agent').first()).toBeVisible();
   await expect(page.getByRole('button', { name: /专利撰写 Agent/ })).toBeVisible();
 });
+
+test('workflow phase preview uses successful phase history output when current output is incomplete', async ({ page }) => {
+  await page.route(`${API_BASE_PATTERN}/workflows/wf-phase-preview`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        task_id: 'wf-phase-preview',
+        user_id: 'default_user',
+        title: 'Phase preview regression',
+        current_state: 'retrieval_analysis',
+        created_at: '2026-06-08T00:00:00.000Z',
+        updated_at: '2026-06-08T00:00:01.000Z',
+        iteration_count: 0,
+        message_count: 1,
+        phase_history: [
+          {
+            phase: 'requirement',
+            success: true,
+            duration_seconds: 1,
+            output: {
+              tech_field: '沉浸式折幕显示控制技术',
+              core_principle: '根据观众姿态调整折幕画面映射',
+            },
+            issues: [],
+            warnings: [],
+          },
+        ],
+        outputs: {
+          brainstorming: {},
+          requirement_analysis: {
+            summary: '需求分析已完成',
+          },
+          retrieval_report: {},
+          patent_draft: {},
+          review_report: {},
+        },
+      }),
+    });
+  });
+  await mockWorkflowEventSource(page);
+
+  await page.goto('/workflow/wf-phase-preview');
+
+  await expect(page.getByText('沉浸式折幕显示控制技术')).toBeVisible();
+  await expect(page.getByText('待分析')).toHaveCount(0);
+});

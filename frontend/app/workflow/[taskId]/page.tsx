@@ -570,28 +570,35 @@ export default function WorkflowPage() {
     icon: typeof Brain,
     emptyMessage: string
   ) => {
-    if (!hasOutput(output)) {
+    const phaseAliases: Record<typeof type, string[]> = {
+      requirement: ['requirement', 'requirement_analysis'],
+      retrieval: ['retrieval', 'retrieval_analysis'],
+      draft: ['writing', 'patent_writing'],
+      review: ['review', 'quality_review', 'iteration'],
+    };
+
+    const getPhaseOutputs = (phaseNames: string[]): Record<string, unknown>[] => {
+      if (!workflow) return [];
+      return workflow.phase_history
+        .filter((p) => phaseNames.includes(p.phase) && p.success)
+        .map((p) => p.output as Record<string, unknown>)
+        .filter((o) => o && Object.keys(o).length > 0);
+    };
+
+    const phaseOutputs = getPhaseOutputs(phaseAliases[type]);
+    const effectiveOutput = phaseOutputs[phaseOutputs.length - 1] ?? output;
+
+    if (!hasOutput(effectiveOutput)) {
       return <EmptyOutput icon={icon} message={emptyMessage} />;
     }
 
-    // Check for multi-round outputs in phase_history
-    const getPhaseOutputs = (phaseName: string): Record<string, unknown>[] => {
-      if (!workflow) return [];
-      const outputs = workflow.phase_history
-        .filter((p) => p.phase === phaseName && p.success)
-        .map((p) => p.output as Record<string, unknown>)
-        .filter((o) => o && Object.keys(o).length > 0);
-      // If no outputs from history, use the current output
-      return outputs.length > 0 ? outputs : (output ? [output] : []);
-    };
-
     switch (type) {
       case 'requirement':
-        return <RequirementAnalysisView data={output!} />;
+        return <RequirementAnalysisView data={effectiveOutput} />;
       case 'retrieval':
-        return <RetrievalReportView data={output!} />;
+        return <RetrievalReportView data={effectiveOutput} />;
       case 'draft': {
-        const draftRounds = getPhaseOutputs('writing');
+        const draftRounds = phaseOutputs.length > 0 ? phaseOutputs : [effectiveOutput];
         if (draftRounds.length > 1) {
           return (
             <MultiRoundView
@@ -601,10 +608,10 @@ export default function WorkflowPage() {
             />
           );
         }
-        return <PatentDraftView data={output!} taskId={taskId} title={workflow?.title} />;
+        return <PatentDraftView data={effectiveOutput} taskId={taskId} title={workflow?.title} />;
       }
       case 'review': {
-        const reviewRounds = getPhaseOutputs('review');
+        const reviewRounds = phaseOutputs.length > 0 ? phaseOutputs : [effectiveOutput];
         if (reviewRounds.length > 1) {
           return (
             <MultiRoundView
@@ -614,12 +621,12 @@ export default function WorkflowPage() {
             />
           );
         }
-        return <QualityReviewView data={output!} />;
+        return <QualityReviewView data={effectiveOutput} />;
       }
       default:
         return (
           <CodeBlock language="json">
-            {JSON.stringify(output, null, 2)}
+            {JSON.stringify(effectiveOutput, null, 2)}
           </CodeBlock>
         );
     }
