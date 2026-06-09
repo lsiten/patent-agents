@@ -57,7 +57,13 @@ from .schemas import (
 )
 from ..models.domain import PatentTask
 from ..models.enums import WorkflowState
-from ..core.workflow_engine import PatentWorkflowEngine, WorkflowContext, WorkflowState as EngineWorkflowState
+from ..core.workflow_engine import (
+    PatentWorkflowEngine,
+    PhaseResult,
+    WorkflowContext,
+    WorkflowPhase,
+    WorkflowState as EngineWorkflowState,
+)
 from ..knowledge.base import get_knowledge_base
 from ..data_sources.base import get_data_source_manager
 from ..infrastructure.persistence import get_store
@@ -497,6 +503,22 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
     ret_norm = workflow_engine._normalize_phase_output("retrieval_report", context.retrieval_report or {})
     pat_norm = workflow_engine._normalize_phase_output("patent_draft", context.patent_draft or {})
     rev_norm = workflow_engine._normalize_phase_output("review_report", context.review_report or {})
+
+    phase_output_fields = {
+        WorkflowPhase.REQUIREMENT: "requirement_analysis",
+        WorkflowPhase.RETRIEVAL: "retrieval_report",
+        WorkflowPhase.WRITING: "patent_draft",
+        WorkflowPhase.REVIEW: "review_report",
+    }
+
+    def normalize_phase_result_output(result: PhaseResult) -> Dict[str, Any]:
+        if not isinstance(result.output, dict):
+            return {}
+        context_field = phase_output_fields.get(result.phase)
+        if context_field is None:
+            return result.output
+        return workflow_engine._normalize_phase_output(context_field, result.output)
+
     return WorkflowResponse(
         task_id=context.task_id,
         user_id=context.user_id,
@@ -511,7 +533,7 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
                 phase=result.phase.value,
                 success=result.success,
                 duration_seconds=result.duration_seconds,
-                output=result.output,
+                output=normalize_phase_result_output(result),
                 issues=result.issues,
                 warnings=result.warnings,
             )

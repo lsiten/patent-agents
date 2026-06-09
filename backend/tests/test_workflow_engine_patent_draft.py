@@ -241,6 +241,99 @@ async def test_generate_patent_in_sections_collects_drawing_tool_output(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_generate_patent_in_sections_requests_drawing_generation(monkeypatch):
+    engine = PatentWorkflowEngine()
+    context = engine.create_workflow(
+        task_id="writer-prompt-drawing-tool",
+        user_id="test-user",
+        description="一种包含入口终端、姿态控制模块和可调折幕组件的沉浸式显示系统。",
+    )
+    captured = {}
+
+    async def fake_run_agent_conversation(profile_id, prompt):
+        captured["prompt"] = prompt
+        return {
+            "final_response": "工具调用完成",
+            "messages": [
+                {
+                    "role": "tool",
+                    "name": "claim_drafter",
+                    "content": json.dumps(
+                        {
+                            "tool": "claim_drafter",
+                            "success": True,
+                            "data": {
+                                "independent_claim": "1. 一种沉浸式显示系统，包括入口终端和可调折幕组件。",
+                                "dependent_claims": ["2. 根据权利要求1所述的系统，其中可调折幕组件包括驱动机构。"],
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            ],
+        }
+
+    monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
+
+    await engine._generate_patent_in_sections(None, "patent.writer.v1", "", context)
+
+    assert "patent_drawing_generator" in captured["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_generate_patent_in_sections_preserves_drawings_description(monkeypatch):
+    engine = PatentWorkflowEngine()
+    context = engine.create_workflow(
+        task_id="writer-drawings-description",
+        user_id="test-user",
+        description="一种包含入口终端、姿态控制模块和可调折幕组件的沉浸式显示系统。",
+    )
+
+    async def fake_run_agent_conversation(profile_id, prompt):
+        return {
+            "final_response": "工具调用完成",
+            "messages": [
+                {
+                    "role": "tool",
+                    "name": "claim_drafter",
+                    "content": json.dumps(
+                        {
+                            "tool": "claim_drafter",
+                            "success": True,
+                            "data": {
+                                "independent_claim": "1. 一种沉浸式显示系统，包括入口终端和可调折幕组件。",
+                                "dependent_claims": ["2. 根据权利要求1所述的系统，其中可调折幕组件包括驱动机构。"],
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+                {
+                    "role": "tool",
+                    "name": "description_writer",
+                    "content": json.dumps(
+                        {
+                            "tool": "description_writer",
+                            "success": True,
+                            "data": {
+                                "section_type": "drawings",
+                                "content": "图1为沉浸式显示系统的结构示意图。",
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+        }
+
+    monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
+
+    draft = await engine._generate_patent_in_sections(None, "patent.writer.v1", "", context)
+
+    assert draft["description"]["drawings_description"] == "图1为沉浸式显示系统的结构示意图。"
+
+
+@pytest.mark.asyncio
 async def test_generate_patent_in_sections_preserves_agent_failure(monkeypatch):
     engine = PatentWorkflowEngine()
     context = engine.create_workflow(
@@ -833,6 +926,9 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
     assert writing_phase.success is True
     assert writing_phase.output.get("_agent_failed") is not True
     assert writing_phase.output["claims"]["independent_claim"].startswith("1. 一种Cave折幕视频处理方法")
+    review_phase = next(p for p in result.phase_history if p.phase.value == "review")
+    assert review_phase.success is True
+    assert review_phase.output["review_summary"]["recommendation"] == "approve"
 
 
 @pytest.mark.asyncio

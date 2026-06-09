@@ -1960,7 +1960,12 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
    - section_type="summary": 发明内容（技术问题+技术方案+有益效果）
    - section_type="detailed": 具体实施方式
    
-3. 调用 support_checker 检查权利要求与说明书的支持关系
+ 3. 对涉及结构、装置、系统、流程或空间关系的发明，调用 patent_drawing_generator 工具生成对应附图
+    - task_id: 当前工作流任务ID {context.task_id}
+    - stage: draft
+    - drawing_specs: 依据权利要求和说明书附图说明生成至少一张结构/流程示意图
+
+ 4. 调用 support_checker 检查权利要求与说明书的支持关系
 
 注意：本阶段仅生成专利内容，不生成最终文档文件。请确保所有内容完整、规范。
 
@@ -2044,6 +2049,8 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                                 description_data["background_art"] = content
                             elif section_type == "summary":
                                 description_data["summary_of_invention"] = content
+                            elif section_type in {"drawings", "drawings_description"}:
+                                description_data["drawings_description"] = content
                             elif section_type == "detailed":
                                 description_data["detailed_description"] = content
                             self._logger.info(f"Got description section: {section_type}")

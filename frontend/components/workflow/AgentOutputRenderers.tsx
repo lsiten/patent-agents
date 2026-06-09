@@ -42,6 +42,21 @@ function str(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
+function fieldText(value: unknown, keys: string[] = []): string {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+
+  if (isRecord(value)) {
+    for (const key of keys) {
+      const nested = value[key];
+      if (typeof nested === 'string' && nested.trim()) return nested;
+      if (typeof nested === 'number' && Number.isFinite(nested)) return String(nested);
+    }
+  }
+
+  return '';
+}
+
 function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -111,9 +126,11 @@ interface RequirementAnalysisViewProps {
 export function RequirementAnalysisView({ data }: RequirementAnalysisViewProps) {
   if (!data || Object.keys(data).length === 0) return null;
 
-  const techField = str(data.tech_field);
-  const corePrinciple = str(data.core_principle);
-  const technicalProblem = str(data.technical_problem);
+  const techField = fieldText(data.tech_field, ['primary_domain', 'domain', 'name'])
+    || fieldText(data.technical_field, ['primary_domain', 'domain', 'name'])
+    || fieldText(data.field, ['primary_domain', 'domain', 'name']);
+  const corePrinciple = fieldText(data.core_principle, ['content', 'principle', 'summary']);
+  const technicalProblem = fieldText(data.technical_problem, ['content', 'problem', 'summary']);
   const beneficialEffects = arr(data.beneficial_effects).map((e) => str(e)).filter(Boolean);
   const features = arr(data.key_innovative_features).filter(isRecord);
   const scenarios = arr(data.application_scenarios).map((s) => str(s)).filter(Boolean);

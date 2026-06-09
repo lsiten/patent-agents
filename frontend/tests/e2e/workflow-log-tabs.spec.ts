@@ -113,7 +113,10 @@ test('workflow phase preview uses successful phase history output when current o
             success: true,
             duration_seconds: 1,
             output: {
-              tech_field: '沉浸式折幕显示控制技术',
+              tech_field: {
+                primary_domain: '沉浸式折幕显示控制技术',
+                secondary_domains: ['可重构展示空间'],
+              },
               core_principle: '根据观众姿态调整折幕画面映射',
             },
             issues: [],

@@ -351,6 +351,35 @@ def test_workflow_response_preserves_phase_result_output():
     }
 
 
+def test_workflow_response_normalizes_phase_result_output():
+    task_id = "task-phase-output-normalized"
+    context = routes.workflow_engine.create_workflow(
+        task_id=task_id,
+        user_id="test_user",
+        description="Original invention description",
+    )
+    context.requirement_analysis = {}
+    context.add_phase_result(
+        PhaseResult(
+            phase=WorkflowPhase.REQUIREMENT,
+            success=True,
+            duration_seconds=0,
+            output={
+                "tech_field": {
+                    "primary_domain": "Cave folded-screen video",
+                    "secondary_domains": ["reconfigurable exhibition space"],
+                }
+            },
+        )
+    )
+
+    response = routes._workflow_context_to_response(context)
+
+    assert response.model_dump()["phase_history"][0]["output"]["tech_field"] == (
+        "Cave folded-screen video"
+    )
+
+
 def test_restart_linked_workflow_prefers_uploaded_disclosure_over_placeholder(
     client, api_prefix, monkeypatch
 ):
