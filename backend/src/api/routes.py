@@ -143,6 +143,7 @@ conversations_store: Dict[str, dict] = {}
 conversations_lock = asyncio.Lock()
 CONVERSATION_STREAM_HEARTBEAT_SECONDS = 15.0
 conversation_event_queues: Dict[str, List[Dict[str, Any]]] = {}
+conversation_stream_finalization_tasks: set[asyncio.Task[Any]] = set()
 
 workflow_engine = PatentWorkflowEngine()
 organization_tree_store: OrgNodeResponse | None = None
@@ -3156,6 +3157,56 @@ def _get_brainstorm_agent():
     )
 
 
+def _conversation_requested_complete_workflow(messages: List[dict], current_content: str = "") -> bool:
+    user_text = "\n".join(
+        str(message.get("content") or "")
+        for message in messages
+        if message.get("role") == "user"
+    )
+    normalized = re.sub(r"\s+", "", f"{user_text}\n{current_content}".lower())
+    requests_complete_application = (
+        re.search(r"生成完整(?:发明)?专利申请文件", normalized) is not None
+        or re.search(r"完整(?:发明)?专利申请(?:文件|流程)", normalized) is not None
+    )
+    requests_full_process = any(keyword in normalized for keyword in ["全流程", "完整流程", "工作流"])
+    return requests_complete_application and requests_full_process
+
+
+def _agent_completed_core_workflow_analysis(
+    tool_calls: List[dict],
+    agent_events: List[dict],
+    response_text: str,
+) -> bool:
+    evidence = (
+        json.dumps(tool_calls, ensure_ascii=False)
+        + json.dumps(agent_events, ensure_ascii=False)
+        + response_text
+    )
+    has_requirement_analysis = (
+        "requirement_analyst" in evidence or "需求分析师" in evidence or "需求分析" in evidence
+    )
+    has_retrieval_analysis = (
+        "retrieval_analyst" in evidence or "检索分析师" in evidence or "检索" in evidence
+    )
+    return has_requirement_analysis and has_retrieval_analysis
+
+
+def _should_recommend_workflow_creation(
+    *,
+    messages: List[dict],
+    current_content: str,
+    response_text: str,
+    tool_calls: List[dict],
+    agent_events: List[dict],
+) -> bool:
+    if "[CREATE_PATENT_RECOMMENDATION]" in response_text:
+        return True
+    return _conversation_requested_complete_workflow(
+        messages,
+        current_content,
+    ) and _agent_completed_core_workflow_analysis(tool_calls, agent_events, response_text)
+
+
 async def _handle_linked_workflow_conversation_chat(
     conv_id: str,
     conv: dict,
@@ -3399,7 +3450,13 @@ async def chat_in_conversation(conv_id: str, request: ConversationChatRequest):
         raise HTTPException(status_code=500, detail=f"AI 响应失败: {str(e)}")
 
     # 检查 AI 是否建议创建专利
-    has_recommendation = "[CREATE_PATENT_RECOMMENDATION]" in response_text
+    has_recommendation = _should_recommend_workflow_creation(
+        messages=conv["messages"],
+        current_content=content,
+        response_text=response_text,
+        tool_calls=tool_calls_data,
+        agent_events=[],
+    )
     clean_text = response_text.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
 
     assistant_msg = {
@@ -3554,7 +3611,7 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
         agent_events: list = []
         events_lock = threading.Lock()
         final_content = ""
-        result_holder = {"result": None, "error": None, "done": False}
+        result_holder: Dict[str, Any] = {"result": None, "error": None, "done": False}
         sequence_counter = {"value": 0}
         stream_call_id = f"conv-{conv_id}-{uuid.uuid4()}"
 
@@ -3668,6 +3725,85 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
         thread = threading.Thread(target=run_agent, daemon=True)
         thread.start()
 
+        finalization_task = None
+        finalized = {"done": False}
+
+        async def finalize_agent_result():
+            if finalized["done"]:
+                return None
+            finalized["done"] = True
+
+            while not result_holder["done"]:
+                await asyncio.sleep(0.05)
+
+            if result_holder["error"]:
+                return {"error": result_holder["error"]}
+
+            result = result_holder["result"]
+            if isinstance(result, dict):
+                final_content = result.get("final_response", "") or ""
+            else:
+                final_content = str(result) if result else ""
+
+            with events_lock:
+                persisted_agent_events = list(agent_events)
+
+            has_recommendation = _should_recommend_workflow_creation(
+                messages=conv["messages"],
+                current_content=content,
+                response_text=final_content,
+                tool_calls=tool_calls_data,
+                agent_events=persisted_agent_events,
+            )
+            clean_content = final_content.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
+
+            confirmation_data = None
+            confirm_pattern = r'\[CONFIRM:\s*(.*?)\]'
+            confirm_match = re.search(confirm_pattern, clean_content)
+            if confirm_match:
+                marker_content = confirm_match.group(1)
+                parts = [p.strip() for p in marker_content.split('|')]
+                question = parts[0]
+                options = parts[1:] if len(parts) > 1 else []
+                if question:
+                    confirmation_data = {"question": question, "options": options}
+                    clean_content = re.sub(confirm_pattern, '', clean_content).strip()
+
+            assistant_msg = {
+                "id": str(uuid.uuid4()),
+                "role": "assistant",
+                "content": clean_content,
+                "timestamp": datetime.now().isoformat(),
+                "type": "text",
+                "metadata": {"recommend_create_patent": has_recommendation} if has_recommendation else None,
+                "tool_calls": tool_calls_data if tool_calls_data else None,
+                "agent_events": persisted_agent_events if persisted_agent_events else None,
+            }
+
+            async with conversations_lock:
+                c = conversations_store.get(conv_id)
+                if c:
+                    c["messages"].append(assistant_msg)
+                    c["updated_at"] = datetime.now().isoformat()
+                    user_msgs = [m for m in c["messages"] if m["role"] == "user"]
+                    if c["title"] == "新的对话" and len(user_msgs) == 1:
+                        title = content[:50]
+                        c["title"] = title + ("..." if len(content) > 50 else "")
+
+            await _persist_conversation(conv_id)
+            return {
+                "message": assistant_msg,
+                "content": clean_content,
+                "has_recommendation": has_recommendation,
+                "confirmation": confirmation_data,
+            }
+
+        async def finalize_after_disconnect():
+            try:
+                await finalize_agent_result()
+            except Exception:
+                logger.exception("Failed to persist conversation stream result after disconnect")
+
         try:
             last_heartbeat_at = asyncio.get_running_loop().time()
             while not result_holder["done"] or events:
@@ -3692,28 +3828,16 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
             if result_holder["error"]:
                 yield f"event: error\ndata: {_json.dumps({'error': result_holder['error']}, ensure_ascii=False)}\n\n"
             else:
-                result = result_holder["result"]
-                if isinstance(result, dict):
-                    final_content = result.get("final_response", "") or ""
-                else:
-                    final_content = str(result) if result else ""
+                finalized_result = await finalize_agent_result()
+                if not finalized_result or finalized_result.get("error"):
+                    error = finalized_result.get("error") if finalized_result else "empty result"
+                    yield f"event: error\ndata: {_json.dumps({'error': error}, ensure_ascii=False)}\n\n"
+                    return
 
-                has_recommendation = "[CREATE_PATENT_RECOMMENDATION]" in final_content
-                clean_content = final_content.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
-
-                # Parse [CONFIRM: question|opt1|opt2] markers for user confirmation
-                confirmation_data = None
-                confirm_pattern = r'\[CONFIRM:\s*(.*?)\]'
-                confirm_match = re.search(confirm_pattern, clean_content)
-                if confirm_match:
-                    marker_content = confirm_match.group(1)
-                    parts = [p.strip() for p in marker_content.split('|')]
-                    question = parts[0]
-                    options = parts[1:] if len(parts) > 1 else []
-                    if question:
-                        confirmation_data = {"question": question, "options": options}
-                        # Remove marker from displayed content
-                        clean_content = re.sub(confirm_pattern, '', clean_content).strip()
+                clean_content = finalized_result["content"]
+                has_recommendation = finalized_result["has_recommendation"]
+                confirmation_data = finalized_result["confirmation"]
+                assistant_msg = finalized_result["message"]
 
                 # 发送 content 事件
                 yield f"event: content\ndata: {_json.dumps({'content': clean_content, 'has_recommendation': has_recommendation}, ensure_ascii=False)}\n\n"
@@ -3722,34 +3846,15 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                 if confirmation_data:
                     yield f"event: confirmation\ndata: {_json.dumps(confirmation_data, ensure_ascii=False)}\n\n"
 
-                # 构建 assistant 消息并持久化
-                assistant_msg = {
-                    "id": str(uuid.uuid4()),
-                    "role": "assistant",
-                    "content": clean_content,
-                    "timestamp": datetime.now().isoformat(),
-                    "type": "text",
-                    "metadata": {"recommend_create_patent": has_recommendation} if has_recommendation else None,
-                    "tool_calls": tool_calls_data if tool_calls_data else None,
-                    "agent_events": agent_events if agent_events else None,
-                }
-
-                async with conversations_lock:
-                    c = conversations_store.get(conv_id)
-                    if c:
-                        c["messages"].append(assistant_msg)
-                        c["updated_at"] = datetime.now().isoformat()
-                        user_msgs = [m for m in c["messages"] if m["role"] == "user"]
-                        if c["title"] == "新的对话" and len(user_msgs) == 1:
-                            title = content[:50]
-                            c["title"] = title + ("..." if len(content) > 50 else "")
-
-                await _persist_conversation(conv_id)
-
                 yield f"event: done\ndata: {_json.dumps({'message': assistant_msg, 'has_recommendation': has_recommendation, 'needs_confirmation': confirmation_data is not None, 'conversation_id': conv_id}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             yield f"event: error\ndata: {_json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            if not finalized["done"] and finalization_task is None:
+                finalization_task = asyncio.create_task(finalize_after_disconnect())
+                conversation_stream_finalization_tasks.add(finalization_task)
+                finalization_task.add_done_callback(conversation_stream_finalization_tasks.discard)
 
     return StreamingResponse(
         event_generator(),

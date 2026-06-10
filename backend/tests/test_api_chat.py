@@ -6,12 +6,14 @@ Chat endpoint tests.
 
 import pytest
 from fastapi import BackgroundTasks
+import asyncio
 import json
 import time
 from datetime import datetime
+from typing import AsyncGenerator, cast
 
 from src.api import routes
-from src.api.schemas import AgentEventInfo
+from src.api.schemas import AgentEventInfo, ConversationChatRequest
 from src.core.workflow_engine import WorkflowContext, WorkflowState
 
 
@@ -270,6 +272,124 @@ class TestAgentActivityEvents:
         assert response.status_code == 200, body
         assert "event: heartbeat" in body
         assert "安静运行后的答复" in body
+
+    async def test_conversation_stream_persists_assistant_after_client_disconnect(
+        self,
+        monkeypatch,
+    ):
+        conv_id = "conv-disconnect-persists-assistant"
+        now = datetime.now().isoformat()
+        routes.conversations_store[conv_id] = {
+            "id": conv_id,
+            "title": "新的对话",
+            "messages": [],
+            "created_at": now,
+            "updated_at": now,
+            "status": "active",
+            "linked_workflow_id": None,
+        }
+
+        class SlowAgent:
+            def run_conversation(self, prompt):
+                time.sleep(0.1)
+                return {"final_response": "断开连接后仍应保存的答复"}
+
+        def fake_create_ai_agent(*, profile_id, session_id, callbacks):
+            return SlowAgent()
+
+        monkeypatch.setattr(routes, "create_ai_agent", fake_create_ai_agent)
+        monkeypatch.setattr(routes, "CONVERSATION_STREAM_HEARTBEAT_SECONDS", 0.01, raising=False)
+
+        response = await routes.chat_in_conversation_stream(
+            conv_id,
+            ConversationChatRequest(content="请分析这个方案"),
+        )
+        body_iterator = cast(AsyncGenerator[str, None], response.body_iterator)
+        async for chunk in body_iterator:
+            if "event: heartbeat" in chunk:
+                await body_iterator.aclose()
+                break
+
+        await asyncio.sleep(0.2)
+
+        messages = routes.conversations_store[conv_id]["messages"]
+        assert any(
+            message["role"] == "assistant" and message["content"] == "断开连接后仍应保存的答复"
+            for message in messages
+        )
+
+    def test_conversation_stream_recommends_workflow_after_full_flow_analysis(
+        self,
+        client,
+        api_prefix,
+        monkeypatch,
+    ):
+        conv_id = "conv-full-flow-analysis-recommendation"
+        now = datetime.now().isoformat()
+        routes.conversations_store[conv_id] = {
+            "id": conv_id,
+            "title": "完整流程申请",
+            "messages": [
+                {
+                    "id": "msg-user-full-flow",
+                    "role": "user",
+                    "content": "请基于以下技术方案生成完整发明专利申请文件，并执行需求分析、现有技术检索、专利撰写、附图生成和质量审查全流程。",
+                    "timestamp": now,
+                    "type": "text",
+                    "metadata": None,
+                },
+                {
+                    "id": "msg-assistant-confirm",
+                    "role": "assistant",
+                    "content": "请确认系统、方法、边缘控制装置是否均支持。",
+                    "timestamp": now,
+                    "type": "text",
+                    "metadata": None,
+                },
+            ],
+            "created_at": now,
+            "updated_at": now,
+            "status": "brainstorming",
+            "linked_workflow_id": None,
+        }
+
+        class FullFlowAgent:
+            def __init__(self, callbacks):
+                self.callbacks = callbacks
+
+            def run_conversation(self, prompt):
+                self.callbacks["tool_complete"](
+                    "call-requirements",
+                    "dispatch_specialist",
+                    {},
+                    '{"agent_id":"requirement_analyst","result":"需求分析完成"}',
+                )
+                self.callbacks["tool_complete"](
+                    "call-retrieval",
+                    "dispatch_specialist",
+                    {},
+                    '{"agent_id":"retrieval_analyst","result":"检索分析完成"}',
+                )
+                return {
+                    "final_response": "检索结论已完成，建议围绕蒸腾需求差值驱动滴灌量二次修正撰写申请文件。"
+                }
+
+        def fake_create_ai_agent(*, profile_id, session_id, callbacks):
+            return FullFlowAgent(callbacks)
+
+        monkeypatch.setattr(routes, "create_ai_agent", fake_create_ai_agent)
+
+        with client.stream(
+            "POST",
+            f"{api_prefix}/conversations/{conv_id}/chat/stream",
+            json={"content": "两者均支持"},
+        ) as response:
+            body = "".join(response.iter_text())
+
+        assert response.status_code == 200, body
+        assert '"has_recommendation": true' in body
+        persisted = routes.conversations_store[conv_id]["messages"][-1]
+        assert persisted["metadata"] == {"recommend_create_patent": True}
 
 
 class TestChat:

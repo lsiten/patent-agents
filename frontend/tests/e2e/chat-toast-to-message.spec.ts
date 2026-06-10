@@ -285,3 +285,66 @@ test('starting workflow hides stale agent confirmation card', async ({ page }) =
   await expect(page.getByText('专利申请流程已创建并自动启动！')).toBeVisible();
   await expect(page.getByText('请选择申请类型')).toHaveCount(0);
 });
+
+test('direct full-flow request auto-starts workflow after recommendation', async ({ page }) => {
+  await mockConversationList(page);
+  await mockCreateConversation(page, 'conv-auto-start', '请基于以下技术方案生成完整发明专利申请文件');
+
+  let createWorkflowCalled = false;
+  const fullFlowPrompt = '请基于以下技术方案生成完整发明专利申请文件，并执行需求分析、现有技术检索、专利撰写、附图生成和质量审查全流程。';
+
+  await page.route(`${API_BASE_PATTERN}/conversations/conv-auto-start/chat/stream`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: [
+        'event: content',
+        'data: {"content":"已识别为完整专利申请全流程请求","has_recommendation":true}',
+        '',
+        'event: done',
+        'data: {"message":{"id":"assistant-auto-start","role":"assistant","content":"已识别为完整专利申请全流程请求","timestamp":"2026-06-04T00:00:01.000Z"},"has_recommendation":true,"conversation_id":"conv-auto-start"}',
+        '',
+      ].join('\n'),
+    });
+  });
+
+  await page.route(`${API_BASE_PATTERN}/conversations/conv-auto-start/create-workflow`, async (route) => {
+    createWorkflowCalled = true;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        task_id: 'wf-auto-started',
+        status: 'started',
+        redirect_url: '/workflow/wf-auto-started',
+      }),
+    });
+  });
+
+  await page.route(`${API_BASE_PATTERN}/workflows/wf-auto-started`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        task_id: 'wf-auto-started',
+        user_id: 'default_user',
+        title: '完整专利申请流程',
+        current_state: 'requirement_analysis',
+        created_at: '2026-06-04T00:00:00.000Z',
+        updated_at: '2026-06-04T00:00:00.000Z',
+        iteration_count: 0,
+        message_count: 1,
+        phase_history: [],
+        outputs: {},
+      }),
+    });
+  });
+
+  await page.goto('/chat');
+  await page.getByTestId('chat-input').fill(fullFlowPrompt);
+  await page.getByTestId('chat-send-button').click();
+
+  await expect.poll(() => createWorkflowCalled).toBe(true);
+  await expect(page.getByText('专利申请流程已创建并自动启动！')).toBeVisible();
+  await expect(page.getByText('专利申请流程已启动')).toBeVisible();
+});

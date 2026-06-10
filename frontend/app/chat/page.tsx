@@ -135,6 +135,17 @@ function resolveAgentName(data: unknown, fallback = 'patent.ceo.v1'): string {
   return fallback;
 }
 
+function shouldAutoStartWorkflowFromPrompt(content: string): boolean {
+  const normalized = content.replace(/\s+/g, '').toLowerCase();
+  const requestsCompletePatentApplication = /生成完整(?:发明)?专利申请文件/.test(normalized)
+    || /完整(?:发明)?专利申请(?:文件|流程)/.test(normalized);
+  const requestsFullProcess = normalized.includes('全流程')
+    || normalized.includes('完整流程')
+    || normalized.includes('工作流');
+
+  return requestsCompletePatentApplication && requestsFullProcess;
+}
+
 interface ParsedMessageContent {
   conclusion: string;
   interaction: string;
@@ -637,6 +648,12 @@ function ChatPageContent() {
         agent_events: [],
       };
       setMessages((prev) => [...prev, streamMsg]);
+      let didAutoStartWorkflow = false;
+      const maybeAutoStartWorkflow = () => {
+        if (didAutoStartWorkflow || !shouldAutoStartWorkflowFromPrompt(content)) return;
+        didAutoStartWorkflow = true;
+        void handleStartWorkflow(convId);
+      };
 
       // Use streaming API
       conversationApi.chatStream(convId, { content }, {
@@ -799,6 +816,7 @@ function ChatPageContent() {
           ));
           if (data.has_recommendation) {
             setRecommendStartWorkflow(true);
+            maybeAutoStartWorkflow();
           }
         },
         onConfirmation: (data) => {
@@ -843,6 +861,7 @@ function ChatPageContent() {
           sendingRef.current = false;
           if (data.has_recommendation) {
             setRecommendStartWorkflow(true);
+            maybeAutoStartWorkflow();
           }
           void loadConversations();
         },
@@ -952,13 +971,13 @@ function ChatPageContent() {
   };
 
   // Start workflow from conversation
-  const handleStartWorkflow = async () => {
-    if (!activeConvId || isStartingWorkflow) return;
+  const handleStartWorkflow = async (conversationId = activeConvId) => {
+    if (!conversationId || isStartingWorkflow) return;
     setIsStartingWorkflow(true);
     setError(null);
 
     try {
-      const result = await conversationApi.createWorkflow(activeConvId);
+      const result = await conversationApi.createWorkflow(conversationId);
       setWorkflowTaskId(result.task_id);
       setWorkflowState(result.status);
       setRecommendStartWorkflow(false);
@@ -1501,7 +1520,7 @@ function ChatPageContent() {
               <div className="flex items-center gap-2 flex-shrink-0">
                 <Button
                   size="sm"
-                  onClick={handleStartWorkflow}
+                  onClick={() => handleStartWorkflow()}
                   disabled={isStartingWorkflow}
                   className="bg-green-600 hover:bg-green-700"
                 >
