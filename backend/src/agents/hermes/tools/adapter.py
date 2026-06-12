@@ -787,7 +787,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "patent_drawing_generator",
         "schema": {
             "name": "patent_drawing_generator",
-            "description": "根据技术方案生成专利说明书附图，使用系统配置的生图/LLM配置并返回附图元数据。需要附图时在生成DOCX前调用。",
+            "description": "根据技术方案生成专利说明书附图，使用撰写Agent生图配置或系统生图配置并返回附图元数据。需要附图时必须在质量审查和生成DOCX前调用。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -807,6 +807,10 @@ PATENT_TOOL_DEFINITIONS = [
                         "type": "string",
                         "description": "附图说明文本，可用于前端展示和说明书附图说明",
                     },
+                    "figure_number": {
+                        "type": "string",
+                        "description": "附图编号，例如：图1、图2、图3。生成多张附图时必须分别调用并传入对应编号。",
+                    },
                 },
                 "required": ["tech_description", "task_id"],
             },
@@ -818,7 +822,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "patent_docx_generator",
         "schema": {
             "name": "patent_docx_generator",
-            "description": "将结构化的专利撰写结果生成为符合专利局规范的.docx文件。在完成权利要求书和说明书撰写后调用此工具，输入结构化内容，输出格式规范的专利申请文件。文件格式：楷体14pt、首行缩进、A4页面、标准页边距、文档分节。如果提供tech_description，将自动生成专利附图。",
+            "description": "将结构化的专利撰写结果生成为符合专利局规范的.docx文件。在质量审查通过后调用此工具，输入权利要求、说明书、摘要以及 patent_drawing_generator 已生成的 drawings 元数据，输出格式规范的专利申请文件。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -844,7 +848,12 @@ PATENT_TOOL_DEFINITIONS = [
                     },
                     "tech_description": {
                         "type": "string",
-                        "description": "原始技术方案描述，用于自动生成专利附图（系统架构图、流程图等）。如果发明涉及硬件、装置、系统或流程，强烈建议提供此参数以生成附图。",
+                        "description": "原始技术方案描述，仅用于旧流程兼容兜底；新流程应优先传入 drawings。",
+                    },
+                    "drawings": {
+                        "type": "array",
+                        "description": "patent_drawing_generator 返回的附图元数据列表，用于插入摘要附图和说明书附图。",
+                        "items": {"type": "object"},
                     },
                 },
                 "required": ["title", "claims", "description", "abstract"],

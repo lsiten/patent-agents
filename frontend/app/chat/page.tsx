@@ -4,8 +4,8 @@ import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'rea
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Send, Bot, User, Sparkles, FileText, Loader2, Plus, Trash2,
-  MessageSquare, ChevronRight, AlertCircle, CheckCircle2, Clock, Paperclip, X, Copy, Search,
-  ChevronDown
+  MessageSquare, ChevronRight, AlertCircle, CheckCircle2, Paperclip, X, Copy, Search,
+  ChevronDown, PauseCircle, PlayCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -67,6 +67,70 @@ function updateDispatchActivities(activities: DispatchActivity[], event: AgentWo
   }
 
   return activities;
+}
+
+function updateWorkflowActivityMessage(
+  messages: ChatMessage[],
+  workflowTaskId: string,
+  event: AgentEvent,
+): ChatMessage[] {
+  const liveId = `workflow-live-${workflowTaskId}`;
+  const existingIndex = messages.findIndex((message) => message.id === liveId);
+  const existing = existingIndex >= 0 ? messages[existingIndex] : null;
+  const agentEvents = [...(existing?.agent_events || []), event].slice(-120);
+  const toolCalls = [...(existing?.tool_calls || [])];
+
+  if (event.type === 'tool_call_start') {
+    const toolName = typeof event.data?.name === 'string' ? event.data.name : 'unknown';
+    const parameters = typeof event.data?.parameters === 'object' && event.data.parameters !== null && !Array.isArray(event.data.parameters)
+      ? event.data.parameters as Record<string, unknown>
+      : {};
+    toolCalls.push({
+      name: toolName,
+      parameters,
+      result: null,
+      success: true,
+    });
+  }
+
+  if (event.type === 'tool_call_end') {
+    const toolName = typeof event.data?.name === 'string' ? event.data.name : 'unknown';
+    const idx = toolCalls.findLastIndex((tool) => tool.name === toolName && tool.result === null);
+    const result = event.data?.result ?? '';
+    const success = typeof event.data?.success === 'boolean' ? event.data.success : true;
+    const nextTool = {
+      name: toolName,
+      parameters: idx >= 0 ? toolCalls[idx].parameters : {},
+      result,
+      success,
+      error: success ? undefined : String(event.data?.error || result || '工具执行失败'),
+    };
+    if (idx >= 0) {
+      toolCalls[idx] = nextTool;
+    } else {
+      toolCalls.push(nextTool);
+    }
+  }
+
+  const nextMessage: ChatMessage = {
+    id: liveId,
+    role: 'agent',
+    agent_name: 'workflow_engine',
+    content: '工作流实时过程',
+    timestamp: event.timestamp || new Date().toISOString(),
+    type: 'progress',
+    metadata: { workflow_id: workflowTaskId, live_activity: true },
+    agent_events: agentEvents,
+    tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+  };
+
+  if (existingIndex < 0) {
+    return [...messages, nextMessage];
+  }
+
+  const updated = [...messages];
+  updated[existingIndex] = { ...existing!, ...nextMessage };
+  return updated;
 }
 
 function createWelcomeMessage(): ChatMessage {
@@ -144,6 +208,27 @@ function shouldAutoStartWorkflowFromPrompt(content: string): boolean {
     || normalized.includes('工作流');
 
   return requestsCompletePatentApplication && requestsFullProcess;
+}
+
+function conversationWorkflowState(conversation: ConversationSummary): string {
+  return conversation.workflow_state ?? conversation.status;
+}
+
+function workflowStatusDisplay(state: string): { label: string; tone: 'done' | 'failed' | 'waiting' | 'running' | 'initial' } {
+  if (state === 'completed') return { label: '已完成', tone: 'done' };
+  if (state === 'failed') return { label: '已失败', tone: 'failed' };
+  if (state === 'cancelled') return { label: '已取消', tone: 'failed' };
+  if (state === 'awaiting_user_decision') return { label: '待处理', tone: 'waiting' };
+  if (state === 'initial' || state === 'initialized' || state === 'created') return { label: '待启动', tone: 'initial' };
+  return { label: '进行中', tone: 'running' };
+}
+
+function WorkflowStatusIcon({ tone }: { tone: ReturnType<typeof workflowStatusDisplay>['tone'] }) {
+  if (tone === 'done') return <CheckCircle2 className="w-3 h-3 text-green-600" />;
+  if (tone === 'failed') return <AlertCircle className="w-3 h-3 text-red-500" />;
+  if (tone === 'waiting') return <PauseCircle className="w-3 h-3 text-purple-600" />;
+  if (tone === 'initial') return <PlayCircle className="w-3 h-3 text-slate-500" />;
+  return <Loader2 className="w-3 h-3 text-amber-500 animate-spin" />;
 }
 
 interface ParsedMessageContent {
@@ -268,6 +353,8 @@ function ChatPageContent() {
       (m) => m.content && m.content.toLowerCase().includes(q)
     );
   }, [messages, searchQuery]);
+  const visibleWorkflowTaskId = activeConvId ? workflowTaskId : null;
+  const visibleWorkflowState = activeConvId ? workflowState : null;
 
   const appendSystemMessage = useCallback(
     (content: string, tone: 'info' | 'error' = 'info') => {
@@ -486,6 +573,9 @@ function ChatPageContent() {
           setWorkflowState('failed');
         }
       },
+      onAgentActivity: (event) => {
+        setMessages((current) => updateWorkflowActivityMessage(current, workflowTaskId, event));
+      },
       onConversationMessage: (message) => {
         setMessages((current) => upsertMessage(current, message));
       },
@@ -498,8 +588,45 @@ function ChatPageContent() {
     return () => stream.abort();
   }, [activeConvId, loadConversation, workflowState, workflowTaskId]);
 
+  useEffect(() => {
+    if (!activeConvId || !workflowTaskId) return;
+
+    let stopped = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const syncWorkflowState = async () => {
+      try {
+        const workflow = await workflowApi.get(workflowTaskId);
+        if (stopped) return;
+        setWorkflowState(workflow.current_state);
+        setConversations((current) => current.map((conversation) => (
+          conversation.id === activeConvId
+          || conversation.linked_workflow_id === workflowTaskId
+          || conversation.workflow_task_id === workflowTaskId
+            ? { ...conversation, workflow_state: workflow.current_state }
+            : conversation
+        )));
+        if (terminalWorkflowStates.has(workflow.current_state) && interval) {
+          clearInterval(interval);
+          interval = null;
+        }
+      } catch {
+      }
+    };
+
+    void syncWorkflowState();
+    interval = setInterval(syncWorkflowState, 3000);
+
+    return () => {
+      stopped = true;
+      if (interval) clearInterval(interval);
+    };
+  }, [activeConvId, workflowTaskId]);
+
   // Create new conversation
   const handleNewConversation = async () => {
+    conversationLoadSeqRef.current += 1;
+    skipNextConversationLoadRef.current = null;
     setConnectionStatus('idle');
     setIsLoading(false);
     setActiveConvId(null);
@@ -509,12 +636,16 @@ function ChatPageContent() {
     setRecommendStartWorkflow(false);
     setSuggestedTitle(null);
     setPendingConfirmation(null);
+    setDispatchActivities([]);
     setError(null);
+    setInput('');
+    setPendingFile(null);
     window.history.replaceState(null, '', '/chat');
   };
 
   // Select conversation
   const handleSelectConversation = (convId: string) => {
+    conversationLoadSeqRef.current += 1;
     setActiveConvId(convId);
     setConnectionStatus('idle');
     setIsLoading(false);
@@ -627,6 +758,15 @@ function ChatPageContent() {
         skipNextConversationLoadRef.current = convId;
         window.history.replaceState(null, '', `/chat?conv_id=${encodeURIComponent(convId)}`);
         void loadConversations();
+      }
+
+      if (fileUpload && shouldAutoStartWorkflowFromPrompt(content)) {
+        setConnectionStatus('idle');
+        setIsLoading(false);
+        sendingRef.current = false;
+        setRecommendStartWorkflow(false);
+        await handleStartWorkflow(convId);
+        return;
       }
 
       // Create a streaming assistant message placeholder
@@ -859,7 +999,7 @@ function ChatPageContent() {
           ));
           setIsLoading(false);
           sendingRef.current = false;
-          if (data.has_recommendation) {
+          if (data.has_recommendation || shouldAutoStartWorkflowFromPrompt(content)) {
             setRecommendStartWorkflow(true);
             maybeAutoStartWorkflow();
           }
@@ -1019,7 +1159,7 @@ function ChatPageContent() {
 
   return (
     <>
-    <div className="flex h-[calc(100vh-4rem)]">
+    <div className="fixed inset-x-0 bottom-0 top-16 flex min-h-0 overflow-hidden">
       {/* Sidebar Toggle (mobile) */}
       <button
         className="md:hidden fixed left-2 top-20 z-10 p-2 rounded-lg bg-canvas border border-hairline shadow-sm"
@@ -1031,7 +1171,7 @@ function ChatPageContent() {
       {/* Sidebar */}
       <aside
         className={clsx(
-          'w-80 flex-shrink-0 border-r border-hairline bg-surface/95 flex flex-col transition-transform',
+          'h-full min-h-0 w-80 flex-shrink-0 border-r border-hairline bg-surface/95 flex flex-col transition-transform',
           'md:relative md:translate-x-0',
           showSidebar ? 'translate-x-0' : '-translate-x-full absolute inset-y-0 z-20'
         )}
@@ -1062,7 +1202,11 @@ function ChatPageContent() {
               <p className="text-xs text-slate/60 mt-1">点击上方按钮开始新对话</p>
             </div>
           ) : (
-            conversations.map((conv) => (
+            conversations.map((conv) => {
+              const convWorkflowState = conversationWorkflowState(conv);
+              const statusDisplay = workflowStatusDisplay(convWorkflowState);
+
+              return (
               <div
                 key={conv.id}
                 onClick={() => handleSelectConversation(conv.id)}
@@ -1087,16 +1231,8 @@ function ChatPageContent() {
                     {(conv.linked_workflow_id || conv.workflow_task_id) && (
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         <span className="inline-flex items-center gap-1 rounded-full bg-canvas px-2 py-0.5 text-[11px] font-medium text-slate ring-1 ring-hairline">
-                        {conv.status === 'completed' ? (
-                          <CheckCircle2 className="w-3 h-3 text-green-600" />
-                        ) : (
-                          <Clock className="w-3 h-3 text-amber-500" />
-                        )}
-                        <span>
-                          {conv.status === 'completed' ? '已完成' :
-                           conv.status === 'failed' ? '已失败' :
-                           conv.status === 'initial' ? '待启动' : '进行中'}
-                        </span>
+                        <WorkflowStatusIcon tone={statusDisplay.tone} />
+                        <span>{statusDisplay.label}</span>
                         </span>
                         {(conv.linked_workflow_id || conv.workflow_task_id) && (
                           <button
@@ -1123,15 +1259,16 @@ function ChatPageContent() {
                   </button>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </div>
       </aside>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex h-full min-h-0 flex-col min-w-0 overflow-hidden">
         {/* Header */}
-        <div className="border-b border-hairline bg-canvas/95 px-6 py-3 backdrop-blur">
+        <div className="flex-shrink-0 border-b border-hairline bg-canvas/95 px-6 py-3 backdrop-blur">
           <div className="flex items-center justify-between">
             <div>
               {editingTitle ? (
@@ -1154,7 +1291,7 @@ function ChatPageContent() {
                 </h1>
               )}
               <p className="text-sm text-slate">
-                {workflowTaskId
+                {visibleWorkflowTaskId
                   ? '专利申请流程已启动'
                   : activeConvId
                   ? '与 AI 专利代理人沟通，完善技术方案'
@@ -1212,11 +1349,11 @@ function ChatPageContent() {
                   )}
                 </>
               )}
-              {workflowTaskId && (
+              {visibleWorkflowTaskId && (
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => router.push(`/workflow/${encodeURIComponent(workflowTaskId)}`)}
+                  onClick={() => router.push(`/workflow/${encodeURIComponent(visibleWorkflowTaskId)}`)}
                 >
                   <Sparkles className="w-4 h-4 mr-1" />
                   查看工作流
@@ -1227,36 +1364,34 @@ function ChatPageContent() {
         </div>
 
         {/* Unified CEO Dispatch Panel (stage roadmap + dispatch activities) */}
-        <WorkflowProgressStrip
-          taskId={workflowTaskId}
-          currentState={workflowState}
-          refreshKey={isLoading ? 1 : 0}
-          dispatchActivities={dispatchActivities}
-          isStreaming={isLoading}
-        />
+        {visibleWorkflowTaskId && (
+          <WorkflowProgressStrip
+            taskId={visibleWorkflowTaskId}
+            currentState={visibleWorkflowState}
+            refreshKey={isLoading ? 1 : 0}
+            dispatchActivities={dispatchActivities}
+            isStreaming={isLoading}
+          />
+        )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto bg-surface/35">
-          <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 md:px-6">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-surface/35">
+          <div className="mx-auto flex min-h-full max-w-5xl flex-col space-y-6 px-4 pb-44 pt-6 md:px-6">
 
             {isLoadingConv ? (
               <div className="flex justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-brand-green-dark" />
               </div>
             ) : !activeConvId && messages.length === 1 && messages[0]?.id === 'welcome' ? (
-              <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center text-center">
                 <MessageSquare className="w-12 h-12 text-slate/30 mb-4" />
                 <h2 className="text-lg font-semibold text-ink mb-2">开始新的专利对话</h2>
                 <p className="text-sm text-slate max-w-md mb-6">
                   描述您的发明创造，AI 专利代理人将帮助您梳理技术方案、评估专利价值，并生成专业的专利申请文件。
                 </p>
-                <Button onClick={handleNewConversation} size="lg">
-                  <Plus className="w-4 h-4 mr-1.5" />
-                  新建对话
-                </Button>
               </div>
             ) : (searchQuery ? filteredMessages : messages).length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center text-center">
                 <Bot className="w-10 h-10 text-slate/30 mb-3" />
                 <p className="text-sm text-slate">{searchQuery ? '未找到匹配的消息' : '对话为空，发送第一条消息开始'}</p>
               </div>
@@ -1507,7 +1642,7 @@ function ChatPageContent() {
 
         {/* Workflow Recommendation Banner */}
         {recommendStartWorkflow && activeConvId && !workflowTaskId && (
-          <div className="border-t border-hairline bg-green-50 px-6 py-3">
+          <div className="flex-shrink-0 border-t border-hairline bg-green-50 px-6 py-3">
             <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-green-600" />
@@ -1545,7 +1680,7 @@ function ChatPageContent() {
         )}
 
         {pendingConfirmation && !recommendStartWorkflow && !workflowTaskId && (
-          <div className="sticky bottom-[76px] z-10 border-t border-amber-200/80 bg-amber-50/95 px-4 py-3 shadow-[0_-12px_30px_rgba(0,30,43,0.08)] backdrop-blur">
+          <div className="z-10 flex-shrink-0 border-t border-amber-200/80 bg-amber-50/95 px-4 py-3 shadow-[0_-12px_30px_rgba(0,30,43,0.08)] backdrop-blur">
             <div className="mx-auto max-w-5xl">
               <div className="rounded-2xl border border-amber-200 bg-white px-4 py-3 shadow-sm" role="group" aria-label="待确认的问题">
                 <p className="mb-3 flex items-start gap-2 text-sm font-semibold text-amber-900">
@@ -1583,7 +1718,7 @@ function ChatPageContent() {
         )}
 
         {/* Input Area */}
-        <div className="border-t border-hairline bg-canvas px-4 py-3">
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-hairline bg-canvas/98 px-4 py-3 shadow-[0_-10px_24px_rgba(0,30,43,0.08)] backdrop-blur md:left-80">
           <div className="mx-auto max-w-5xl">
             {pendingFile && (
               <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-hairline bg-canvas text-sm">

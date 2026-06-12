@@ -876,6 +876,7 @@ export const conversationApi = {
     conv_id: string,
     callbacks: {
       onAgentWork?: (data: AgentWorkEvent) => void;
+      onAgentActivity?: (data: AgentEvent) => void;
       onConversationMessage?: (data: ChatMessage) => void;
       onDone?: () => void;
       onError?: (error: string) => void;
@@ -923,6 +924,9 @@ export const conversationApi = {
             switch (eventType) {
               case 'agent_work':
                 callbacks.onAgentWork?.(parsed);
+                break;
+              case 'agent_activity':
+                callbacks.onAgentActivity?.(parsed);
                 break;
               case 'conversation_message':
                 callbacks.onConversationMessage?.(parsed);

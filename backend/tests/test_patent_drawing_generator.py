@@ -56,7 +56,7 @@ async def test_patent_drawing_generator_uses_system_image_config(monkeypatch, tm
 
 
 @pytest.mark.asyncio
-async def test_patent_drawing_generator_falls_back_to_llm_config(monkeypatch, tmp_path):
+async def test_patent_drawing_generator_uses_resolved_image_config(monkeypatch, tmp_path):
     from src.agents.hermes.tools import patent_drawing_generator as drawing_module
     from src.agents.hermes.tools.patent_drawing_generator import PatentDrawingGeneratorTool
 
@@ -87,3 +87,37 @@ async def test_patent_drawing_generator_falls_back_to_llm_config(monkeypatch, tm
     assert result["success"] is True
     assert captured["image_config"]["api_key"] == "llm-configured-key"
     assert captured["image_config"]["model_id"] == "gpt-image-2"
+
+
+def test_resolve_image_config_passes_agent_overrides(monkeypatch):
+    from src.agents.hermes.tools import patent_drawing_generator as drawing_module
+
+    captured = {}
+
+    class FakeAgentConfig:
+        image_gen = {
+            "provider": "openai",
+            "base_url": "https://agent-image.example/v1",
+            "api_key": "agent-image-key",
+            "model_id": "agent-image-model",
+        }
+
+    monkeypatch.setattr(
+        "src.agents.agent_config.get_agent_config",
+        lambda profile_id: FakeAgentConfig(),
+    )
+    monkeypatch.setattr(
+        "src.core.override_store.get_override_store",
+        lambda: type("Store", (), {"get_image_gen_override": lambda self, profile_id: {}})(),
+    )
+
+    def fake_resolve_for_agent(self, overrides):
+        captured["overrides"] = overrides
+        return {"provider": overrides["provider"], "api_key": overrides["api_key"]}
+
+    monkeypatch.setattr(type(drawing_module.settings.image_gen), "resolve_for_agent", fake_resolve_for_agent)
+
+    resolved = drawing_module._resolve_image_config("patent.writer.v1")
+
+    assert captured["overrides"] == FakeAgentConfig.image_gen
+    assert resolved == {"provider": "openai", "api_key": "agent-image-key"}

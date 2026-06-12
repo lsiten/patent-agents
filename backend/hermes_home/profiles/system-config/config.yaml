@@ -40,3 +40,6 @@ llm:
 
 image_gen:
   provider: azure_aoai
+  base_url: http://localhost:8080/v1
+  api_key: sk-08c607a925dcb002c95a9b9dcf5abcffde02d076868fd2b36671825461d913b3
+  model_id: gpt-image-2

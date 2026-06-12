@@ -669,13 +669,14 @@ async def test_generate_patent_in_sections_preserves_partial_output_when_resume_
 
 
 @pytest.mark.asyncio
-async def test_execute_full_workflow_marks_truncated_writer_stage_failed(monkeypatch):
+async def test_execute_full_workflow_remediates_truncated_writer_stage(monkeypatch):
     engine = PatentWorkflowEngine()
     context = engine.create_workflow(
         task_id="writer-truncated-phase-failure",
         user_id="test-user",
         description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
     )
+    context.metadata["quality_remediation_safety_limit"] = 2
 
     async def fake_publish_progress_event(context, phase, status, result=None):
         return None
@@ -709,7 +710,56 @@ async def test_execute_full_workflow_marks_truncated_writer_stage_failed(monkeyp
                 ),
                 "tool_results": [],
             }
-        raise AssertionError("quality reviewer should not run after truncated writer output")
+        if profile_id == "patent.writer.v1":
+            return {
+                "text": json.dumps(
+                    {
+                        "failed": True,
+                        "error": "Response truncated due to output length limit",
+                        "completed": False,
+                    },
+                    ensure_ascii=False,
+                ),
+                "structured_result": {
+                    "failed": True,
+                    "error": "Response truncated due to output length limit",
+                    "completed": False,
+                },
+                "tool_results": [],
+            }
+        if profile_id == "patent.quality_reviewer.v1":
+            return {
+                "text": json.dumps(
+                    {
+                        "recommendation": "revise",
+                        "revision_priority": "critical",
+                        "root_cause": "content_incomplete",
+                        "missing_information": [],
+                        "review_summary": {
+                            "recommendation": "revise",
+                            "overall_rating": "poor",
+                            "overall_score": 0.1,
+                        },
+                        "formal_compliance_review": {
+                            "issues": [
+                                {
+                                    "severity": "critical",
+                                    "location": "全文",
+                                    "description": "撰写内容截断",
+                                    "suggestion": "重新生成完整文本",
+                                }
+                            ]
+                        },
+                        "claims_review": {"issues": []},
+                        "description_review": {"issues": []},
+                        "consistency_review": {"issues": []},
+                        "examination_risks": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                "tool_results": [],
+            }
+        raise AssertionError(f"unexpected profile {profile_id}")
 
     writer_attempts = 0
 
@@ -730,13 +780,16 @@ async def test_execute_full_workflow_marks_truncated_writer_stage_failed(monkeyp
 
     result = await engine.execute_full_workflow(context)
 
-    assert result.current_phase == WorkflowState.FAILED
-    writing_phase = next(p for p in result.phase_history if p.phase.value == "writing")
-    assert writing_phase.success is False
-    assert writing_phase.output["_agent_failed"] is True
-    assert writing_phase.issues == ["Response truncated due to output length limit"]
+    assert result.current_phase == WorkflowState.AWAITING_USER_DECISION
+    writing_phases = [p for p in result.phase_history if p.phase.value == "writing"]
+    assert writing_phases[0].success is False
+    assert writing_phases[0].output["_agent_failed"] is True
+    assert writing_phases[0].issues == ["Response truncated due to output length limit"]
+    assert len(writing_phases) > 1
     assert writer_attempts == 3
-    assert all(p.phase.value != "review" for p in result.phase_history)
+    assert any(p.phase.value == "review" for p in result.phase_history)
+    assert result.metadata["quality_remediation"]["classification"] == "auto_remediation_limit"
+    assert result.patent_draft.get("docx_path") in (None, "")
 
 
 @pytest.mark.asyncio
@@ -1217,3 +1270,60 @@ async def test_patent_docx_generator_accepts_structured_text_values():
 
     assert result["success"] is True
     assert result["file_path"].endswith(".docx")
+
+
+@pytest.mark.asyncio
+async def test_patent_docx_generator_embeds_provided_drawings(tmp_path):
+    import zipfile
+
+    from docx import Document
+    from PIL import Image, ImageDraw
+
+    from src.agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
+
+    drawing_path = tmp_path / "fig1.png"
+    image = Image.new("RGB", (640, 420), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((60, 60, 580, 360), outline="black", width=4)
+    draw.text((220, 190), "FIG 1", fill="black")
+    image.save(drawing_path)
+
+    tool = PatentDocxGeneratorTool()
+    result = await tool.execute(
+        title="可调式沉浸显示系统及其显示控制方法",
+        claims={
+            "independent_claim": "一种可调式沉浸显示系统，包括入口交互终端和可调显示面。",
+            "dependent_claims": ["根据权利要求1所述的系统，其中所述可调显示面绕预设转轴转动。"],
+        },
+        description={
+            "technical_field": "本发明涉及沉浸式显示控制技术领域。",
+            "background_art": "现有沉浸式显示空间难以适配不同体验者。",
+            "summary_of_invention": "系统根据人体参数调整显示面姿态。",
+            "drawings_description": "图1为系统结构示意图。",
+            "detailed_description": "下面结合图1说明本发明的系统结构。",
+        },
+        abstract="本发明公开一种可调式沉浸显示系统及其显示控制方法。",
+        task_id="provided-drawings-docx",
+        drawings=[
+            {
+                "figure_number": "图1",
+                "title": "系统结构示意图",
+                "description": "图1为系统结构示意图。",
+                "file_path": str(drawing_path),
+                "artifact_url": "/api/v1/workflows/provided-drawings-docx/artifacts/draft/drawings/fig1.png",
+                "mime_type": "image/png",
+            }
+        ],
+    )
+
+    assert result["success"] is True
+    assert result["figures"][0]["path"] == str(drawing_path)
+    generated = Document(result["file_path"])
+    assert len(generated.inline_shapes) >= 3
+
+    with zipfile.ZipFile(result["file_path"]) as docx_zip:
+        document_xml = docx_zip.read("word/document.xml").decode("utf-8")
+    drawing_desc_index = document_xml.index("图1为系统结构示意图")
+    inline_drawing_index = document_xml.index("<w:drawing>", drawing_desc_index)
+    detailed_index = document_xml.index("下面结合图1说明本发明的系统结构", inline_drawing_index)
+    assert drawing_desc_index < inline_drawing_index < detailed_index

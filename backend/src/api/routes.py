@@ -137,6 +137,7 @@ router = APIRouter(tags=["patent-agents"])
 tasks_store: Dict[str, PatentTask] = {}
 task_events: Dict[str, List[WorkflowEventResponse]] = {}
 workflow_lock = asyncio.Lock()
+workflow_background_tasks: Dict[str, asyncio.Task[Any]] = {}
 
 # 对话会话存储
 conversations_store: Dict[str, dict] = {}
@@ -147,6 +148,39 @@ conversation_stream_finalization_tasks: set[asyncio.Task[Any]] = set()
 
 workflow_engine = PatentWorkflowEngine()
 organization_tree_store: OrgNodeResponse | None = None
+
+
+def _track_workflow_background_task(task_id: str, coro: Any) -> asyncio.Task[Any]:
+    """Track workflow coroutines so cancellation can stop real background work."""
+    existing = workflow_background_tasks.get(task_id)
+    if existing and not existing.done():
+        existing.cancel()
+
+    task = asyncio.create_task(coro)
+    workflow_background_tasks[task_id] = task
+
+    def _cleanup(done_task: asyncio.Task[Any]) -> None:
+        if workflow_background_tasks.get(task_id) is done_task:
+            workflow_background_tasks.pop(task_id, None)
+        if done_task.cancelled():
+            return
+        try:
+            exc = done_task.exception()
+        except asyncio.CancelledError:
+            return
+        if exc:
+            logger.exception("Workflow background task failed", task_id=task_id, error=exc)
+
+    task.add_done_callback(_cleanup)
+    return task
+
+
+def _cancel_workflow_background_task(task_id: str) -> bool:
+    task = workflow_background_tasks.pop(task_id, None)
+    if not task or task.done():
+        return False
+    task.cancel()
+    return True
 
 # ── Agent Override Store (真实持久化) ──
 from ..core.override_store import get_override_store
@@ -499,6 +533,8 @@ async def restore_stores_from_db() -> None:
 
 
 def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
+    _recover_context_from_export_artifacts(context)
+
     # 读取时归一化 — 确保旧数据也能适配前端格式
     req_norm = workflow_engine._normalize_phase_output("requirement_analysis", context.requirement_analysis or {})
     ret_norm = workflow_engine._normalize_phase_output("retrieval_report", context.retrieval_report or {})
@@ -554,6 +590,207 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
             else None
         ),
     )
+
+
+def _load_latest_export_json(task_id: str, phase_dir: str) -> Dict[str, Any]:
+    latest_path = _EXPORTS_ROOT / task_id / phase_dir / "latest.json"
+    if not latest_path.is_file():
+        return {}
+    try:
+        data = json.loads(latest_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logger.warning(f"读取阶段产物失败 {latest_path}: {e}")
+        return {}
+
+
+def _find_final_docx(task_id: str) -> Optional[Path]:
+    final_dir = _EXPORTS_ROOT / task_id / "final"
+    if not final_dir.is_dir():
+        return None
+    docx_files = sorted(
+        final_dir.glob("*.docx"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    return docx_files[0] if docx_files else None
+
+
+def _has_phase_result(context: WorkflowContext, phase: WorkflowPhase) -> bool:
+    return any(result.phase == phase for result in context.phase_history)
+
+
+def _phase_has_real_result(context: WorkflowContext, phase: WorkflowPhase) -> bool:
+    for result in context.phase_history:
+        if result.phase != phase:
+            continue
+        if "Recovered from exported artifacts" not in (result.warnings or []):
+            return True
+    return False
+
+
+def _drop_superseded_recovered_phases(context: WorkflowContext) -> None:
+    real_phases = {
+        result.phase
+        for result in context.phase_history
+        if "Recovered from exported artifacts" not in (result.warnings or [])
+    }
+    if not real_phases:
+        return
+    context.phase_history = [
+        result
+        for result in context.phase_history
+        if not (
+            result.phase in real_phases
+            and "Recovered from exported artifacts" in (result.warnings or [])
+        )
+    ]
+
+
+def _phase_is_past(context: WorkflowContext, phase: WorkflowPhase) -> bool:
+    completed_states = {
+        EngineWorkflowState.COMPLETED,
+        EngineWorkflowState.FAILED,
+        EngineWorkflowState.CANCELLED,
+        EngineWorkflowState.AWAITING_USER_DECISION,
+    }
+    if context.current_phase in completed_states:
+        return True
+
+    phase_order = {
+        WorkflowPhase.REQUIREMENT: EngineWorkflowState.RETRIEVAL_ANALYSIS,
+        WorkflowPhase.RETRIEVAL: EngineWorkflowState.PATENT_WRITING,
+        WorkflowPhase.WRITING: EngineWorkflowState.QUALITY_REVIEW,
+    }
+    next_state = phase_order.get(phase)
+    if next_state is None:
+        return False
+
+    state_order = [
+        EngineWorkflowState.REQUIREMENT_ANALYSIS,
+        EngineWorkflowState.RETRIEVAL_ANALYSIS,
+        EngineWorkflowState.PATENT_WRITING,
+        EngineWorkflowState.QUALITY_REVIEW,
+    ]
+    try:
+        return state_order.index(context.current_phase) >= state_order.index(next_state)
+    except ValueError:
+        return False
+
+
+def _append_recovered_phase(
+    context: WorkflowContext,
+    phase: WorkflowPhase,
+    output: Dict[str, Any],
+) -> None:
+    if _has_phase_result(context, phase) or _phase_has_real_result(context, phase):
+        return
+    context.phase_history.append(
+        PhaseResult(
+            phase=phase,
+            success=True,
+            duration_seconds=0,
+            output=output,
+            warnings=["Recovered from exported artifacts"],
+        )
+    )
+
+
+def _recover_context_from_export_artifacts(context: WorkflowContext) -> None:
+    """Backfill old/in-memory workflow state from durable export artifacts."""
+    task_id = context.task_id
+    final_docx = _find_final_docx(task_id)
+
+    if not context.requirement_analysis:
+        requirement = _load_latest_export_json(task_id, "requirement")
+        if requirement:
+            context.requirement_analysis = requirement
+    if context.requirement_analysis and (
+        final_docx or _phase_is_past(context, WorkflowPhase.REQUIREMENT)
+    ):
+        _append_recovered_phase(context, WorkflowPhase.REQUIREMENT, context.requirement_analysis)
+
+    if not context.retrieval_report:
+        retrieval = _load_latest_export_json(task_id, "retrieval")
+        if retrieval:
+            context.retrieval_report = retrieval
+    if context.retrieval_report and (final_docx or _phase_is_past(context, WorkflowPhase.RETRIEVAL)):
+        _append_recovered_phase(context, WorkflowPhase.RETRIEVAL, context.retrieval_report)
+
+    if not context.patent_draft:
+        draft = _load_latest_export_json(task_id, "draft")
+        if draft:
+            context.patent_draft = draft
+    if context.patent_draft and (final_docx or _phase_is_past(context, WorkflowPhase.WRITING)):
+        _append_recovered_phase(context, WorkflowPhase.WRITING, context.patent_draft)
+
+    if not context.review_report:
+        review = _load_latest_export_json(task_id, "review")
+        if review:
+            context.review_report = review
+    if context.review_report and context.current_phase in {
+        EngineWorkflowState.COMPLETED,
+        EngineWorkflowState.FAILED,
+        EngineWorkflowState.CANCELLED,
+        EngineWorkflowState.AWAITING_USER_DECISION,
+    }:
+        _append_recovered_phase(context, WorkflowPhase.REVIEW, context.review_report)
+
+    if final_docx:
+        draft = context.patent_draft if isinstance(context.patent_draft, dict) else {}
+        if not draft:
+            draft = {
+                "claims": {"independent_claim": "", "dependent_claims": []},
+                "description": {},
+                "abstract": "",
+            }
+        draft["docx_path"] = str(final_docx)
+        draft["final_document"] = {
+            "file_path": str(final_docx),
+            "filename": final_docx.name,
+            "download_url": f"/api/v1/workflows/{task_id}/export/docx",
+        }
+        context.patent_draft = draft
+        _append_recovered_phase(context, WorkflowPhase.WRITING, draft)
+        context.brainstorming_output = {
+            **(context.brainstorming_output or {}),
+            "summary": "专利申请流程已完成，已从生成产物恢复最终文档状态。",
+        }
+        if context.current_phase not in {
+            EngineWorkflowState.FAILED,
+            EngineWorkflowState.CANCELLED,
+            EngineWorkflowState.AWAITING_USER_DECISION,
+        }:
+            context.current_phase = EngineWorkflowState.COMPLETED
+        context.metadata["final_document_path"] = str(final_docx)
+    _drop_superseded_recovered_phases(context)
+
+
+def _linked_workflow_state(conv: Dict[str, Any]) -> Optional[str]:
+    task_id = conv.get("linked_workflow_id")
+    if not isinstance(task_id, str) or not task_id:
+        return None
+    context = workflow_engine.get_workflow(task_id)
+    if not context:
+        return None
+    return context.current_phase.value
+
+
+def _conversation_detail_payload(conv: Dict[str, Any]) -> Dict[str, Any]:
+    return {**conv, "workflow_state": _linked_workflow_state(conv)}
+
+
+def _conversation_summary_payload(conv: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": conv["id"],
+        "title": conv["title"],
+        "created_at": conv["created_at"],
+        "updated_at": conv["updated_at"],
+        "message_count": len(conv["messages"]),
+        "status": conv["status"],
+        "linked_workflow_id": conv.get("linked_workflow_id"),
+        "workflow_state": _linked_workflow_state(conv),
+    }
 
 
 def _get_agent_memory_stats(profile_id: str, dir_name: str) -> Dict[str, Any]:
@@ -937,6 +1174,54 @@ def _build_agent_activity_event(
     return event.model_dump(mode="json")
 
 
+def _agent_activity_from_workflow_event(event: Dict[str, Any]) -> Dict[str, Any] | None:
+    """Convert workflow/agent engine events to chat activity-log entries."""
+    raw_type = str(event.get("event_type") or "")
+    agent_name = str(event.get("agent_name") or event.get("agent_id") or "workflow_engine")
+    task_id = str(event.get("task_id") or "workflow")
+
+    activity_type = ""
+    message = str(event.get("message") or "")
+    data: Dict[str, Any] = {}
+    call_id = str(event.get("call_id") or task_id)
+
+    if raw_type == "agent.tool_call_start":
+        tool_name = str(event.get("tool_name") or (event.get("data") or {}).get("name") or "unknown")
+        params = event.get("parameters") or (event.get("data") or {}).get("parameters") or {}
+        activity_type = "tool_call_start"
+        message = message or f"调用工具: {tool_name}"
+        data = {"name": tool_name, "parameters": params}
+        call_id = f"{task_id}:{agent_name}:{tool_name}"
+    elif raw_type == "agent.tool_call_end":
+        tool_name = str(event.get("tool_name") or (event.get("data") or {}).get("name") or "unknown")
+        result = event.get("result") or (event.get("data") or {}).get("result") or ""
+        success = event.get("success", (event.get("data") or {}).get("success", True))
+        activity_type = "tool_call_end"
+        message = message or f"工具完成: {tool_name}"
+        data = {"name": tool_name, "result": str(result)[:1200], "success": bool(success)}
+        call_id = f"{task_id}:{agent_name}:{tool_name}"
+    elif raw_type == "agent.thinking":
+        thought = str(event.get("thought") or message or "")
+        activity_type = "thinking"
+        message = message or thought
+        data = {"message": thought}
+    elif raw_type.startswith("workflow."):
+        activity_type = "status"
+        message = message or raw_type
+        data = {"kind": raw_type, "message": message}
+    else:
+        return None
+
+    return _build_agent_activity_event(
+        event_type=activity_type,
+        agent_name=agent_name,
+        sequence=int(time.time() * 1000) % 1_000_000_000,
+        call_id=call_id,
+        message=message,
+        data=data,
+    )
+
+
 def _agent_work_message(conv_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
     status_value = event.get("status", "running")
     agent_name = str(event.get("agent_name") or event.get("agent_id") or "Agent")
@@ -1125,7 +1410,7 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
             await _persist_workflow(task_id)
             raise
 
-    background_tasks.add_task(run_workflow)
+    _track_workflow_background_task(task_id, run_workflow())
     async with workflow_lock:
         _append_workflow_event(
             task_id=task_id,
@@ -1377,16 +1662,19 @@ async def get_workflow_messages(task_id: str):
 @router.post("/workflows/{task_id}/cancel")
 async def cancel_workflow(task_id: str):
     """取消 Hermes/Profile 工作流"""
+    stopped = _cancel_workflow_background_task(task_id)
     async with workflow_lock:
         if not workflow_engine.cancel_workflow(task_id):
             raise HTTPException(status_code=404, detail="工作流不存在")
         _append_workflow_event(
             task_id=task_id,
             agent="workflow_engine",
-            message="工作流已取消",
+            message="工作流已取消，后台执行已停止" if stopped else "工作流已取消",
             event_type="workflow.cancelled",
+            data={"background_task_cancelled": stopped},
         )
     await _persist_events(task_id)
+    await _persist_workflow(task_id)
     return {"task_id": task_id, "status": "cancelled"}
 
 
@@ -3191,6 +3479,24 @@ def _agent_completed_core_workflow_analysis(
     return has_requirement_analysis and has_retrieval_analysis
 
 
+def _brainstorm_converged_to_workflow_handoff(response_text: str) -> bool:
+    normalized = re.sub(r"\s+", "", response_text.lower())
+    has_brainstorm_convergence = "头脑风暴" in normalized and any(
+        keyword in normalized for keyword in ("收敛", "主线", "核心创造性")
+    )
+    has_patent_application_handoff = any(
+        keyword in normalized
+        for keyword in (
+            "正式专利申请",
+            "专利申请流程",
+            "进入结构化需求分析",
+            "扩大保护范围",
+            "保护范围",
+        )
+    )
+    return has_brainstorm_convergence and has_patent_application_handoff
+
+
 def _should_recommend_workflow_creation(
     *,
     messages: List[dict],
@@ -3200,6 +3506,8 @@ def _should_recommend_workflow_creation(
     agent_events: List[dict],
 ) -> bool:
     if "[CREATE_PATENT_RECOMMENDATION]" in response_text:
+        return True
+    if _brainstorm_converged_to_workflow_handoff(response_text):
         return True
     return _conversation_requested_complete_workflow(
         messages,
@@ -3339,17 +3647,7 @@ async def list_conversations(
 ):
     """列出所有对话会话"""
     async with conversations_lock:
-        items = []
-        for conv in conversations_store.values():
-            items.append({
-                "id": conv["id"],
-                "title": conv["title"],
-                "created_at": conv["created_at"],
-                "updated_at": conv["updated_at"],
-                "message_count": len(conv["messages"]),
-                "status": conv["status"],
-                "linked_workflow_id": conv.get("linked_workflow_id"),
-            })
+        items = [_conversation_summary_payload(conv) for conv in conversations_store.values()]
         items.sort(key=lambda x: x["updated_at"], reverse=True)
         total = len(items)
         page_items = items[offset:offset + limit]
@@ -3370,9 +3668,9 @@ async def get_conversation(conv_id: str):
         if stored:
             async with conversations_lock:
                 conversations_store[conv_id] = stored
-            return stored
+            return _conversation_detail_payload(stored)
         raise HTTPException(status_code=404, detail="对话不存在")
-    return conv
+    return _conversation_detail_payload(conv)
 
 
 @router.post("/conversations/{conv_id}/chat", response_model=ConversationChatResponse)
@@ -4107,6 +4405,15 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
 
     async def run_workflow():
         def _event_cb(agent_name: str, event_type: str, message: str, data: Dict[str, Any]):
+            event_data = {
+                **(data or {}),
+                "task_id": task_id,
+                "conversation_id": conv_id,
+                "event_type": event_type,
+                "agent_name": agent_name,
+                "message": message,
+                "timestamp": datetime.now().isoformat(),
+            }
             task_events.setdefault(task_id, []).append(
                 WorkflowEventResponse(
                     task_id=task_id,
@@ -4114,9 +4421,12 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
                     agent=agent_name,
                     message=message,
                     event_type=event_type,
-                    data=data,
+                    data=event_data,
                 )
             )
+            activity = _agent_activity_from_workflow_event(event_data)
+            if activity:
+                _queue_conversation_event(conv_id, "agent_activity", activity)
 
         async def _phase_cb(phase, result):
             async with workflow_lock:
@@ -4155,6 +4465,9 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
                     c["messages"].append(message)
                     c["updated_at"] = datetime.now().isoformat()
             _queue_conversation_event(conv_id, "agent_work", event)
+            activity = _agent_activity_from_workflow_event(event)
+            if activity:
+                _queue_conversation_event(conv_id, "agent_activity", activity)
             _queue_conversation_event(conv_id, "conversation_message", message)
             await _persist_events(task_id)
             await _persist_conversation(conv_id)
@@ -4182,7 +4495,7 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             await _persist_workflow(task_id)
             raise
 
-    background_tasks.add_task(run_workflow)
+    _track_workflow_background_task(task_id, run_workflow())
     async with workflow_lock:
         _append_workflow_event(
             task_id=task_id,
@@ -5260,20 +5573,17 @@ async def export_patent_docx(task_id: str):
 @router.get("/workflows/{task_id}/export/docx")
 async def export_workflow_patent_docx(task_id: str):
     """从工作流导出专利文档为DOCX格式"""
+    final_docx = _find_final_docx(task_id)
+    if final_docx:
+        return FileResponse(
+            path=str(final_docx),
+            filename=f"patent_{task_id}.docx",
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
     async with workflow_lock:
         context = workflow_engine.get_workflow(task_id)
     if not context:
-        # 兜底：如果工作流已不在内存中，尝试从磁盘直接提供已生成的DOCX文件
-        export_dir = os.path.join(os.path.dirname(__file__), "..", "..", "exports", task_id, "final")
-        if os.path.isdir(export_dir):
-            docx_files = [f for f in os.listdir(export_dir) if f.endswith(".docx")]
-            if docx_files:
-                filepath = os.path.join(export_dir, docx_files[0])
-                return FileResponse(
-                    path=filepath,
-                    filename=f"patent_{task_id}.docx",
-                    media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
         raise HTTPException(status_code=404, detail="工作流不存在")
 
     patent_draft = context.patent_draft

@@ -65,15 +65,90 @@ function arr(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function parseJsonLikeObject(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const candidates = [
+    trimmed,
+    ...Array.from(trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi), (match) => match[1]),
+  ];
+
+  const firstObjectStart = trimmed.indexOf('{');
+  const lastObjectEnd = trimmed.lastIndexOf('}');
+  if (firstObjectStart >= 0 && lastObjectEnd > firstObjectStart) {
+    candidates.push(trimmed.slice(firstObjectStart, lastObjectEnd + 1));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (isRecord(parsed)) return parsed;
+    } catch {
+      // Try the next likely JSON fragment.
+    }
+  }
+
+  return null;
+}
+
+function unwrapAgentOutput(data: Record<string, unknown>): Record<string, unknown> {
+  for (const key of ['final_response', 'raw_response', 'output', 'full_response']) {
+    const value = data[key];
+    if (isRecord(value)) {
+      return { ...data, ...value };
+    }
+    if (typeof value === 'string') {
+      const parsed = parseJsonLikeObject(value);
+      if (parsed) {
+        return { ...data, ...parsed };
+      }
+    }
+  }
+
+  return data;
+}
+
+function textListItem(value: unknown, keys: string[]): string {
+  if (typeof value === 'string') return value;
+  if (isRecord(value)) {
+    const parts = keys.map((key) => fieldText(value[key])).filter(Boolean);
+    return parts.join('：');
+  }
+  return '';
+}
+
 function ratingBadge(rating: unknown) {
   const r = str(rating);
   const config: Record<string, { label: string; variant: 'green' | 'orange' | 'gray' }> = {
     high: { label: '高', variant: 'green' },
     medium: { label: '中', variant: 'orange' },
     low: { label: '低', variant: 'gray' },
+    excellent: { label: '优秀', variant: 'green' },
+    good: { label: '良好', variant: 'green' },
+    pass: { label: '通过', variant: 'green' },
+    needs_revision: { label: '需修改', variant: 'orange' },
+    revise: { label: '需修改', variant: 'orange' },
+    reject: { label: '不通过', variant: 'orange' },
   };
-  const c = config[r] || { label: r || '未知', variant: 'gray' as const };
+  const c = config[r.toLowerCase()] || { label: r || '未知', variant: 'gray' as const };
   return <Badge variant={c.variant}>{c.label}</Badge>;
+}
+
+function statusLabel(value: unknown): string {
+  const raw = str(value);
+  const normalized = raw.toLowerCase();
+  const labels: Record<string, string> = {
+    needs_revision: '需修改',
+    revise: '需修改',
+    approve: '通过',
+    pass: '通过',
+    reject: '不通过',
+    high: '高',
+    medium: '中',
+    low: '低',
+  };
+  return labels[normalized] || raw;
 }
 
 function downloadText(filename: string, content: string) {
@@ -126,16 +201,26 @@ interface RequirementAnalysisViewProps {
 export function RequirementAnalysisView({ data }: RequirementAnalysisViewProps) {
   if (!data || Object.keys(data).length === 0) return null;
 
-  const techField = fieldText(data.tech_field, ['primary_domain', 'domain', 'name'])
-    || fieldText(data.technical_field, ['primary_domain', 'domain', 'name'])
-    || fieldText(data.field, ['primary_domain', 'domain', 'name']);
-  const corePrinciple = fieldText(data.core_principle, ['content', 'principle', 'summary']);
-  const technicalProblem = fieldText(data.technical_problem, ['content', 'problem', 'summary']);
-  const beneficialEffects = arr(data.beneficial_effects).map((e) => str(e)).filter(Boolean);
-  const features = arr(data.key_innovative_features).filter(isRecord);
-  const scenarios = arr(data.application_scenarios).map((s) => str(s)).filter(Boolean);
-  const patentType = isRecord(data.patent_type_recommendation) ? data.patent_type_recommendation : {};
-  const gaps = arr(data.information_gaps).map((g) => str(g)).filter(Boolean);
+  const parsedData = unwrapAgentOutput(data);
+  const techFieldData = isRecord(parsedData.tech_field) ? parsedData.tech_field : {};
+  const techField = fieldText(parsedData.tech_field, ['primary_domain', 'domain', 'name'])
+    || fieldText(parsedData.technical_field, ['primary_domain', 'domain', 'name'])
+    || fieldText(parsedData.field, ['primary_domain', 'domain', 'name']);
+  const secondaryDomains = arr(techFieldData.secondary_domains).map((item) => str(item)).filter(Boolean);
+  const ipcSuggestions = arr(techFieldData.ipc_suggestions).map((item) => str(item)).filter(Boolean);
+  const corePrinciple = fieldText(parsedData.core_principle, ['content', 'principle', 'summary']);
+  const technicalProblem = fieldText(parsedData.technical_problem, ['content', 'problem', 'summary']);
+  const beneficialEffects = arr(parsedData.beneficial_effects)
+    .map((effect) => textListItem(effect, ['effect', 'technical_basis', 'description']))
+    .filter(Boolean);
+  const features = arr(parsedData.key_innovative_features).filter(isRecord);
+  const scenarios = arr(parsedData.application_scenarios)
+    .map((scenario) => textListItem(scenario, ['scenario', 'potential_value', 'description']))
+    .filter(Boolean);
+  const patentType = isRecord(parsedData.patent_type_recommendation) ? parsedData.patent_type_recommendation : {};
+  const gaps = arr(parsedData.information_gaps)
+    .map((gap) => textListItem(gap, ['gap', 'suggestion', 'importance']))
+    .filter(Boolean);
 
   return (
     <div className="space-y-lg">
@@ -146,6 +231,23 @@ export function RequirementAnalysisView({ data }: RequirementAnalysisViewProps) 
           技术领域
         </h4>
         <p className="text-body-md text-steel bg-surface-feature rounded-lg p-md">{techField || '待分析'}</p>
+        {secondaryDomains.length > 0 && (
+          <div className="flex flex-wrap gap-sm mt-sm">
+            {secondaryDomains.map((domain, i) => (
+              <Badge key={i} variant="green-soft">{domain}</Badge>
+            ))}
+          </div>
+        )}
+        {ipcSuggestions.length > 0 && (
+          <ul className="mt-sm space-y-xs">
+            {ipcSuggestions.map((item, i) => (
+              <li key={i} className="text-body-sm text-steel flex items-start gap-2">
+                <span className="text-brand-green-dark">•</span>
+                {item}
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {/* 核心原理 */}
@@ -185,7 +287,9 @@ export function RequirementAnalysisView({ data }: RequirementAnalysisViewProps) 
                     {i + 1}
                   </span>
                   <div>
-                    <p className="text-body-sm-medium font-medium text-ink">{str(f.name)}</p>
+                    <p className="text-body-sm-medium font-medium text-ink">
+                      {str(f.name || f.feature_name) || `创新特征 ${i + 1}`}
+                    </p>
                     <p className="text-body-sm text-steel mt-xs">{str(f.description)}</p>
                     {str(f.technical_significance) && (
                       <p className="text-caption text-muted mt-xs">技术意义：{str(f.technical_significance)}</p>
@@ -272,23 +376,7 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
 
   const [expandedRef, setExpandedRef] = useState<number | null>(null);
 
-  // 尝试从 data.output 中解析 JSON 结构化数据
-  // 后端返回的数据结构是 { agent, output, summary }，其中 output 可能是包含 JSON 的字符串
-  let parsedData: Record<string, unknown> = data;
-  if (typeof data.output === 'string') {
-    // 尝试从 output 字符串中提取 JSON
-    const jsonMatch = data.output.match(/\{[\s\S]*"retrieval_strategy"[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        parsedData = JSON.parse(jsonMatch[0]);
-      } catch {
-        // 解析失败，使用原始 data
-      }
-    }
-  } else if (isRecord(data.output)) {
-    // output 已经是对象
-    parsedData = data.output as Record<string, unknown>;
-  }
+  const parsedData = unwrapAgentOutput(data);
 
   // 从 retrieval_strategy 中提取关键词和数据源
   const retrievalStrategy = isRecord(parsedData.retrieval_strategy) ? parsedData.retrieval_strategy : {};
@@ -562,34 +650,7 @@ export function PatentDraftView({ data, taskId, title }: PatentDraftViewProps) {
 
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
 
-  // 尝试从 data.output 中解析 JSON 结构化数据
-  // 后端返回的数据结构是 { agent, output, summary }，其中 output 可能是包含 JSON 的字符串
-  let parsedData: Record<string, unknown> = data;
-  if (typeof data.output === 'string') {
-    // 尝试从 output 字符串中提取 JSON（可能在 ```json ... ``` 代码块中）
-    const jsonBlockMatch = data.output.match(/```json\s*([\s\S]*?)\s*```/);
-    if (jsonBlockMatch) {
-      try {
-        parsedData = JSON.parse(jsonBlockMatch[1]);
-      } catch {
-        // 解析失败，尝试直接匹配 JSON 对象
-      }
-    }
-    if (parsedData === data) {
-      // 尝试直接匹配 JSON 对象
-      const jsonMatch = data.output.match(/\{[\s\S]*"claims"[\s\S]*\}/);
-      if (jsonMatch) {
-        try {
-          parsedData = JSON.parse(jsonMatch[0]);
-        } catch {
-          // 解析失败，使用原始 data
-        }
-      }
-    }
-  } else if (isRecord(data.output)) {
-    // output 已经是对象
-    parsedData = data.output as Record<string, unknown>;
-  }
+  const parsedData = unwrapAgentOutput(data);
 
   const claims = isRecord(parsedData.claims) ? parsedData.claims : {};
   const description = isRecord(parsedData.description) ? parsedData.description : {};
@@ -744,29 +805,39 @@ interface QualityReviewViewProps {
 export function QualityReviewView({ data, roundIndex }: QualityReviewViewProps) {
   if (!data || Object.keys(data).length === 0) return null;
 
-  const reviewSummaryData = isRecord(data.review_summary) ? data.review_summary : {};
+  const parsedData = unwrapAgentOutput(data);
+  const reviewSummaryData = isRecord(parsedData.review_summary) ? parsedData.review_summary : {};
   const overallScore = normalizeQualityScoreForDisplay(
-    num(data.overall_score) ?? num(reviewSummaryData.overall_score)
+    num(parsedData.overall_score) ?? num(reviewSummaryData.overall_score)
   );
-  const overallRating = str(data.overall_rating || reviewSummaryData.overall_rating);
-  const recommendation = str(data.recommendation);
-  const reviewSummary = str(data.review_summary) || str(reviewSummaryData.reviewer_notes);
-  const revisionSuggestions = arr(data.revision_suggestions).map((s) => str(s)).filter(Boolean);
+  const overallRating = statusLabel(parsedData.overall_rating || reviewSummaryData.overall_rating);
+  const recommendation = str(parsedData.recommendation || reviewSummaryData.recommendation);
+  const reviewSummary = str(parsedData.review_summary) || str(reviewSummaryData.reviewer_notes);
+  const revisionSuggestions = [
+    ...arr(parsedData.revision_suggestions),
+    ...arr(parsedData.detailed_revision_suggestions),
+  ].map((s) => textListItem(s, ['issue', 'suggestion', 'target_section', 'priority'])).filter(Boolean);
 
-  const formalCompliance = isRecord(data.formal_compliance) ? data.formal_compliance : {};
+  const formalCompliance = isRecord(parsedData.formal_compliance)
+    ? parsedData.formal_compliance
+    : isRecord(parsedData.formal_compliance_review)
+      ? parsedData.formal_compliance_review
+      : {};
   const formalIssues = arr(formalCompliance.issues).filter(isRecord);
 
-  const claimsReview = isRecord(data.claims_review) ? data.claims_review : {};
+  const claimsReview = isRecord(parsedData.claims_review) ? parsedData.claims_review : {};
   const claimsIssues = arr(claimsReview.issues).filter(isRecord);
 
-  const descriptionReview = isRecord(data.description_review) ? data.description_review : {};
+  const descriptionReview = isRecord(parsedData.description_review) ? parsedData.description_review : {};
   const descriptionIssues = arr(descriptionReview.issues).filter(isRecord);
 
-  const allIssues = [...formalIssues, ...claimsIssues, ...descriptionIssues];
+  const examinationRisks = arr(parsedData.examination_risks).filter(isRecord);
+  const allIssues = [...formalIssues, ...claimsIssues, ...descriptionIssues, ...examinationRisks];
 
   const recommendationConfig: Record<string, { label: string; color: string }> = {
     approve: { label: '通过', color: 'text-brand-green-dark bg-green-50' },
     revise: { label: '需修改', color: 'text-accent-orange bg-orange-50' },
+    needs_revision: { label: '需修改', color: 'text-accent-orange bg-orange-50' },
     reject: { label: '不通过', color: 'text-red-500 bg-red-50' },
   };
   const recConfig = recommendationConfig[recommendation] || { label: recommendation, color: 'text-muted bg-hairline-soft' };

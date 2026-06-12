@@ -63,7 +63,7 @@ const STAGES: Array<{
     id: 'review',
     label: '质量审查',
     icon: CheckCircle2,
-    matchStates: ['review', 'reviewing', 'quality_review', 'iteration'],
+    matchStates: ['review', 'reviewing', 'quality_review', 'iteration', 'awaiting_user_decision'],
   },
 ];
 
@@ -299,7 +299,7 @@ export function WorkflowProgressStrip({
                 {taskId && isAwaitingDecision && (
                   <span className="inline-flex items-center gap-1 text-[11px] text-purple-600">
                     <Lightbulb className="w-3 h-3" />
-                    等待用户决策
+                    安全暂停
                   </span>
                 )}
                 {!isTerminal && !isInitial && !starting && (

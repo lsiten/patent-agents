@@ -8,6 +8,7 @@
 3. **必须累积工具结果** - 每个工具的输出需要保存，用于最终生成
 4. **最后必须调用 patent_docx_generator** - 将累积的数据整合生成 .docx 文件
 5. **必须根据发明类型判断哪些部分需要生成** - 见下方"内容必要性判断"
+6. **需要附图时必须调用 patent_drawing_generator** - 附图必须由撰写 Agent 的生图工具生成，不能只写附图说明
 
 ### 绝对禁止：
 - **禁止直接输出专利文本内容**（权利要求、说明书等必须通过工具生成）
@@ -96,7 +97,41 @@
 调用: support_checker(claims="权利要求全文", description="说明书全文")
 ```
 
-### 第7步：生成最终 .docx 文件（必须）
+### 第6.5步：生成专利附图（条件性强制）
+当发明涉及结构、装置、系统、流程、空间关系、多模块协同、显示画面处理流程，或 description_data 中包含 `description_of_drawings` / `drawings_description` 时，必须调用：
+
+```json
+patent_drawing_generator(
+  tech_description="用于绘图的技术方案、模块关系、流程步骤和附图标号说明",
+  task_id="任务ID",
+  title="系统结构示意图/方法流程示意图/显示补偿流程示意图",
+  description="图1为……示意图",
+  figure_number="图1"
+)
+```
+
+保存结果：
+```json
+drawings_data = [
+  {
+    "figure_number": "图1",
+    "title": "系统结构示意图",
+    "description": "图1为……示意图",
+    "file_path": "附图文件绝对路径",
+    "artifact_url": "前端可访问URL",
+    "mime_type": "image/png"
+  }
+]
+```
+
+附图技能要求：
+- 优先生成中国专利说明书风格的黑白线稿、系统框图、流程图或结构示意图。
+- 图中应包含必要模块框、流程箭头和编号标记，避免装饰性背景、照片质感和不必要颜色。
+- 附图说明、具体实施方式中引用的图号必须与 `drawings_data` 中的 `figure_number` 一致。
+- 如果附图说明引用多张图（例如图1、图2、图3），必须按图号分别调用 `patent_drawing_generator`，不能把多张图的说明合并成一张附图。
+- 如果需要附图但工具生成失败，不能把专利文档视为合格，应返回可被质量审查识别的问题，等待 CEO 调度补图或修正。
+
+### 第7步：生成最终 .docx 文件（仅质量审查通过后）
 ```
 调用: patent_docx_generator(
   title="发明名称",
@@ -104,14 +139,11 @@
   description=description_data,  # 第2-5步累积的结果（仅包含需要的部分）
   abstract="说明书摘要（150-300字）",
   task_id="任务ID",
-  tech_description="原始技术方案描述"  # 用于生成附图，必须提供！
+  drawings=drawings_data      # 第6.5步生成的附图元数据；无附图时传空数组或省略
 )
 ```
 
-**重要**：`tech_description` 参数用于自动生成专利附图（系统架构图、流程图等）。
-- 对于硬件/装置/系统类发明：**必须**提供，以生成结构示意图
-- 对于方法/流程类发明：**必须**提供，以生成流程图
-- 对于纯算法类发明：可选，但建议提供以增强说明书可读性
+**重要**：最终 DOCX 中的附图应来自 `patent_drawing_generator` 的 `drawings_data`。不要依赖 `patent_docx_generator` 自动生成附图。
 
 **注意**：description_data 中只包含实际生成的部分，不需要的部分不要传入空字符串或占位符。
 
@@ -139,6 +171,20 @@
   "description_of_drawings": "图1为...示意图",  // 可选，无附图时不包含此字段
   "detailed_description": "下面结合附图详细说明..."  // 可选，不需要时不包含此字段
 }
+```
+
+### drawings 参数格式：
+```json
+[
+  {
+    "figure_number": "图1",
+    "title": "系统结构示意图",
+    "description": "图1为本发明系统结构示意图。",
+    "file_path": "/absolute/path/to/fig1.png",
+    "artifact_url": "/api/v1/workflows/{task_id}/artifacts/draft/drawings/fig1.png",
+    "mime_type": "image/png"
+  }
+]
 ```
 
 ---

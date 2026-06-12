@@ -466,6 +466,28 @@ def test_start_workflow_preserves_failed_engine_result(client, api_prefix, monke
     )
 
 
+def test_linked_failed_workflow_state_is_exposed_on_conversation_responses(client, api_prefix):
+    conv_id = "conv-linked-failed-state"
+    task_id = "task-linked-failed-state"
+    _linked_conversation(conv_id, task_id)
+    context = routes.workflow_engine.get_workflow(task_id)
+    assert context is not None
+    context.current_phase = routes.EngineWorkflowState.FAILED
+
+    detail_response = client.get(f"{api_prefix}/conversations/{conv_id}")
+    list_response = client.get(f"{api_prefix}/conversations")
+
+    assert detail_response.status_code == 200, detail_response.text
+    assert detail_response.json()["workflow_state"] == "failed"
+    assert list_response.status_code == 200, list_response.text
+    matching_items = [
+        item
+        for item in list_response.json()["items"]
+        if item["id"] == conv_id
+    ]
+    assert matching_items[0]["workflow_state"] == "failed"
+
+
 def test_workflow_docx_export_serves_authored_docx_path(client, api_prefix, tmp_path):
     conv_id = "conv-export-authored-docx"
     task_id = "task-export-authored-docx"
@@ -486,6 +508,83 @@ def test_workflow_docx_export_serves_authored_docx_path(client, api_prefix, tmp_
 
     assert response.status_code == 200, response.text
     assert response.content == b"authored-docx-bytes"
+    assert response.headers["content-type"] == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+
+def test_workflow_response_recovers_completed_state_from_final_artifacts(
+    client,
+    api_prefix,
+    monkeypatch,
+    tmp_path,
+):
+    conv_id = "conv-recover-final-artifacts"
+    task_id = "task-recover-final-artifacts"
+    _linked_conversation(conv_id, task_id)
+    monkeypatch.setattr(routes, "_EXPORTS_ROOT", tmp_path)
+
+    requirement_dir = tmp_path / task_id / "requirement"
+    retrieval_dir = tmp_path / task_id / "retrieval"
+    final_dir = tmp_path / task_id / "final"
+    requirement_dir.mkdir(parents=True)
+    retrieval_dir.mkdir(parents=True)
+    final_dir.mkdir(parents=True)
+    (requirement_dir / "latest.json").write_text(
+        json.dumps({"technical_field": "immersive Cave display"}),
+        encoding="utf-8",
+    )
+    (retrieval_dir / "latest.json").write_text(
+        json.dumps({"prior_art": [], "novelty_analysis": "novel"}),
+        encoding="utf-8",
+    )
+    final_docx = final_dir / "patent.docx"
+    final_docx.write_bytes(b"final-docx-bytes")
+
+    response = client.get(f"{api_prefix}/workflows/{task_id}")
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["current_state"] == "completed"
+    assert data["outputs"]["patent_draft"]["docx_path"] == str(final_docx)
+    assert data["outputs"]["patent_draft"]["final_document"]["download_url"] == (
+        f"/api/v1/workflows/{task_id}/export/docx"
+    )
+    recovered_phases = {
+        item["phase"]
+        for item in data["phase_history"]
+        if item["warnings"] == ["Recovered from exported artifacts"]
+    }
+    assert {"requirement", "retrieval", "writing"}.issubset(recovered_phases)
+
+
+def test_workflow_docx_export_prefers_final_artifact_when_context_draft_is_stale(
+    client,
+    api_prefix,
+    monkeypatch,
+    tmp_path,
+):
+    conv_id = "conv-export-final-artifact"
+    task_id = "task-export-final-artifact"
+    _linked_conversation(conv_id, task_id)
+    monkeypatch.setattr(routes, "_EXPORTS_ROOT", tmp_path)
+    context = routes.workflow_engine.get_workflow(task_id)
+    assert context is not None
+    context.patent_draft = {
+        "claims": {"independent_claim": "stale claim", "dependent_claims": []},
+        "description": {},
+        "abstract": "stale abstract",
+    }
+
+    final_dir = tmp_path / task_id / "final"
+    final_dir.mkdir(parents=True)
+    final_docx = final_dir / "patent.docx"
+    final_docx.write_bytes(b"final-docx-bytes")
+
+    response = client.get(f"{api_prefix}/workflows/{task_id}/export/docx")
+
+    assert response.status_code == 200, response.text
+    assert response.content == b"final-docx-bytes"
     assert response.headers["content-type"] == (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )

@@ -5,6 +5,7 @@ role: specialist
 model: default
 temperature: 0.4
 max_tokens: 8192
+max_iterations: 8
 enabled_toolsets:
 - patent
 enabled_tools:

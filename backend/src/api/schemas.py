@@ -383,6 +383,7 @@ class ConversationSummary(BaseModel):
     message_count: int
     status: str
     linked_workflow_id: Optional[str] = None
+    workflow_state: Optional[str] = None
 
 
 class ToolCallInfo(BaseModel):
@@ -442,6 +443,7 @@ class ConversationDetail(BaseModel):
     updated_at: str
     status: str
     linked_workflow_id: Optional[str] = None
+    workflow_state: Optional[str] = None
 
 
 class ConversationListResponse(BaseModel):

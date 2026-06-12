@@ -229,7 +229,7 @@ class TestLowScoreRemediationContracts:
         ctx = WorkflowContext(task_id="t-search", user_id="u-search")
         assert engine._classify_remediation_path(review, ctx) == "SEARCH_MORE"
 
-    def test_missing_information_enters_awaiting_user_decision(self):
+    def test_missing_information_routes_to_auto_remediation(self):
         engine = PatentWorkflowEngine()
         review = {
             "review_summary": {
@@ -242,6 +242,8 @@ class TestLowScoreRemediationContracts:
         }
         ctx = WorkflowContext(task_id="t2", user_id="u2")
         assert engine._classify_remediation_path(review, ctx) == "NEEDS_USER_INPUT"
+        engine._enter_quality_remediation_hold(ctx, review, "NEEDS_USER_INPUT")
+        assert ctx.metadata["quality_remediation"]["recommended_next_action"] == "continue_auto_fix"
 
     def test_system_failure_routes_to_terminal_failure(self):
         engine = PatentWorkflowEngine()

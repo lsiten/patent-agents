@@ -23,7 +23,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from docx.shared import Pt
 from loguru import logger
@@ -237,6 +237,46 @@ def _add_multiline_content(doc, content: Any, profile: _Profile) -> None:
         add_body_paragraph(doc, para_text, profile)
 
 
+def _add_figure_picture(doc, fig_info: Dict[str, str], profile: _Profile, width_inches: float = 5.0) -> bool:
+    """Add a drawing image and caption to the current DOCX position."""
+    try:
+        from docx.shared import Inches as _Inches
+
+        figure_number = _coerce_text(fig_info.get("figure_number")) or ""
+        title = _coerce_text(fig_info.get("title")) or "专利附图"
+        caption = f"{figure_number} {title}".strip()
+        add_body_paragraph(doc, caption, profile, first_line_indent=False, bold=True)
+        doc.add_picture(fig_info["path"], width=_Inches(width_inches))
+        doc.add_paragraph("")
+        return True
+    except Exception as e:
+        logger.warning(
+            f"Failed to add figure {fig_info.get('figure_number')}: {e} "
+            f"(path: {fig_info.get('path', '')})"
+        )
+        return False
+
+
+def _add_multiline_content_with_figures(
+    doc,
+    content: Any,
+    profile: _Profile,
+    figures_by_number: Dict[str, Dict[str, str]],
+    inserted_figures: Set[str],
+) -> None:
+    """Add paragraphs and insert the first referenced drawing immediately after its paragraph."""
+    content = _strip_markdown(content)
+    paragraphs = [p.strip() for p in content.split("\n") if p.strip()]
+    for para_text in paragraphs:
+        add_body_paragraph(doc, para_text, profile)
+        for figure_number in sorted(figures_by_number.keys(), key=lambda value: int(re.search(r"\d+", value).group(0)) if re.search(r"\d+", value) else 0):
+            if figure_number in inserted_figures:
+                continue
+            if re.search(rf"(?<!\d){re.escape(figure_number)}(?!\d)", para_text):
+                if _add_figure_picture(doc, figures_by_number[figure_number], profile):
+                    inserted_figures.add(figure_number)
+
+
 def _coerce_text(value: Any) -> str:
     """Convert structured agent/tool output fields into document text."""
     if value is None:
@@ -382,6 +422,38 @@ def _generate_patent_figures(
     return []
 
 
+def _normalize_provided_figures(drawings: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """Convert patent_drawing_generator metadata into DOCX-ready figure entries."""
+    figures: List[Dict[str, str]] = []
+    backend_dir = Path(__file__).resolve().parent.parent.parent.parent.parent
+
+    for index, drawing in enumerate(drawings, 1):
+        if not isinstance(drawing, dict):
+            continue
+        path_value = drawing.get("file_path") or drawing.get("path")
+        if not path_value:
+            continue
+        path = Path(str(path_value))
+        if not path.is_absolute():
+            path = backend_dir / path
+        if not path.is_file():
+            logger.warning(f"Provided patent drawing does not exist: {path}")
+            continue
+        if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"}:
+            logger.warning(f"Provided patent drawing is not directly supported by python-docx: {path}")
+            continue
+        figures.append(
+            {
+                "path": str(path),
+                "title": _coerce_text(drawing.get("title")) or f"专利附图{index}",
+                "figure_number": _coerce_text(drawing.get("figure_number")) or f"图{index}",
+                "description": _coerce_text(drawing.get("description")),
+            }
+        )
+
+    return figures
+
+
 # ═══════════════════════════════════════════════════════════════════
 # PDF/A 简化处理
 # ═══════════════════════════════════════════════════════════════════
@@ -424,6 +496,7 @@ class PatentDocxGeneratorTool:
         abstract: Any = "",
         task_id: str = "",
         tech_description: str = "",
+        drawings: Optional[List[Dict[str, Any]]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """
@@ -437,7 +510,8 @@ class PatentDocxGeneratorTool:
                           "description_of_drawings": "..."}
             abstract: 说明书摘要
             task_id: 任务ID
-            tech_description: 原始技术方案描述（用于附图生成）
+            tech_description: 原始技术方案描述（仅兼容旧调用；优先使用 drawings）
+            drawings: patent_drawing_generator 已生成的附图元数据列表
 
         Returns:
             {"success": True, "file_path": "...", "figures": [...], "message": "..."}
@@ -469,10 +543,15 @@ class PatentDocxGeneratorTool:
                 add_document_heading(doc, "说明书摘要", profile)
                 add_body_paragraph(doc, _strip_markdown(abstract), profile)
 
-            # 先生成附图（异步）
-            figure_paths = []
-            if tech_description:
+            figure_paths = _normalize_provided_figures(drawings or [])
+            if not figure_paths and tech_description:
                 figure_paths = _generate_patent_figures(tech_description, task_id)
+            figures_by_number = {
+                fig["figure_number"]: fig
+                for fig in figure_paths
+                if fig.get("figure_number") and fig.get("path")
+            }
+            inline_inserted_figures: Set[str] = set()
 
             # ── 摘要附图 ── (仅在有附图时生成)
             if figure_paths:
@@ -551,7 +630,13 @@ class PatentDocxGeneratorTool:
                     summary = "\n".join(parts) if parts else str(summary)
                 if summary and summary.strip():
                     add_section_heading(doc, "发明内容", profile)
-                    _add_multiline_content(doc, summary, profile)
+                    _add_multiline_content_with_figures(
+                        doc,
+                        summary,
+                        profile,
+                        figures_by_number,
+                        inline_inserted_figures,
+                    )
 
                 # 附图说明（仅在有内容时生成）
                 drawings_desc = description.get("description_of_drawings") or description.get("drawings_description", "")
@@ -559,7 +644,13 @@ class PatentDocxGeneratorTool:
                     drawings_desc = drawings_desc.get("content", "") or str(drawings_desc)
                 if drawings_desc and drawings_desc.strip():
                     add_section_heading(doc, "附图说明", profile)
-                    _add_multiline_content(doc, drawings_desc, profile)
+                    _add_multiline_content_with_figures(
+                        doc,
+                        drawings_desc,
+                        profile,
+                        figures_by_number,
+                        inline_inserted_figures,
+                    )
 
             # 具体实施方式 (仅在有内容时生成)
             detailed = description.get("detailed_description", "")
@@ -581,7 +672,13 @@ class PatentDocxGeneratorTool:
                 detailed = "\n\n".join(parts)
             if detailed and detailed.strip():
                 add_section_heading(doc, "具体实施方式", profile)
-                _add_multiline_content(doc, detailed, profile)
+                _add_multiline_content_with_figures(
+                    doc,
+                    detailed,
+                    profile,
+                    figures_by_number,
+                    inline_inserted_figures,
+                )
 
             # ── 说明书附图 ── (仅在有附图时生成)
             if figure_paths:
@@ -590,7 +687,7 @@ class PatentDocxGeneratorTool:
                 from docx.shared import Inches as _Inches
                 for fig_info in figure_paths:
                     try:
-                        fig_title = f"图{fig_info.get('figure_number', '')}: {fig_info.get('title', '')}"
+                        fig_title = f"{fig_info.get('figure_number', '')}: {fig_info.get('title', '')}"
                         add_body_paragraph(doc, fig_title, profile, first_line_indent=False, bold=True)
                         doc.add_picture(fig_info["path"], width=_Inches(5.0))
                         doc.add_paragraph("")

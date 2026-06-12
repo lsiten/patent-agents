@@ -391,6 +391,40 @@ class TestAgentActivityEvents:
         persisted = routes.conversations_store[conv_id]["messages"][-1]
         assert persisted["metadata"] == {"recommend_create_patent": True}
 
+    def test_brainstorm_convergence_recommends_workflow_creation(self):
+        messages = [
+            {
+                "role": "user",
+                "content": "请分析我上传的技术交底文件，并开始专利申请讨论",
+            },
+            {
+                "role": "assistant",
+                "content": "已完成第一轮头脑风暴，下一步还需要确认两个关键事实。",
+            },
+            {"role": "user", "content": "两者结合"},
+            {
+                "role": "assistant",
+                "content": "请确认两个关键点，确认后我会进入下一轮保护范围收敛并准备结构化分析。",
+            },
+            {"role": "user", "content": "是，基于推荐姿态微调"},
+        ]
+        response_text = (
+            "第二轮头脑风暴已收敛：本案主线建议定为“推荐姿态生成 + 用户基于推荐姿态微调 + "
+            "可动显示面姿态调整 + 外转补画/内转裁切重映射 + 多屏连续衔接”。\n"
+            "我判断核心创造性应放在“姿态变化后的视频显示数据重构”，不要只保护机械调屏。\n"
+            "为扩大保护范围，建议不把补画限定为“补充投影设备”，而写成补充显示模块、相邻显示面或现有显示区域均可输出。"
+        )
+
+        assert routes._should_recommend_workflow_creation(
+            messages=messages,
+            current_content="是，基于推荐姿态微调",
+            response_text=response_text,
+            tool_calls=[
+                {"name": "dispatch_specialist", "result": "第二轮头脑风暴完成，保护范围已收敛"},
+            ],
+            agent_events=[],
+        ) is True
+
 
 class TestChat:
     def test_chat_with_message(self, client, api_prefix):

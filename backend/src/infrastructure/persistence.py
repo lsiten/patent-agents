@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from loguru import logger
 from sqlalchemy import select, delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.models.store import StoredValue
@@ -47,9 +48,21 @@ class StoreManager:
             if row:
                 row.value = value
                 row.updated_at = datetime.now(timezone.utc)
-            else:
-                session.add(StoredValue(key=key, category=cat, value=value))
-            await session.commit()
+                await session.commit()
+                return
+
+            session.add(StoredValue(key=key, category=cat, value=value))
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                result = await session.execute(stmt)
+                row = result.scalar_one_or_none()
+                if not row:
+                    raise
+                row.value = value
+                row.updated_at = datetime.now(timezone.utc)
+                await session.commit()
 
     async def load(self, category: str, key: str) -> Optional[Any]:
         cat = _cat(category)
