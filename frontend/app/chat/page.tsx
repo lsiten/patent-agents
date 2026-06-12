@@ -1159,7 +1159,7 @@ function ChatPageContent() {
 
   return (
     <>
-    <div className="fixed inset-x-0 bottom-0 top-16 flex min-h-0 overflow-hidden">
+    <div className="flex h-full min-h-0 w-full min-w-0 overflow-hidden">
       {/* Sidebar Toggle (mobile) */}
       <button
         className="md:hidden fixed left-2 top-20 z-10 p-2 rounded-lg bg-canvas border border-hairline shadow-sm"
@@ -1171,7 +1171,7 @@ function ChatPageContent() {
       {/* Sidebar */}
       <aside
         className={clsx(
-          'h-full min-h-0 w-80 flex-shrink-0 border-r border-hairline bg-surface/95 flex flex-col transition-transform',
+          'h-full min-h-0 w-80 max-w-[86vw] flex-shrink-0 border-r border-hairline bg-surface/95 flex flex-col transition-transform',
           'md:relative md:translate-x-0',
           showSidebar ? 'translate-x-0' : '-translate-x-full absolute inset-y-0 z-20'
         )}
@@ -1269,8 +1269,8 @@ function ChatPageContent() {
       <div className="flex-1 flex h-full min-h-0 flex-col min-w-0 overflow-hidden">
         {/* Header */}
         <div className="flex-shrink-0 border-b border-hairline bg-canvas/95 px-6 py-3 backdrop-blur">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
               {editingTitle ? (
                 <input
                   type="text"
@@ -1279,18 +1279,18 @@ function ChatPageContent() {
                   onBlur={handleSaveTitle}
                   onKeyDown={handleKeyDownTitle}
                   autoFocus
-                  className="text-lg font-semibold text-ink bg-canvas border border-hairline rounded px-2 py-1 w-full focus:outline-none focus:border-accent"
+                  className="w-full min-w-0 rounded border border-hairline bg-canvas px-2 py-1 text-lg font-semibold text-ink focus:outline-none focus:border-accent"
                 />
               ) : (
                 <h1
-                  className="text-lg font-semibold text-ink cursor-text"
+                  className="min-w-0 cursor-text truncate text-lg font-semibold text-ink"
                   onClick={handleStartEditingTitle}
                   title="点击重命名"
                 >
                   {activeConvId ? (conversations.find((c) => c.id === activeConvId)?.title || '专利对话') : '新对话'}
                 </h1>
               )}
-              <p className="text-sm text-slate">
+              <p className="truncate text-sm text-slate">
                 {visibleWorkflowTaskId
                   ? '专利申请流程已启动'
                   : activeConvId
@@ -1298,7 +1298,7 @@ function ChatPageContent() {
                   : '描述您的发明创造，开始专利申请'}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-shrink-0 items-center gap-2">
               {connectionStatus !== 'idle' && (
                 <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
                   connectionStatus === 'connected'
@@ -1375,8 +1375,8 @@ function ChatPageContent() {
         )}
 
         {/* Messages */}
-        <div className="min-h-0 flex-1 overflow-y-auto bg-surface/35">
-          <div className="mx-auto flex min-h-full max-w-5xl flex-col space-y-6 px-4 pb-44 pt-6 md:px-6">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-surface/35">
+          <div className="flex min-h-full w-full min-w-0 flex-col space-y-6 px-[4%] pb-8 pt-6">
 
             {isLoadingConv ? (
               <div className="flex justify-center py-12">
@@ -1456,14 +1456,14 @@ function ChatPageContent() {
                         <div
                           key={msg.id}
                           data-testid="chat-message-assistant-empty"
-                          className="flex gap-3 justify-start"
+                          className="flex w-full min-w-0 gap-3 justify-start"
                         >
                           <div className="flex-shrink-0 mt-1">
                             <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
                               <Bot className="w-4.5 h-4.5 text-ink" />
                             </div>
                           </div>
-                          <div className="order-1 max-w-[760px]">
+                          <div className="order-1 w-full min-w-0 max-w-[78%]">
                             <AgentActivityLog events={msg.agent_events} className="-mx-1 mt-2" />
                             <p className="text-[11px] text-slate/60 mt-1 px-1">
                               {new Date(msg.timestamp).toLocaleTimeString('zh-CN', {
@@ -1484,14 +1484,14 @@ function ChatPageContent() {
                       <div
                         key={msg.id}
                         data-testid="chat-message-assistant-interaction-only"
-                        className="flex gap-3 justify-start"
+                        className="flex w-full min-w-0 gap-3 justify-start"
                       >
                         <div className="flex-shrink-0 mt-1">
                           <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
                             <Bot className="w-4.5 h-4.5 text-ink" />
                           </div>
                         </div>
-                        <div className="order-1 max-w-[760px]">
+                        <div className="order-1 w-full min-w-0 max-w-[78%]">
                           <InteractionPanel interaction={parsedContent.interaction} />
                           {msg.agent_events && msg.agent_events.length > 0 && (
                             <AgentActivityLog events={msg.agent_events} className="-mx-1 mt-2" />
@@ -1514,8 +1514,8 @@ function ChatPageContent() {
                       key={msg.id}
                       data-testid={msg.type === 'file' ? 'chat-file-message' : `chat-message-${msg.role}`}
                       className={clsx(
-                        'flex gap-3',
-                        msg.role === 'user' ? 'justify-end' : 'justify-start'
+                        'flex w-full min-w-0 gap-3 overflow-hidden',
+                        msg.role === 'user' ? 'justify-end pl-[8%] pr-2' : 'justify-start pr-[8%]'
                       )}
                     >
                       {(msg.role === 'assistant' || msg.role === 'agent') && (
@@ -1526,11 +1526,11 @@ function ChatPageContent() {
                         </div>
                       )}
 
-                      <div className={clsx(msg.role === 'user' ? 'order-1 max-w-[680px]' : 'order-1 max-w-[760px]')}>
+                      <div className={clsx('min-w-0', msg.role === 'user' ? 'order-1 flex-1' : 'order-1 w-full max-w-[78%]')}>
                         {msg.type === 'file' && !msg.content ? (
-                          <div className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-hairline bg-canvas text-sm text-ink">
+                          <div className="flex w-full min-w-0 items-center gap-2 px-3 py-2 rounded-xl border border-hairline bg-canvas text-sm text-ink">
                             <FileText className="w-4 h-4 text-slate-600 flex-shrink-0" />
-                            <span className="font-medium truncate max-w-[240px]">
+                            <span className="min-w-0 flex-1 truncate font-medium">
                               {(msg.metadata?.filename as string) || '上传文件'}
                             </span>
                             <span className="text-xs text-slate/70 flex-shrink-0">
@@ -1540,19 +1540,19 @@ function ChatPageContent() {
                             </span>
                           </div>
                         ) : (
-                          <div className="relative group">
+                          <div className="relative min-w-0 group">
                             <div
                               className={clsx(
-                                'rounded-2xl text-sm leading-relaxed shadow-sm',
+                                'w-full max-w-full min-w-0 overflow-hidden rounded-2xl text-sm leading-relaxed shadow-sm',
                                 msg.role === 'user'
                                   ? 'bg-brand-green text-ink rounded-br-md'
                                   : 'border border-hairline bg-canvas rounded-bl-md'
                               )}
                             >
                               {msg.type === 'file' && (
-                                <div className="flex items-center gap-2 px-3.5 pt-2.5 pb-1.5 text-xs border-b border-ink/15">
+                                <div className="flex min-w-0 items-center gap-2 px-3.5 pt-2.5 pb-1.5 text-xs border-b border-ink/15">
                                   <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                                  <span className="font-medium truncate">
+                                  <span className="min-w-0 flex-1 truncate font-medium">
                                     {(msg.metadata?.filename as string) || '上传文件'}
                                   </span>
                                   <span className="flex-shrink-0 opacity-80">
@@ -1562,7 +1562,13 @@ function ChatPageContent() {
                                   </span>
                                 </div>
                               )}
-                              <div className={clsx('px-3.5 py-2.5', msg.role === 'user' ? 'whitespace-pre-wrap' : 'prose prose-sm max-w-none')}>
+                              <div
+                                className={clsx(
+                                  'break-words px-3.5 py-2.5 [overflow-wrap:anywhere]',
+                                  msg.type === 'file' && 'max-h-[40vh] overflow-y-auto',
+                                  msg.role === 'user' ? 'whitespace-pre-wrap break-all' : 'prose prose-sm max-w-none'
+                                )}
+                              >
                                 {msg.isStreaming && !msg.content ? (
                                   <div className="flex items-center gap-1.5 text-slate">
                                     <span>思考中</span>
@@ -1642,8 +1648,8 @@ function ChatPageContent() {
 
         {/* Workflow Recommendation Banner */}
         {recommendStartWorkflow && activeConvId && !workflowTaskId && (
-          <div className="flex-shrink-0 border-t border-hairline bg-green-50 px-6 py-3">
-            <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex-shrink-0 border-t border-hairline bg-green-50 px-[4%] py-3">
+            <div className="flex w-full min-w-0 items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-green-600" />
                 <p className="text-sm text-green-800">
@@ -1680,8 +1686,8 @@ function ChatPageContent() {
         )}
 
         {pendingConfirmation && !recommendStartWorkflow && !workflowTaskId && (
-          <div className="z-10 flex-shrink-0 border-t border-amber-200/80 bg-amber-50/95 px-4 py-3 shadow-[0_-12px_30px_rgba(0,30,43,0.08)] backdrop-blur">
-            <div className="mx-auto max-w-5xl">
+          <div className="z-10 flex-shrink-0 border-t border-amber-200/80 bg-amber-50/95 px-[4%] py-3 shadow-[0_-12px_30px_rgba(0,30,43,0.08)] backdrop-blur">
+            <div className="w-full min-w-0">
               <div className="rounded-2xl border border-amber-200 bg-white px-4 py-3 shadow-sm" role="group" aria-label="待确认的问题">
                 <p className="mb-3 flex items-start gap-2 text-sm font-semibold text-amber-900">
                   <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
@@ -1718,12 +1724,12 @@ function ChatPageContent() {
         )}
 
         {/* Input Area */}
-        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-hairline bg-canvas/98 px-4 py-3 shadow-[0_-10px_24px_rgba(0,30,43,0.08)] backdrop-blur md:left-80">
-          <div className="mx-auto max-w-5xl">
+        <div className="z-30 min-w-0 flex-shrink-0 overflow-hidden border-t border-hairline bg-canvas/98 px-4 py-3 shadow-[0_-10px_24px_rgba(0,30,43,0.08)] backdrop-blur">
+          <div className="w-full min-w-0 max-w-full px-[4%]">
             {pendingFile && (
-              <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-lg border border-hairline bg-canvas text-sm">
+              <div className="mb-2 flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm">
                 <FileText className="w-4 h-4 text-slate-600 flex-shrink-0" />
-                <span className="font-medium truncate max-w-[280px]">
+                <span className="min-w-0 flex-1 truncate font-medium">
                   {pendingFile.name}
                 </span>
                 <span className="text-xs text-slate/70 flex-shrink-0">
@@ -1731,7 +1737,7 @@ function ChatPageContent() {
                     ? `${(pendingFile.size / 1024 / 1024).toFixed(1)} MB`
                     : `${Math.round(pendingFile.size / 1024)} KB`}
                 </span>
-                <span className="text-xs text-slate/50 ml-1">点击发送后上传</span>
+                <span className="hidden flex-shrink-0 text-xs text-slate/50 sm:inline">点击发送后上传</span>
                 <button
                   type="button"
                   onClick={() => setPendingFile(null)}
@@ -1744,7 +1750,7 @@ function ChatPageContent() {
                 </button>
               </div>
             )}
-            <div className="flex gap-2">
+            <div className="flex w-full min-w-0 max-w-full items-end gap-2 overflow-hidden">
               <input
                 data-testid="chat-file-input"
                 ref={fileInputRef}
@@ -1759,7 +1765,7 @@ function ChatPageContent() {
                 size="md"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={!!pendingFile || isUploadingFile || isLoading || isLoadingConv || isStartingWorkflow}
-                className="self-end"
+                className="flex-shrink-0 self-end"
                 title="选择交底书（.txt / .docx / .pdf）"
                 aria-label="选择交底书文件"
               >
@@ -1781,7 +1787,7 @@ function ChatPageContent() {
                   }
                 }}
                 placeholder={activeConvId ? '继续补充技术细节...（可点击 📎 选择交底书 .txt / .docx / .pdf）' : '描述您的发明创造...（可点击 📎 选择交底书 .txt / .docx / .pdf）'}
-                className="flex-1 overflow-y-auto rounded-lg border border-hairline bg-white px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green focus:border-brand-green placeholder:text-slate/60"
+                className="min-w-0 flex-1 overflow-y-auto rounded-lg border border-hairline bg-white px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green focus:border-brand-green placeholder:text-slate/60"
                 rows={1}
                 autoFocus
                 disabled={isLoading || isLoadingConv || isStartingWorkflow || isUploadingFile}
@@ -1791,7 +1797,7 @@ function ChatPageContent() {
                 onClick={() => handleSend()}
                 disabled={(!input.trim() && !pendingFile) || isLoading || isLoadingConv || isUploadingFile}
                 isLoading={isLoading || isUploadingFile}
-                className="self-end"
+                className="flex-shrink-0 self-end"
                 aria-label="发送消息"
               >
                 {!(isLoading || isUploadingFile) && <Send className="w-4 h-4" />}

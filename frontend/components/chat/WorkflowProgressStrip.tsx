@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
-  ChevronRight,
   ExternalLink,
   ChevronDown,
   ChevronUp,
@@ -257,14 +256,14 @@ export function WorkflowProgressStrip({
   const failedCount = allActivities.filter((a) => a.status === 'failed').length;
 
   return (
-    <div className="border-b border-hairline bg-canvas/60">
+    <div className="max-w-full min-w-0 overflow-hidden border-b border-hairline bg-canvas/60">
       {/* Unified CEO Dispatch Panel (stage roadmap + dispatch activities merged) */}
       {showDispatch && (
-        <div className="px-6 py-2">
-          <div className="max-w-4xl mx-auto">
+        <div className="min-w-0 px-4 py-2 md:px-6">
+          <div className="w-full min-w-0">
             {/* Header: CEO 调度 title + workflow status + counters + collapse button */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className="text-xs font-medium text-slate">CEO 调度</span>
                 {taskId && isInitial && !starting && (
                   <span className="inline-flex items-center gap-1 text-[11px] text-amber-600">
@@ -331,7 +330,7 @@ export function WorkflowProgressStrip({
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-shrink-0 items-center gap-2">
                 {taskId && isInitial && (
                   <button
                     onClick={handleStart}
@@ -373,7 +372,8 @@ export function WorkflowProgressStrip({
 
             {/* Stage roadmap — below the CEO header when a workflow is active */}
             {taskId && (
-              <div className="flex items-center gap-1 mt-3 pt-3 border-t border-hairline/60">
+              <div className="mt-3 border-t border-hairline/60 pt-3">
+                <div className="flex min-w-0 flex-wrap gap-2">
                 {STAGES.map((stage, idx) => {
                   // 检查该阶段是否完成
                   const isCompleted = stage.matchStates.some((m) => completedSet.has(m));
@@ -381,10 +381,10 @@ export function WorkflowProgressStrip({
                   const Icon = stage.icon;
 
                   return (
-                    <div key={stage.id} className="flex items-center flex-1 min-w-0">
+                    <div key={stage.id} className="min-w-0 max-w-full flex-none">
                       <div
                         className={clsx(
-                          'flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors w-full',
+                          'flex min-w-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors',
                           isCompleted && 'bg-green-50 text-green-700',
                           isActive && 'bg-blue-50 text-blue-700 ring-1 ring-blue-200',
                           !isCompleted && !isActive && 'bg-canvas text-slate-500 border border-hairline'
@@ -397,14 +397,12 @@ export function WorkflowProgressStrip({
                         ) : (
                           <Icon className="w-3.5 h-3.5 flex-shrink-0" />
                         )}
-                        <span className="truncate">{stage.label}</span>
+                        <span className="min-w-0 truncate">{stage.label}</span>
                       </div>
-                      {idx < STAGES.length - 1 && (
-                        <ChevronRight className="w-3 h-3 mx-0.5 text-slate-300 flex-shrink-0" />
-                      )}
                     </div>
                   );
                 })}
+                </div>
               </div>
             )}
 
@@ -440,7 +438,7 @@ export function WorkflowProgressStrip({
 
             {/* Expanded detail list */}
             {dispatchExpanded && (
-              <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto">
+              <div className="mt-2 max-h-48 space-y-1.5 overflow-y-auto overflow-x-hidden">
                 {allActivities.length === 0 && isStreaming && (
                   <div className="flex items-center gap-2 px-3 py-2 text-xs text-slate border border-dashed border-hairline rounded-lg bg-canvas/50">
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
@@ -457,13 +455,13 @@ export function WorkflowProgressStrip({
                     >
                       <button
                         onClick={() => setDispatchItemExpanded(isItemExpanded ? null : activity.id)}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-surface/50 transition-colors"
+                        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-surface/50"
                       >
                         <span className="text-sm">{agent.emoji}</span>
                         <span className="flex-1 text-xs font-medium text-ink truncate">
                           {agent.name}
                         </span>
-                        <span className="text-[10px] text-slate truncate max-w-[200px]">
+                        <span className="min-w-0 max-w-[35%] truncate text-[10px] text-slate">
                           {activity.task.slice(0, 40)}{activity.task.length > 40 ? '...' : ''}
                         </span>
                         {activity.status === 'running' && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}

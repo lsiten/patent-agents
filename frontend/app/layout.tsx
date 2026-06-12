@@ -21,9 +21,9 @@ export default function RootLayout({
     <html lang="zh-CN">
       <body className={inter.className}>
         <ToastProvider>
-          <div className="flex min-h-screen flex-col">
+          <div className="flex h-screen min-h-0 flex-col overflow-hidden">
             <Navbar />
-            <main className="flex-1">{children}</main>
+            <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
           </div>
         </ToastProvider>
       </body>
