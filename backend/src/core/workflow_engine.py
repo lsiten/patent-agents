@@ -582,15 +582,6 @@ class PatentWorkflowEngine:
                         context_data = self._normalize_phase_output(context_field, context_data)
                         if context_field == "patent_draft":
                             context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
-                        elif (
-                            context_field == "review_report"
-                            and isinstance(context_data, dict)
-                            and context_data.get("_agent_failed") is True
-                        ):
-                            context_data = self._build_deterministic_quality_review(
-                                context,
-                                reason=str(context_data.get("_agent_error") or "审查 Agent 不可用"),
-                            )
                         if isinstance(context_data, dict) and context_data.get("_agent_failed") is True:
                             agent_error = str(
                                 context_data.get("_agent_error") or "Agent execution failed"
@@ -1004,11 +995,6 @@ class PatentWorkflowEngine:
                             {"agent_name": "质量审查 Agent", "content": agent_text[:500] if agent_text else "", "phase": "quality_review"})
 
                     context_data = self._normalize_phase_output("review_report", context_data)
-                    if isinstance(context_data, dict) and context_data.get("_agent_failed") is True:
-                        context_data = self._build_deterministic_quality_review(
-                            context,
-                            reason=str(context_data.get("_agent_error") or "审查 Agent 不可用"),
-                        )
                     context.review_report = context_data
                     # 持久化审查结果
                     try:
@@ -2718,16 +2704,19 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         context: WorkflowContext,
         reason: str = "",
     ) -> Dict[str, Any]:
-        """Review the draft locally when the reviewer LLM is unavailable.
+        """Build a non-approving review result when the reviewer LLM is unavailable.
 
-        This is deliberately conservative: missing claims, sections, abstracts, required
-        drawings, or figure artifacts still fail the quality gate. A complete draft with
-        all referenced drawings can pass and then proceed to DOCX generation.
+        Quality review is a required expert capability. A local heuristic may point out
+        obvious issues, but it must never approve a patent document or unblock DOCX
+        generation when the real reviewer failed or timed out.
         """
         draft = context.patent_draft if isinstance(context.patent_draft, dict) else {}
         issues = self._reviewable_content_issues(draft)
-        passed = not issues
-        severity = "high" if not passed else "info"
+        if reason:
+            issues = [f"quality_reviewer_unavailable:{reason[:180]}"] + issues
+        else:
+            issues = ["quality_reviewer_unavailable"] + issues
+        severity = "critical"
 
         def issue_payload(code: str) -> Dict[str, str]:
             drawing_issue = "drawing" in code or "图" in code
@@ -2744,42 +2733,41 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 
         formal_issues = [issue_payload(code) for code in issues if "drawing" not in code and "图" not in code]
         drawing_issues = [issue_payload(code) for code in issues if "drawing" in code or "图" in code]
-        score = 0.92 if passed else 0.45
-        notes = "本地确定性审查通过：权利要求、说明书、摘要和附图均满足当前质量门。"
-        if not passed:
-            notes = "本地确定性审查未通过，需要 CEO 继续调度补充优化。"
-        if reason:
-            notes += f" 原审查 Agent 未完成，已启用本地审查兜底：{reason[:180]}"
+        score = 0.0
+        notes = (
+            "质量审查 Agent 未产生可信审查结果，不能由本地规则代替通过。"
+            "需要 CEO 重新调度质量审查或修复导致审查失败的问题。"
+        )
 
         return {
-            "recommendation": "approve" if passed else "revise",
-            "revision_priority": "medium" if passed else "critical",
+            "recommendation": "revise",
+            "revision_priority": "critical",
             "review_summary": {
                 "overall_score": score,
-                "overall_rating": "good" if passed else "needs_revision",
-                "recommendation": "approve" if passed else "revise",
+                "overall_rating": "needs_revision",
+                "recommendation": "revise",
                 "reviewer_notes": notes,
             },
             "formal_compliance_review": {
                 "score": score,
-                "passed": passed and not formal_issues,
+                "passed": False,
                 "issues": formal_issues,
             },
             "claims_review": {"issues": []},
             "description_review": {"issues": []},
             "consistency_review": {"issues": []},
             "drawing_review": {
-                "score": 1.0 if not drawing_issues else 0.0,
-                "passed": not drawing_issues,
+                "score": 0.0,
+                "passed": False,
                 "issues": drawing_issues,
                 "checked_drawings": len(draft.get("drawings") or []) if isinstance(draft, dict) else 0,
             },
-            "examination_risks": [] if passed else [
+            "examination_risks": [
                 {
                     "risk_type": "quality_gate",
                     "likelihood": "high",
-                    "description": "专利申请文件仍存在质量门问题。",
-                    "mitigation_suggestion": "继续补齐并复审。",
+                    "description": "质量审查 Agent 未完成，当前文档不能视为审查通过。",
+                    "mitigation_suggestion": "由 CEO 重新调度质量审查；若多次失败，应停留在待处理状态并展示错误。",
                 }
             ],
             "detailed_revision_suggestions": [],
@@ -3501,113 +3489,6 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         }
         return self._normalize_phase_output("retrieval_report", report)
 
-    def _build_rule_based_patent_sections(
-        self,
-        context: WorkflowContext,
-    ) -> Dict[str, Any]:
-        """Build a real, reviewable patent draft when writer LLM tools are unavailable."""
-        req = context.requirement_analysis if isinstance(context.requirement_analysis, dict) else {}
-        features = req.get("key_innovative_features") if isinstance(req, dict) else []
-        if not isinstance(features, list) or not features:
-            features = [
-                {
-                    "name": "显示面姿态获取",
-                    "description": "获取Cave折幕空间中至少一个可调显示面的姿态参数。",
-                },
-                {
-                    "name": "边界映射计算",
-                    "description": "根据显示面姿态确定相邻显示面的重叠、间隙及内容映射关系。",
-                },
-                {
-                    "name": "显示内容补偿",
-                    "description": "对外转产生的空白区域进行内容补偿，对内转产生的遮挡区域进行裁剪或重排。",
-                },
-                {
-                    "name": "同步输出控制",
-                    "description": "将处理后的多显示面视频内容同步输出到对应显示屏。",
-                },
-            ]
-        feature_names = [str(item.get("name") if isinstance(item, dict) else item) for item in features[:8]]
-        feature_desc = "；".join(
-            str(item.get("description") or item.get("name") or item)
-            for item in features[:8]
-            if item
-        )
-        technical_problem = str(
-            req.get("technical_problem")
-            or "Cave折幕空间中显示面姿态变化后，视频画面容易出现边缘缝隙、遮挡重叠、内容错位和多屏不同步的问题。"
-        )
-        core_innovation = str(
-            req.get("core_innovation")
-            or "根据显示面姿态联动计算边界投影、内容映射、空白补偿、遮挡裁剪和多屏同步输出。"
-        )
-        title = context.title or "一种基于Cave折幕视频的处理方法及系统"
-        independent = (
-            "1. 一种基于Cave折幕视频的处理方法，其特征在于，包括：获取Cave折幕空间中至少一个"
-            "可调显示面的姿态参数以及多个显示面的空间边界参数；根据所述姿态参数和空间边界参数，"
-            "确定相邻显示面之间的边界投影关系、重叠区域和/或空白区域；基于所述边界投影关系建立"
-            "视频内容与各显示面的映射关系；当检测到所述可调显示面的姿态发生变化时，按照所述映射关系"
-            "对待显示视频内容进行裁剪、补偿和/或重排，得到分别对应各显示面的显示内容；以及将所述显示内容"
-            "同步输出至对应显示面，以使Cave折幕空间中的视频画面在显示面姿态变化后保持连续显示。"
-        )
-        dependent_claims = [
-            "2. 根据权利要求1所述的方法，其特征在于，所述姿态参数包括显示面的转动角度、法向量、边缘坐标和显示面尺寸中的至少一种。",
-            "3. 根据权利要求1所述的方法，其特征在于，确定相邻显示面之间的边界投影关系包括将可调显示面的边缘投影至统一三维坐标系，并计算其与固定显示面的交叠边界。",
-            "4. 根据权利要求1所述的方法，其特征在于，当相邻显示面之间形成空白区域时，根据邻近帧内容、预设背景内容或扩展纹理内容生成补偿内容并填充至所述空白区域。",
-            "5. 根据权利要求1所述的方法，其特征在于，当相邻显示面之间形成重叠区域时，对重叠区域内的视频内容进行裁剪、透明度融合或优先级选择。",
-            "6. 根据权利要求1所述的方法，其特征在于，所述映射关系包括姿态区间与显示内容变换参数之间的对应关系，所述显示内容变换参数包括缩放、平移、旋转、裁剪和补偿参数中的至少一种。",
-            "7. 根据权利要求1所述的方法，其特征在于，还包括在显示面姿态变化超过预设阈值时重新计算所述映射关系，并对后续视频帧执行更新后的裁剪、补偿和/或重排。",
-            "8. 一种基于Cave折幕视频的处理系统，其特征在于，包括姿态获取模块、边界计算模块、内容映射模块、补偿裁剪模块和同步输出模块，所述各模块被配置为执行权利要求1至7任一项所述的方法。",
-            "9. 一种电子设备，其特征在于，包括处理器和存储器，所述存储器存储有程序，所述程序被处理器执行时实现权利要求1至7任一项所述的方法。",
-            "10. 一种计算机可读存储介质，其上存储有计算机程序，其特征在于，所述计算机程序被处理器执行时实现权利要求1至7任一项所述的方法。",
-        ]
-        description = {
-            "technical_field": (
-                f"本发明涉及沉浸式显示和多屏视频处理技术领域，尤其涉及{title}，适用于Cave折幕、环幕、"
-                "多LED显示面或投影显示面构成的沉浸式展示空间。"
-            ),
-            "background_art": (
-                "现有Cave或折幕展示空间通常将多个显示面按照固定姿态拼接，并将视频内容分别输出至各显示面。"
-                "当其中至少一个显示面能够转动、折叠或根据用户位置进行姿态调整时，相邻显示面之间的空间关系会发生变化，"
-                f"容易产生如下问题：{technical_problem}。若仅采用固定视频裁切或固定投影参数，难以在不同姿态下维持画面连续性，"
-                "也难以兼顾LED屏和投影屏等不同显示载体。因此，需要一种能够随显示面姿态变化而动态调整视频内容的处理方案。"
-            ),
-            "summary_of_invention": (
-                f"为解决上述问题，本发明提出{title}。该方案的核心在于：{core_innovation}。"
-                f"具体而言，系统首先获取显示面姿态和空间边界，随后计算相邻显示面的边界投影关系，并根据{feature_desc}等技术特征"
-                "生成多显示面的内容映射参数。当检测到显示面外转时，对由此产生的空白区域进行补偿；当检测到显示面内转时，"
-                "对遮挡或重叠区域进行裁剪、融合或重排。由此能够在折幕角度、用户入口位置或展示姿态发生变化时，"
-                "保持视频画面的连续性、沉浸感和同步性。"
-            ),
-            "drawings_description": (
-                "图1为本发明实施例的Cave折幕视频处理系统结构示意图；图2为本发明实施例的基于显示面姿态的视频处理方法流程示意图；"
-                "图3为本发明实施例的显示面边界映射及空白补偿关系示意图。"
-            ),
-            "detailed_description": (
-                "下面结合附图对本发明的实施方式进行说明。在一个实施例中，Cave折幕空间包括固定显示面和至少一个可调显示面，"
-                "可调显示面可以为LED显示屏、投影幕、折叠屏或其他显示载体。姿态获取模块采集可调显示面的转动角度、边缘坐标、"
-                "法向量和尺寸参数，并将固定显示面和可调显示面统一到同一三维坐标系中。边界计算模块根据所述参数计算相邻显示面的"
-                "边界投影关系，判断当前姿态下是否存在空白区域、重叠区域或内容错位区域。内容映射模块依据边界投影关系确定视频帧"
-                "在各显示面上的裁切窗口和变换参数。补偿裁剪模块在外转造成空白区域时生成补偿画面，在内转造成重叠区域时执行裁剪、"
-                "融合或优先级显示。同步输出模块将处理后的视频内容分别输出至对应显示面，并在姿态变化超过阈值时重新计算映射关系。"
-                f"上述过程可结合预设姿态区间执行，所述姿态区间可以对应{', '.join(feature_names[:4])}等参数，以降低实时计算量并保证显示稳定。"
-            ),
-        }
-        abstract = (
-            f"本发明公开了{title}，该方法获取Cave折幕空间中可调显示面的姿态参数和多个显示面的空间边界参数，"
-            "确定相邻显示面之间的边界投影关系、重叠区域和/或空白区域，建立视频内容与各显示面的映射关系；"
-            "当显示面姿态发生变化时，对待显示视频内容进行裁剪、补偿和/或重排并同步输出至对应显示面。"
-            "本发明能够在折幕角度变化时保持多显示面视频画面的连续性和沉浸感。"
-        )
-        return {
-            "claims": {
-                "independent_claim": independent,
-                "dependent_claims": dependent_claims,
-            },
-            "description": description,
-            "abstract": abstract,
-        }
-
     async def _generate_patent_in_sections(
         self,
         service,
@@ -3682,8 +3563,8 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         ) -> Dict[str, Any]:
             """Run a writer-owned tool with progress events and a bounded wait.
 
-            Section drafting must keep moving: a single slow LLM/tool call should not
-            block the whole patent document from being written into the working DOCX.
+            Section drafting must be real: a slow or failed LLM/tool call should be
+            surfaced as a writer failure instead of being replaced by local content.
             """
             await _emit_tool_start(tool_name, parameters)
             try:
@@ -3708,10 +3589,10 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     event_callback(
                         "专利撰写 Agent",
                         "agent.thinking",
-                        f"⚠️ {tool_name} 调用超时或失败，继续使用分段兜底内容写入草稿",
+                        f"⚠️ {tool_name} 调用超时或失败，停止本轮撰写并等待 CEO 重新调度",
                         {
                             "agent_name": "专利撰写 Agent",
-                            "thought": "writer_tool_timeout_fallback",
+                            "thought": "writer_tool_failed",
                             "tool_name": tool_name,
                             "error": result["error"],
                         },
@@ -3729,7 +3610,24 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             description_data: Dict[str, Any] = {}
             drawings_data: List[Dict[str, Any]] = []
             abstract_text = ""
-            rule_based_draft = self._build_rule_based_patent_sections(context)
+            def _writer_failure_result(message: str, tool_result: Any = None) -> Dict[str, Any]:
+                return {
+                    "_agent_failed": True,
+                    "_incomplete_output": True,
+                    "_agent_error": message,
+                    "claims": {"independent_claim": "", "dependent_claims": []},
+                    "description": {
+                        "technical_field": "",
+                        "background_art": "",
+                        "summary_of_invention": "",
+                        "drawings_description": "",
+                        "detailed_description": "",
+                    },
+                    "abstract": "",
+                    "drawings": [],
+                    "docx_path": "",
+                    "tool_result": tool_result,
+                }
 
             async def _checkpoint_writer_draft(checkpoint: str) -> None:
                 """Persist current section-level content and refresh draft/working_draft.docx."""
@@ -3839,17 +3737,17 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 raw_response=claim_result.get("raw_response") if isinstance(claim_result, dict) else None,
             )
             if not claims_data.get("independent_claim"):
-                claims_data = dict(rule_based_draft["claims"])
                 if event_callback:
                     event_callback(
                         "专利撰写 Agent",
                         "agent.thinking",
-                        "🧾 claim_drafter 暂不可用，已基于需求分析补齐可审查的权利要求书",
+                        "❌ claim_drafter 未返回有效权利要求，本轮撰写失败",
                         {
                             "agent_name": "专利撰写 Agent",
-                            "thought": "rule_based_claims_fallback",
+                            "thought": "claim_drafter_empty",
                         },
                     )
+                return _writer_failure_result("claim_drafter 未返回有效权利要求，未使用本地规则兜底", claim_result)
             await _checkpoint_writer_draft("权利要求书")
 
             claims_text = json.dumps(claims_data, ensure_ascii=False)
@@ -3875,18 +3773,21 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 section_data = section_result.get("data", {}) if isinstance(section_result, dict) else {}
                 section_content = section_data.get("content", "") if isinstance(section_data, dict) else ""
                 if not section_content:
-                    section_content = str(rule_based_draft["description"].get(field_name, ""))
                     if event_callback:
                         event_callback(
                             "专利撰写 Agent",
                             "agent.thinking",
-                            f"📚 description_writer 暂不可用，已补齐{field_name}章节",
+                            f"❌ description_writer 未返回 {field_name} 章节，本轮撰写失败",
                             {
                                 "agent_name": "专利撰写 Agent",
-                                "thought": "rule_based_description_fallback",
+                                "thought": "description_writer_empty",
                                 "section": field_name,
                             },
                         )
+                    return _writer_failure_result(
+                        f"description_writer 未返回 {field_name} 章节，未使用本地规则兜底",
+                        section_result,
+                    )
                 if section_content:
                     description_data[field_name] = section_content
                     await _checkpoint_writer_draft(
@@ -3913,7 +3814,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             if not abstract_text:
                 summary = str(description_data.get("summary_of_invention") or "")
                 detailed = str(description_data.get("detailed_description") or "")
-                abstract_text = str(rule_based_draft.get("abstract") or summary or detailed or context.original_description)[:600]
+                abstract_text = str(summary or detailed)[:600]
                 await _checkpoint_writer_draft("说明书摘要")
 
             required_sections_present = all(
@@ -5479,53 +5380,23 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         return parsed if isinstance(parsed, dict) else {}
 
     def _build_fallback_retrieval_report(self, output_text: str) -> Dict[str, Any]:
-        """为检索报告构建兜底的默认结构"""
-        import re
-        
-        # 尝试从文本中提取专利号
-        patent_ids = re.findall(r'(CN\d{9}[A-Z]?|US\d{7,}[A-Z]?\d*|EP\d{7}[A-Z]?\d*)', output_text)
-        prior_art_refs = []
-        for pid in patent_ids[:10]:  # 最多取10个
-            prior_art_refs.append({
-                "title": "",
-                "reference_id": pid,
-                "source": "CNIPA" if pid.startswith("CN") else "USPTO" if pid.startswith("US") else "EPO",
-                "relevance": "medium",
-                "abstract": "",
-                "differences": "",
-                "url": self._build_patent_url(pid, ""),
-                "applicant": "",
-                "publication_date": "",
-                "similarity_score": 0,
-            })
-        
-        # 尝试从文本中提取关键词（查找引号中的中文内容）
-        keywords_cn = re.findall(r'[""「」]([^""「」]{2,20})[""「」]', output_text)
-        # 去重并取前10个
-        keywords_cn = list(dict.fromkeys(keywords_cn))[:10]
-        
+        """Build a failed retrieval report when real retrieval output cannot be parsed."""
         return {
-            "novelty_assessment": {
-                "rating": "unknown",
-                "rationale": "数据解析中，请参考原始输出",
-            },
-            "inventive_step_assessment": {
-                "rating": "unknown",
-                "rationale": "数据解析中，请参考原始输出",
-            },
-            "utility_assessment": {
-                "rating": "unknown",
-                "rationale": "数据解析中，请参考原始输出",
-            },
-            "prior_art_references": prior_art_refs,
-            "retrieval_keywords": keywords_cn if keywords_cn else ["待提取"],
-            "retrieval_databases": ["CNIPA", "USPTO", "Google Patents"],
+            "_agent_failed": True,
+            "_incomplete_output": True,
+            "_agent_error": "检索报告无法解析，未使用本地抽取或模拟兜底",
+            "novelty_assessment": {"rating": "unknown", "rationale": "真实检索报告不可用"},
+            "inventive_step_assessment": {"rating": "unknown", "rationale": "真实检索报告不可用"},
+            "utility_assessment": {"rating": "unknown", "rationale": "真实检索报告不可用"},
+            "prior_art_references": [],
+            "retrieval_keywords": [],
+            "retrieval_databases": [],
             "risk_factors": [],
             "writing_recommendations": [],
             "claim_strategy_recommendations": [],
             "overall_patentability": "unknown",
             "confidence": 0,
-            "_raw_output": output_text[:2000] if output_text else "",  # 保留原始输出供参考
+            "_raw_output": output_text[:2000] if output_text else "",
         }
 
     def _build_fallback_patent_draft(self, output_text: str) -> Dict[str, Any]:
@@ -5946,12 +5817,11 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         round_label: str = "",
         timeout_seconds: int = 150,
     ) -> tuple[str, Dict[str, Any]]:
-        """Run the quality reviewer with a bounded wait and deterministic fallback.
+        """Run the quality reviewer with a bounded wait.
 
-        Quality review is a gate, so it must always produce a structured result. If
-        the reviewer LLM/tool chain hangs, the local review still checks the draft
-        and drawings, then lets the normal remediation loop decide whether to fix
-        or finalize.
+        Quality review is a required gate. If the reviewer LLM/tool chain hangs,
+        return a structured non-approval result so the CEO remediation loop can
+        retry or stop for human attention. Local heuristics must not approve.
         """
         label = f"（{round_label}）" if round_label else ""
         try:
@@ -5980,17 +5850,17 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             reason = f"质量审查 Agent{label}执行异常：{str(exc)[:180]}"
 
         self._logger.warning(
-            f"{reason}; using deterministic quality review fallback",
+            f"{reason}; quality review marked as not approved",
             task_id=context.task_id,
         )
         if event_callback:
             event_callback(
                 "质量审查 Agent",
                 "agent.thinking",
-                f"⚠️ {reason}，启用本地质量门审查（含附图检查）",
+                f"⚠️ {reason}，质量审查未通过，等待 CEO 重新调度",
                 {
                     "agent_name": "质量审查 Agent",
-                    "thought": "deterministic_quality_review_fallback",
+                    "thought": "quality_review_unavailable",
                     "timeout_seconds": timeout_seconds,
                 },
             )

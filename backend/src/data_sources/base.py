@@ -70,17 +70,8 @@ class CNIPASource(DataSource):
         # TODO: 实现真实的CNIPA API调用
         # 注意: CNIPA有反爬机制，需要使用浏览器自动化
         # 参考: playwright 实现
-
-        # 模拟返回 - 生产环境替换为真实API调用
-        return [
-            PriorArtReference(
-                reference_id=f"CN{datetime.now().year}1234567A",
-                title="模拟专利: 基于AI的智能检索方法",
-                abstract="本发明公开了一种基于人工智能的智能专利检索方法...",
-                similarity_score=0.75,
-                source="cnipa",
-            )
-        ]
+        logger.warning("CNIPA真实检索尚未接入，跳过该数据源，不返回模拟结果")
+        return []
 
     async def get_details(self, reference_id: str) -> Optional[PriorArtReference]:
         await self._rate_limit()

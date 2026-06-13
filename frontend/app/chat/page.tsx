@@ -1794,7 +1794,12 @@ function ChatPageContent() {
 
         {/* Workflow Recommendation Banner */}
         {recommendStartWorkflow && activeConvId && !workflowTaskId && (
-        <div className="min-w-0 border-t border-hairline bg-green-50 px-4 py-3 sm:px-6 lg:px-8">
+        <div
+          className="relative z-30 min-w-0 border-t border-hairline bg-green-50 px-4 py-3 sm:px-6 lg:px-8"
+          style={{
+            marginBottom: `calc(${composerHeight}px + env(safe-area-inset-bottom))`,
+          }}
+        >
             <div className="flex w-full min-w-0 items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-green-600" />
@@ -1832,7 +1837,12 @@ function ChatPageContent() {
         )}
 
         {pendingConfirmation && !recommendStartWorkflow && !workflowTaskId && (
-          <div className="z-10 min-w-0 border-t border-amber-200/80 bg-amber-50/95 px-4 py-3 shadow-[0_-12px_30px_rgba(0,30,43,0.08)] backdrop-blur sm:px-6 lg:px-8">
+          <div
+            className="relative z-30 min-w-0 border-t border-amber-200/80 bg-amber-50/95 px-4 py-3 shadow-[0_-12px_30px_rgba(0,30,43,0.08)] backdrop-blur sm:px-6 lg:px-8"
+            style={{
+              marginBottom: `calc(${composerHeight}px + env(safe-area-inset-bottom))`,
+            }}
+          >
             <div className="w-full min-w-0">
               <div className="rounded-2xl border border-amber-200 bg-white px-4 py-3 shadow-sm" role="group" aria-label="待确认的问题">
                 <p className="mb-3 flex items-start gap-2 text-sm font-semibold text-amber-900">

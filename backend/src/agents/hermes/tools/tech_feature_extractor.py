@@ -56,57 +56,6 @@ def _extract_json_from_response(text: str) -> Dict[str, Any]:
     return {}
 
 
-def _fallback_feature_extraction(tech_description: str) -> Dict[str, Any]:
-    """Rule-based fallback for the Cave folded-screen disclosure."""
-    text = tech_description or ""
-    cave_related = any(keyword in text for keyword in ("Cave", "折幕", "沉浸", "显示面", "视频"))
-    if cave_related:
-        features = [
-            {
-                "name": "沉浸式展示空间的统一三维坐标建模",
-                "description": "对固定显示面和姿态可调显示面建立统一空间坐标，并获取各显示面的边界坐标。",
-                "is_innovative": True,
-                "technical_significance": "为后续显示间隙、遮挡区域和内容映射参数计算提供几何基础。",
-            },
-            {
-                "name": "姿态-内容-补偿联合映射关系",
-                "description": "将观看参考点、显示面目标姿态、实际姿态反馈、内容映射矩阵和补偿策略关联。",
-                "is_innovative": True,
-                "technical_significance": "使显示姿态变化与画面连续性补偿联动执行。",
-            },
-            {
-                "name": "外转空白区域补偿",
-                "description": "根据相邻显示面的边界投影关系确定未覆盖区域或显示间隙，并生成补偿显示数据。",
-                "is_innovative": True,
-                "technical_significance": "减少折幕姿态变化造成的画面断裂和空白。",
-            },
-            {
-                "name": "内转遮挡区域裁剪与重排",
-                "description": "根据显示面深度顺序和重叠投影生成可见区域掩膜，对视频内容进行裁剪、缩放、重排或重映射。",
-                "is_innovative": True,
-                "technical_significance": "避免姿态内转时重复显示或重要内容被遮挡。",
-            },
-            {
-                "name": "多显示面同步输出",
-                "description": "按统一时间戳将重构内容、补偿内容和重映射内容同步输出至各显示面。",
-                "is_innovative": False,
-                "technical_significance": "保障多屏播放时序一致性。",
-            },
-        ]
-        return {
-            "features": features,
-            "core_innovation": "围绕Cave折幕显示姿态变化，联动计算显示面边界、内容映射、空白补偿和遮挡裁剪，以保持沉浸式多屏视频画面连续。",
-            "technical_problem": "姿态可调显示面运动后产生显示间隙、遮挡重叠、内容错位和多显示面输出不同步的问题。",
-            "beneficial_effects": ["保持折幕视频画面连续", "降低接缝错位和遮挡重复", "适配不同展示姿态和观看参考点"],
-        }
-    return {
-        "features": [],
-        "core_innovation": text[:300],
-        "technical_problem": "需结合技术描述进一步确认。",
-        "beneficial_effects": ["提高处理自动化程度"],
-    }
-
-
 class TechFeatureExtractorTool(HermesTool):
     """技术特征提取工具"""
     name = "tech_feature_extractor"
@@ -160,11 +109,11 @@ class TechFeatureExtractorTool(HermesTool):
             )
             
         except Exception as e:
-            logger.warning(f"Tech feature extraction LLM failed, using fallback: {e}")
+            logger.warning(f"Tech feature extraction LLM failed: {e}")
             return make_tool_output(
                 tool_name=self.name,
-                data=_fallback_feature_extraction(tech_description),
-                success=True,
-                error=str(e),
+                data={},
+                success=False,
+                error=f"Tech feature extraction requires a real LLM result; no rule fallback was used: {e}",
                 start_time=start_time,
             )

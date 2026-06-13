@@ -6,6 +6,7 @@ import asyncio
 import time
 import uuid
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, status, UploadFile, File
@@ -72,6 +73,14 @@ from .schemas import WorkflowEventResponse, OrgNodeResponse
 
 
 _EXPORTS_ROOT = Path(__file__).resolve().parents[2] / "exports"
+
+
+def _get_hermes_agent_version() -> str | None:
+    """Return the installed hermes-agent package version without hardcoding UI/API data."""
+    try:
+        return version("hermes-agent")
+    except PackageNotFoundError:
+        return None
 
 
 def _repair_truncated_json(json_str: str) -> dict | None:
@@ -2547,9 +2556,6 @@ def _read_config_from_env_file(env_path: str) -> SystemConfigResponse:
     llm_active = _get_env_value(values, "LLM_ACTIVE_PROVIDER") or "openai"
     img_active = _get_env_value(values, "IMAGE_GEN_ACTIVE_PROVIDER") or "azure_aoai"
 
-    # 判断是否有任何生图供应商配置了 key
-    img_configured = any(p.configured for p in img_providers.values())
-
     return SystemConfigResponse(
         text_llm=ModelConfigSectionResponse(
             active_provider=llm_active,
@@ -2559,7 +2565,7 @@ def _read_config_from_env_file(env_path: str) -> SystemConfigResponse:
             active_provider=img_active,
             providers=img_providers,
         ),
-        image_gen_fallback_to_llm=not img_configured,
+        image_gen_fallback_to_llm=False,
     )
 
 
@@ -3626,7 +3632,7 @@ async def get_hermes_agent_info(agent_id: str) -> dict:
         "max_tokens": config.max_tokens,
         "enabled_toolsets": config.enabled_toolsets,
         "enabled_tools": config.enabled_tools,
-        "hermes_agent_version": "0.15.1",
+        "hermes_agent_version": _get_hermes_agent_version(),
         "capabilities": {
             "tool_calling": True,
             "memory_persistent": True,
