@@ -161,7 +161,7 @@ def add_body_paragraph(
     """Add a body text paragraph formatted according to the profile."""
     from docx.shared import Cm
     para = doc.add_paragraph()
-    run = para.add_run(text)
+    run = para.add_run(_strip_transcript_artifacts(text))
     typo = profile.typography
     pfmt = profile.paragraph_format
     _set_run_font(run, typo.body_font_name, typo.body_font_size_pt, bold)
@@ -174,7 +174,7 @@ def add_body_paragraph(
 def add_section_heading(doc, text: str, profile: _Profile) -> None:
     from docx.shared import Cm
     para = doc.add_paragraph()
-    run = para.add_run(text)
+    run = para.add_run(_strip_transcript_artifacts(text))
     typo = profile.typography
     pfmt = profile.paragraph_format
     _set_run_font(run, typo.section_heading_font_name, typo.section_heading_font_size_pt, bold=typo.section_heading_bold)
@@ -243,7 +243,7 @@ def _add_figure_picture(doc, fig_info: Dict[str, str], profile: _Profile, width_
         from docx.shared import Inches as _Inches
 
         figure_number = _coerce_text(fig_info.get("figure_number")) or ""
-        title = _coerce_text(fig_info.get("title")) or "专利附图"
+        title = _normalize_figure_title(_coerce_text(fig_info.get("title")), figure_number) or "专利附图"
         caption = f"{figure_number} {title}".strip()
         add_body_paragraph(doc, caption, profile, first_line_indent=False, bold=True)
         doc.add_picture(fig_info["path"], width=_Inches(width_inches))
@@ -305,9 +305,34 @@ def _coerce_text(value: Any) -> str:
     return str(value)
 
 
+def _strip_transcript_artifacts(text: Any) -> str:
+    """Remove transcript speaker/timestamp noise from patent document text."""
+    text = _coerce_text(text)
+    if not text:
+        return ""
+    text = re.sub(
+        r"[\u4e00-\u9fa5A-Za-z0-9_·（）()、\s]{1,30}[（(]\d{2}:\d{2}:\d{2}[）)]\s*[：:]?\s*",
+        "",
+        text,
+    )
+    text = re.sub(r"[（(]?\d{2}:\d{2}:\d{2}[）)]\s*[：:]?\s*", "", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip()
+
+
+def _normalize_figure_title(title: Any, figure_number: str = "") -> str:
+    """Keep figure captions from becoming '图1 图1 ...'."""
+    title_text = _strip_transcript_artifacts(title)
+    figure_number = _coerce_text(figure_number).strip()
+    if figure_number:
+        title_text = re.sub(rf"^{re.escape(figure_number)}\s*[:：、.．-]?\s*", "", title_text).strip()
+    title_text = re.sub(r"^图\s*\d+\s*[:：、.．-]?\s*", "", title_text).strip()
+    return title_text
+
+
 def _strip_markdown(text: Any) -> str:
     """Remove Markdown formatting from LLM-generated text for clean docx output."""
-    text = _coerce_text(text)
+    text = _strip_transcript_artifacts(text)
     if not text:
         return text
     lines = text.split("\n")
@@ -445,8 +470,11 @@ def _normalize_provided_figures(drawings: List[Dict[str, Any]]) -> List[Dict[str
         figures.append(
             {
                 "path": str(path),
-                "title": _coerce_text(drawing.get("title")) or f"专利附图{index}",
                 "figure_number": _coerce_text(drawing.get("figure_number")) or f"图{index}",
+                "title": _normalize_figure_title(
+                    drawing.get("title"),
+                    _coerce_text(drawing.get("figure_number")) or f"图{index}",
+                ) or f"专利附图{index}",
                 "description": _coerce_text(drawing.get("description")),
             }
         )
@@ -497,6 +525,8 @@ class PatentDocxGeneratorTool:
         task_id: str = "",
         tech_description: str = "",
         drawings: Optional[List[Dict[str, Any]]] = None,
+        output_stage: str = "final",
+        file_name: str = "",
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """
@@ -535,7 +565,9 @@ class PatentDocxGeneratorTool:
             margins = _get_margins_for_section("摘要", profile)
             _set_section_margins(first_section, margins)
 
-            title = _coerce_text(title) or "专利申请文件"
+            title = _strip_transcript_artifacts(title) or "专利申请文件"
+            if re.search(r"这样我开个头|任\s*$|纪烜晓|双证律师|^\s*(这个东西|那先写|那写吧)", title):
+                title = "一种基于Cave折幕视频的处理方法及系统"
             abstract = _coerce_text(abstract)
 
             # ── 说明书摘要 ── (仅在有内容时生成)
@@ -543,9 +575,9 @@ class PatentDocxGeneratorTool:
                 add_document_heading(doc, "说明书摘要", profile)
                 add_body_paragraph(doc, _strip_markdown(abstract), profile)
 
+            # DOCX 生成器只负责插入撰写/附图阶段已经生成的图片。
+            # 自动生图由 patent_drawing_generator 负责，避免在每次工作草稿刷新时重复触发。
             figure_paths = _normalize_provided_figures(drawings or [])
-            if not figure_paths and tech_description:
-                figure_paths = _generate_patent_figures(tech_description, task_id)
             figures_by_number = {
                 fig["figure_number"]: fig
                 for fig in figure_paths
@@ -687,7 +719,9 @@ class PatentDocxGeneratorTool:
                 from docx.shared import Inches as _Inches
                 for fig_info in figure_paths:
                     try:
-                        fig_title = f"{fig_info.get('figure_number', '')}: {fig_info.get('title', '')}"
+                        figure_number = _coerce_text(fig_info.get("figure_number"))
+                        figure_title = _normalize_figure_title(fig_info.get("title"), figure_number)
+                        fig_title = f"{figure_number} {figure_title}".strip()
                         add_body_paragraph(doc, fig_title, profile, first_line_indent=False, bold=True)
                         doc.add_picture(fig_info["path"], width=_Inches(5.0))
                         doc.add_paragraph("")
@@ -696,11 +730,18 @@ class PatentDocxGeneratorTool:
 
             # ── 保存文件 ──
             backend_dir = Path(__file__).resolve().parent.parent.parent.parent.parent
-            export_dir = backend_dir / "exports" / (task_id or "default") / "final"
+            stage = "draft" if str(output_stage or "").lower() in {"draft", "working", "working_draft"} else "final"
+            export_dir = backend_dir / "exports" / (task_id or "default") / stage
             export_dir.mkdir(parents=True, exist_ok=True)
 
             safe_title = re.sub(r'[\\/:*?"<>|]', '', title)[:50] or "专利申请书"
-            file_path = export_dir / f"{safe_title}.docx"
+            safe_file_name = re.sub(r'[\\/:*?"<>|]', '', file_name).strip()
+            if safe_file_name:
+                if not safe_file_name.lower().endswith(".docx"):
+                    safe_file_name = f"{safe_file_name}.docx"
+                file_path = export_dir / safe_file_name
+            else:
+                file_path = export_dir / f"{safe_title}.docx"
             doc.save(str(file_path))
 
             result = {
@@ -710,6 +751,7 @@ class PatentDocxGeneratorTool:
                 "figures": figure_paths,
                 "message": f"专利申请文件已生成：{file_path}",
                 "sections": ["说明书摘要", "摘要附图", "权利要求书", "说明书", "说明书附图"],
+                "output_stage": stage,
             }
 
             # 尝试 PDF 转换（可选）
