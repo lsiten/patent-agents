@@ -494,6 +494,10 @@ async def restore_stores_from_db() -> None:
 
     # 恢复工作流
     restored_workflows = 0
+    zombie_workflows = 0
+    from src.core.workflow_engine import WorkflowState
+    from datetime import datetime, timezone
+    
     try:
         for key, value in await store.load_all("workflows"):
             try:
@@ -509,8 +513,33 @@ async def restore_stores_from_db() -> None:
                     # 恢复标题
                     ctx.title = value.get("title", "未命名专利")
                     # 恢复状态
-                    from src.core.workflow_engine import WorkflowState
-                    ctx.current_phase = WorkflowState(value.get("current_state", "initialized"))
+                    current_state = value.get("current_state", "initialized")
+                    
+                    # 检测僵尸工作流：如果工作流在执行阶段（非终端状态）且长时间未更新
+                    updated_at_str = value.get("updated_at", "")
+                    is_zombie = False
+                    if current_state not in ["initialized", "completed", "failed", "cancelled"]:
+                        try:
+                            if updated_at_str:
+                                updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+                                now = datetime.now(timezone.utc)
+                                # 如果超过30分钟没有更新，认为是僵尸工作流
+                                if (now - updated_at).total_seconds() > 1800:
+                                    is_zombie = True
+                            else:
+                                # 如果没有更新时间，且状态是执行中，也认为是僵尸
+                                is_zombie = True
+                        except Exception:
+                            is_zombie = True
+                    
+                    if is_zombie:
+                        # 将僵尸工作流标记为失败
+                        ctx.current_phase = WorkflowState.FAILED
+                        zombie_workflows += 1
+                        logger.warning(f"检测到僵尸工作流，已标记为失败: {key}, 状态: {current_state}")
+                    else:
+                        ctx.current_phase = WorkflowState(current_state)
+                    
                     ctx.iteration_count = value.get("iteration_count", 0)
                     # 恢复输出
                     outputs = value.get("outputs", {})
@@ -526,6 +555,9 @@ async def restore_stores_from_db() -> None:
                 logger.warning(f"恢复工作流 {key} 失败: {e}")
     except Exception as e:
         logger.warning(f"恢复工作流列表失败: {e}")
+    
+    if zombie_workflows > 0:
+        logger.warning(f"共检测到 {zombie_workflows} 个僵尸工作流，已自动标记为失败")
 
     # 恢复组织架构
     try:
@@ -1928,6 +1960,8 @@ async def restart_workflow(task_id: str, background_tasks: BackgroundTasks):
         async def agent_event_callback(event: Dict[str, Any]):
             event = dict(event)
             event.setdefault("task_id", task_id)
+            # 使用 task_id 作为 conversation_id（工作流场景）
+            conv_id = task_id
             event.setdefault("conversation_id", conv_id)
             event.setdefault("timestamp", datetime.now().isoformat())
             message = _agent_work_message(conv_id, event)
