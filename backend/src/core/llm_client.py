@@ -132,10 +132,10 @@ class BaseLLMClient(ABC):
 class OpenAIClient(BaseLLMClient):
     """OpenAI 客户端"""
 
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or settings.llm.openai_api_key
         self.base_url = base_url or settings.llm.openai_base_url
-        self.default_model = settings.llm.openai_model
+        self.default_model = model or settings.llm.openai_model
         self.default_temperature = settings.llm.temperature
         self.default_max_tokens = settings.llm.max_tokens
         self.timeout = settings.llm.timeout
@@ -597,7 +597,19 @@ class LLMClientFactory:
         """获取 LLM 客户端实例"""
         if provider not in cls._instances:
             if provider == LLMProvider.OPENAI:
-                cls._instances[provider] = OpenAIClient()
+                # 检查是否需要使用星火配置
+                active_provider = settings.llm.active_provider
+                if active_provider in ("spark", "openai-spark"):
+                    # 使用星火配置初始化 OpenAI 客户端
+                    provider_config = settings.llm.get_provider_config(active_provider)
+                    cls._instances[provider] = OpenAIClient(
+                        api_key=provider_config.get("api_key"),
+                        base_url=provider_config.get("base_url"),
+                        model=provider_config.get("model_id"),
+                    )
+                    logger.info(f"OpenAI client initialized with Spark config: {provider_config.get('base_url')}, model: {provider_config.get('model_id')}")
+                else:
+                    cls._instances[provider] = OpenAIClient()
             elif provider == LLMProvider.ANTHROPIC:
                 cls._instances[provider] = AnthropicClient()
             else:
@@ -609,12 +621,23 @@ class LLMClientFactory:
     def get_fallback_chain(cls) -> List[BaseLLMClient]:
         """获取 Fallback 客户端链"""
         clients = []
-        for provider_name in settings.llm.fallback_order:
+        
+        # 首先根据 active_provider 获取主客户端
+        active_provider = settings.llm.active_provider
+        if active_provider in ("spark", "openai-spark"):
+            # 星火使用 OpenAI 兼容格式
             try:
-                provider = LLMProvider(provider_name)
-                clients.append(cls.get_client(provider))
-            except (ValueError, Exception) as e:
-                logger.warning("Skipping fallback provider", provider=provider_name, error=str(e))
+                clients.append(cls.get_client(LLMProvider.OPENAI))
+            except Exception as e:
+                logger.warning("Failed to create Spark client", error=str(e))
+        else:
+            # 使用 fallback_order 配置
+            for provider_name in settings.llm.fallback_order:
+                try:
+                    provider = LLMProvider(provider_name)
+                    clients.append(cls.get_client(provider))
+                except (ValueError, Exception) as e:
+                    logger.warning("Skipping fallback provider", provider=provider_name, error=str(e))
         return clients
 
     @classmethod

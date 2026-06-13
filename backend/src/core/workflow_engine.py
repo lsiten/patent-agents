@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 专利申请工作流编排引擎
 协调 CEO Agent 与各专业 Agent 完成端到端专利申请流程
@@ -5,6 +6,7 @@
 架构：CEO Agent 通过 dispatch_specialist 工具动态调度各专业 Agent，
 本引擎仅负责状态管理、进度追踪和前端 API 兼容。
 """
+from pathlib import Path as _Path
 import asyncio
 import json
 import re
@@ -707,23 +709,27 @@ class PatentWorkflowEngine:
                             f"⚠️ 质量审查发现问题，启动修正迭代（第{context.iteration_count}轮）",
                             {"agent_name": "CEO Agent", "thought": "质量审查未通过，需要修正"})
 
-                    if context.iteration_count > safety_limit:
+                    # 超过最大迭代次数（3次）后，不再继续自动修正，需要用户补充信息
+                    if context.iteration_count >= max_iterations:
                         self._logger.warning(
-                            f"Automatic remediation exceeded safety hint ({safety_limit}); "
-                            "continuing because patent quality gate must pass before completion",
+                            f"Automatic remediation exceeded maximum iterations ({max_iterations}); "
+                            "entering user input required state",
                             task_id=context.task_id,
                         )
                         if event_callback:
                             event_callback(
                                 "CEO Agent",
                                 "agent.thinking",
-                                f"🔁 已连续自动修正 {safety_limit} 轮仍未合格，继续由 CEO 调度补充和复审",
+                                f"⏹️ 已连续自动修正 {max_iterations} 轮仍未通过质量检测，请补充信息后继续",
                                 {
                                     "agent_name": "CEO Agent",
-                                    "thought": "auto_remediation_continue_until_pass",
+                                    "thought": "auto_remediation_limit_reached",
                                     "iteration_count": context.iteration_count,
+                                    "max_iterations": max_iterations,
                                 },
                             )
+                        # 设置为需要用户输入状态
+                        remediation_path = "NEEDS_USER_INPUT"
 
                     if remediation_path == "TERMINAL_FAILURE":
                         break
@@ -734,16 +740,52 @@ class PatentWorkflowEngine:
                             remediation = context.metadata.get("quality_remediation", {})
                             missing_information = remediation.get("missing_information", [])
                             detail = "；".join(str(item) for item in missing_information) if missing_information else "缺少额外信息"
-                            event_callback(
-                                "CEO Agent",
-                                "agent.thinking",
-                                f"🔁 质量审查指出缺少信息，默认由 CEO 调度自动补充并复审：{detail}",
-                                {
-                                    "agent_name": "CEO Agent",
-                                    "thought": "auto_remediation_missing_information",
-                                    "missing_information": missing_information,
-                                },
-                            )
+                            
+                            # 判断是否是因为超过迭代次数进入的用户输入状态
+                            if context.iteration_count >= max_iterations:
+                                event_callback(
+                                    "CEO Agent",
+                                    "agent.thinking",
+                                    f"⏹️ 已连续自动修正 {max_iterations} 轮仍未通过质量检测，请补充以下信息后继续：{detail}",
+                                    {
+                                        "agent_name": "CEO Agent",
+                                        "thought": "auto_remediation_limit_reached_pause",
+                                        "missing_information": missing_information,
+                                        "iteration_count": context.iteration_count,
+                                        "max_iterations": max_iterations,
+                                    },
+                                )
+                            else:
+                                event_callback(
+                                    "CEO Agent",
+                                    "agent.thinking",
+                                    f"🔁 质量审查指出缺少信息，默认由 CEO 调度自动补充并复审：{detail}",
+                                    {
+                                        "agent_name": "CEO Agent",
+                                        "thought": "auto_remediation_missing_information",
+                                        "missing_information": missing_information,
+                                    },
+                                )
+                        
+                        # 如果是超过最大迭代次数，暂停工作流等待用户输入
+                        if context.iteration_count >= max_iterations:
+                            context.is_paused = True
+                            context.current_phase = WorkflowState.PAUSED
+                            await self._publish_progress_event(context, WorkflowState.PAUSED, "paused")
+                            if event_callback:
+                                event_callback(
+                                    "CEO Agent",
+                                    "workflow.paused",
+                                    f"工作流已暂停，等待用户补充信息",
+                                    {
+                                        "agent_name": "CEO Agent",
+                                        "thought": "workflow_paused_for_user_input",
+                                        "missing_information": context.metadata.get("quality_remediation", {}).get("missing_information", []),
+                                    },
+                                )
+                            # 跳出循环，结束工作流
+                            break
+                        
                         await self._execute_remediation_phase(
                             context,
                             self._resolve_remediation_resume_phase(remediation_path),
@@ -951,31 +993,68 @@ class PatentWorkflowEngine:
                     f"task_id={context.task_id}, iteration_count={context.iteration_count}",
                     task_id=context.task_id,
                 )
+                
+                # 详细分析失败原因
+                failure_details = self._analyze_workflow_failure(context)
+                
                 if event_callback:
-                    draft_failed = (
-                        not context.patent_draft
-                        or not isinstance(context.patent_draft, dict)
-                        or context.patent_draft.get("_agent_failed") is True
-                        or context.patent_draft.get("_incomplete_output") is True
-                    )
-                    review_failed = (
-                        not context.review_report
-                        or not isinstance(context.review_report, dict)
-                        or context.review_report.get("_agent_failed") is True
-                        or self._check_review_needs_revision(context.review_report or {})
-                    )
-                    reason = []
-                    if draft_failed:
-                        reason.append("撰写 Agent 未生成有效内容")
-                    if review_failed:
-                        reason.append("审查 Agent 发现未解决的关键问题")
-                    msg = f"❌ 流程未能完成: {'; '.join(reason) or '关键检查未通过'}"
+                    # 发布主错误信息
+                    msg = f"❌ 流程未能完成: {failure_details['main_reason']}"
                     event_callback("CEO Agent", "agent.thinking", msg, {
                         "agent_name": "CEO Agent",
                         "thought": "workflow_failed_unresolved_critical_issues",
+                        "failure_phase": failure_details["phase"],
+                        "failure_reason": failure_details["main_reason"],
                     })
+                    
+                    # 发布详细的失败分析
+                    if failure_details["phase"]:
+                        event_callback("CEO Agent", "agent.thinking", 
+                            f"📍 失败阶段: {failure_details['phase_display']}", {
+                                "agent_name": "CEO Agent",
+                                "thought": "failure_phase",
+                                "phase": failure_details["phase"],
+                                "phase_display": failure_details["phase_display"],
+                            })
+                    
+                    # 发布具体问题列表
+                    for issue in failure_details["issues"]:
+                        event_callback("CEO Agent", "agent.thinking", 
+                            f"⚠️ {issue['message']}", {
+                                "agent_name": "CEO Agent",
+                                "thought": "failure_issue",
+                                "issue_type": issue["type"],
+                                "severity": issue["severity"],
+                            })
+                    
+                    # 发布优化建议
+                    event_callback("CEO Agent", "agent.thinking", 
+                        "💡 优化建议:", {
+                            "agent_name": "CEO Agent",
+                            "thought": "optimization_tips_start",
+                        })
+                    for tip in failure_details["suggestions"]:
+                        event_callback("CEO Agent", "agent.thinking", 
+                            f"   • {tip}", {
+                                "agent_name": "CEO Agent",
+                                "thought": "optimization_tip",
+                            })
+                
                 context.current_phase = WorkflowState.FAILED
                 await self._publish_progress_event(context, WorkflowState.FAILED, "failed")
+                
+                # 发布详细的失败事件
+                await emit_agent_work_event({
+                    "event_type": "workflow.failed",
+                    "task_id": context.task_id,
+                    "phase": failure_details["phase"],
+                    "phase_display": failure_details["phase_display"],
+                    "main_reason": failure_details["main_reason"],
+                    "issues": failure_details["issues"],
+                    "suggestions": failure_details["suggestions"],
+                    "status": "failed",
+                })
+                
                 self._logger.warning("Workflow ended in FAILED state (unresolved critical issues)", task_id=context.task_id)
                 return context
 
@@ -2503,6 +2582,192 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         # 简单比较: 错误信息的前 100 个字符相同
         return writer_err[:100] == reviewer_err[:100]
 
+    def _analyze_workflow_failure(self, context: WorkflowContext) -> Dict[str, Any]:
+        """
+        分析工作流失败的详细原因，返回失败阶段、具体问题和优化建议。
+        
+        Returns:
+            Dict 包含:
+                - phase: 失败阶段标识
+                - phase_display: 阶段显示名称
+                - main_reason: 主要失败原因
+                - issues: 具体问题列表 [{"type": str, "message": str, "severity": str}]
+                - suggestions: 优化建议列表 [str]
+        """
+        issues = []
+        suggestions = []
+        phase = None
+        phase_display = ""
+        
+        # 检查专利草稿问题
+        draft = context.patent_draft
+        draft_is_empty = False
+        
+        if not draft or not isinstance(draft, dict):
+            issues.append({
+                "type": "draft_missing",
+                "message": "专利草稿为空或格式不正确",
+                "severity": "critical"
+            })
+            draft_is_empty = True
+        else:
+            # 检查独立权利要求
+            claims = draft.get("claims", {})
+            if not claims.get("independent_claim", "").strip():
+                issues.append({
+                    "type": "independent_claim_missing",
+                    "message": "独立权利要求为空",
+                    "severity": "critical"
+                })
+                draft_is_empty = True
+            
+            # 检查从属权利要求
+            dependent_claims = claims.get("dependent_claims", [])
+            if isinstance(dependent_claims, list):
+                has_valid_dependent = any(
+                    isinstance(c, str) and c.strip() for c in dependent_claims
+                )
+            elif isinstance(dependent_claims, str):
+                has_valid_dependent = bool(dependent_claims.strip())
+            else:
+                has_valid_dependent = False
+            
+            if not has_valid_dependent:
+                issues.append({
+                    "type": "dependent_claims_missing",
+                    "message": "从属权利要求为空",
+                    "severity": "high"
+                })
+            
+            # 检查说明书
+            description = draft.get("description", {})
+            if isinstance(description, dict):
+                required_sections = ["technical_field", "background_art", "summary_of_invention", "detailed_description"]
+                for section in required_sections:
+                    if not description.get(section, "").strip():
+                        issues.append({
+                            "type": f"description_{section}_missing",
+                            "message": f"说明书{self._get_description_section_name(section)}部分为空",
+                            "severity": "high"
+                        })
+                        draft_is_empty = True
+            
+            # 检查摘要
+            if not draft.get("abstract", "").strip():
+                issues.append({
+                    "type": "abstract_missing",
+                    "message": "摘要为空",
+                    "severity": "medium"
+                })
+            
+            # 检查 Agent 执行失败
+            if draft.get("_agent_failed") is True:
+                agent_error = draft.get("_agent_error", "未知错误")
+                issues.append({
+                    "type": "agent_failed",
+                    "message": f"专利撰写 Agent 执行失败: {agent_error}",
+                    "severity": "critical"
+                })
+        
+        # 检查审查报告问题
+        review = context.review_report
+        if not review or not isinstance(review, dict):
+            issues.append({
+                "type": "review_missing",
+                "message": "审查报告为空或格式不正确",
+                "severity": "high"
+            })
+        else:
+            if review.get("_agent_failed") is True:
+                agent_error = review.get("_agent_error", "未知错误")
+                issues.append({
+                    "type": "review_agent_failed",
+                    "message": f"质量审查 Agent 执行失败: {agent_error}",
+                    "severity": "critical"
+                })
+            
+            # 检查审查建议
+            if self._check_review_needs_revision(review):
+                recommendation = review.get("recommendation", "")
+                if recommendation == "reject":
+                    issues.append({
+                        "type": "review_reject",
+                        "message": f"审查建议拒绝: {review.get('review_summary', {}).get('reviewer_notes', '')}",
+                        "severity": "critical"
+                    })
+                elif recommendation == "revise":
+                    issues.append({
+                        "type": "review_revise",
+                        "message": f"审查建议修改: {review.get('review_summary', {}).get('reviewer_notes', '')}",
+                        "severity": "high"
+                    })
+        
+        # 判断失败阶段
+        if draft_is_empty or (isinstance(draft, dict) and draft.get("_agent_failed")):
+            phase = "patent_writing"
+            phase_display = "专利撰写阶段"
+        elif review and isinstance(review, dict) and review.get("_agent_failed"):
+            phase = "quality_review"
+            phase_display = "质量审查阶段"
+        elif self._check_review_needs_revision(review or {}):
+            phase = "quality_review"
+            phase_display = "质量审查阶段"
+        else:
+            phase = "final_check"
+            phase_display = "最终检查阶段"
+        
+        # 生成主要原因
+        if draft_is_empty:
+            main_reason = "专利撰写阶段未生成有效内容"
+        elif isinstance(draft, dict) and draft.get("_agent_failed"):
+            main_reason = "专利撰写 Agent 执行失败"
+        elif self._check_review_needs_revision(review or {}):
+            main_reason = "质量审查未通过，存在未解决的关键问题"
+        else:
+            main_reason = "最终检查发现关键问题未解决"
+        
+        # 生成优化建议
+        if draft_is_empty:
+            suggestions.append("请提供更详细的技术描述，包括技术方案、创新点、实施方式等")
+            suggestions.append("检查输入内容是否完整，避免过于简短的描述")
+            suggestions.append("确保技术描述包含足够的技术细节，以便生成有效的专利权利要求")
+        
+        if isinstance(draft, dict) and draft.get("_agent_failed"):
+            suggestions.append("检查 LLM 服务是否正常运行")
+            suggestions.append("验证 API 密钥和配置是否正确")
+            suggestions.append("稍后重试，可能是临时的服务问题")
+        
+        if self._check_review_needs_revision(review or {}):
+            suggestions.append("根据审查意见修改专利申请文件")
+            suggestions.append("关注审查报告中标记的高优先级问题")
+            suggestions.append("重新提交进行审查")
+        
+        if context.iteration_count > 0:
+            suggestions.append(f"已尝试 {context.iteration_count} 轮自动修正，建议手动检查输入内容")
+        
+        # 通用建议
+        suggestions.append("确保输入的技术描述清晰、完整、具有创新性")
+        suggestions.append("检查网络连接和服务状态")
+        
+        return {
+            "phase": phase,
+            "phase_display": phase_display,
+            "main_reason": main_reason,
+            "issues": issues,
+            "suggestions": suggestions,
+        }
+    
+    def _get_description_section_name(self, section_key: str) -> str:
+        """获取说明书章节的中文名称"""
+        mapping = {
+            "technical_field": "技术领域",
+            "background_art": "背景技术",
+            "summary_of_invention": "发明内容",
+            "detailed_description": "具体实施方式",
+            "drawings_description": "附图说明",
+        }
+        return mapping.get(section_key, section_key)
+
     def _build_revision_prompt(self, context: WorkflowContext, review_issues: List[str]) -> str:
         """构建修正撰写的prompt，包含审查问题和原有草稿"""
         draft_summary = json.dumps(context.patent_draft, ensure_ascii=False)[:2000]
@@ -2816,13 +3081,49 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 
         search_params = {"query": query, "sources": sources, "limit": "10"}
         await _emit_tool_start("patent_search", search_params)
-        search_result = await PatentSearchTool().execute(**search_params)
+        
+        # 添加超时限制，避免长时间等待
+        try:
+            search_result = await asyncio.wait_for(
+                PatentSearchTool().execute(**search_params),
+                timeout=60.0  # 60秒超时
+            )
+        except asyncio.TimeoutError:
+            self._logger.error("Patent search timed out after 60 seconds", task_id=context.task_id)
+            await _emit_tool_end(
+                "patent_search",
+                search_params,
+                {"error": "检索超时，请检查LLM服务是否可用"},
+                False,
+            )
+            return {
+                "_agent_failed": True,
+                "_agent_error": "专利检索工具调用超时（60秒），请检查LLM服务是否正常运行",
+                "error_phase": "检索分析",
+                "error_reason": "LLM服务响应超时",
+                "suggestion": "请检查本地LLM代理服务(http://localhost:8080)是否运行，或切换到在线API",
+            }
+        
+        search_success = bool(search_result.get("success", True)) if isinstance(search_result, dict) else True
         await _emit_tool_end(
             "patent_search",
             search_params,
             search_result,
-            bool(search_result.get("success", True)) if isinstance(search_result, dict) else True,
+            search_success,
         )
+        
+        # 如果专利检索失败，立即返回错误，不再继续后续工具调用
+        if not search_success:
+            error_msg = search_result.get("error", "专利检索失败") if isinstance(search_result, dict) else "专利检索失败"
+            self._logger.error(f"Patent search failed: {error_msg}", task_id=context.task_id)
+            return {
+                "_agent_failed": True,
+                "_agent_error": f"专利检索工具调用失败：{error_msg}",
+                "error_phase": "检索分析",
+                "error_reason": error_msg,
+                "suggestion": "请检查网络连接或稍后重试，或尝试调整检索关键词",
+            }
+        
         search_data = search_result.get("data", {}) if isinstance(search_result, dict) else {}
         prior_art_refs = search_data.get("search_results", []) if isinstance(search_data, dict) else []
         prior_art_text = json.dumps(prior_art_refs, ensure_ascii=False)[:6000] or "未检索到明确对比文件"
