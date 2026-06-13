@@ -61,8 +61,8 @@ function formatTime(timestamp: string): string {
 
 function DispatchEntry({ entry }: { entry: AgentLogEntry }) {
   return (
-    <div className="pl-6 border-l-2 border-brand-green/40">
-      <span className="text-brand-green font-medium">🎯 调度 → {entry.dispatch_to}</span>
+    <div className="min-w-0 break-words border-l-2 border-brand-green/40 pl-6">
+      <span className="font-medium text-brand-green">🎯 调度 → {entry.dispatch_to}</span>
       {entry.dispatch_task && (
         <p className="text-on-dark-muted text-xs mt-0.5">
           <ExpandableText text={`"${entry.dispatch_task}"`} maxLength={100} />
@@ -74,7 +74,7 @@ function DispatchEntry({ entry }: { entry: AgentLogEntry }) {
 
 function ThinkingEntry({ entry }: { entry: AgentLogEntry }) {
   return (
-    <div className="pl-6 border-l-2 border-on-dark-muted/40">
+    <div className="min-w-0 break-words border-l-2 border-on-dark-muted/40 pl-6">
       <span className="text-on-dark-muted italic text-xs">
         💭 {entry.message}
       </span>
@@ -90,9 +90,9 @@ function ToolStartEntry({ entry }: { entry: AgentLogEntry }) {
   const needsExpand = paramsStr.length > 100;
 
   return (
-    <div className="pl-6 border-l-2 border-amber-500/40">
-      <div className="flex items-center gap-1">
-        <span className="text-amber-400 text-xs font-mono">
+    <div className="min-w-0 border-l-2 border-amber-500/40 pl-6">
+      <div className="flex min-w-0 items-center gap-1">
+        <span className="min-w-0 break-words font-mono text-xs text-amber-400">
           🔧 调用工具: <span className="font-semibold">{entry.tool_name}</span>
         </span>
         {needsExpand && (
@@ -106,7 +106,7 @@ function ToolStartEntry({ entry }: { entry: AgentLogEntry }) {
       </div>
       {paramsStr && (
         <pre className={clsx(
-          'text-on-dark-muted text-xs mt-0.5 font-mono whitespace-pre-wrap break-all',
+          'text-on-dark-muted text-xs mt-0.5 font-mono whitespace-pre-wrap break-all min-w-0',
           !expanded && needsExpand && 'line-clamp-2'
         )}>
           参数: {paramsStr}
@@ -123,8 +123,8 @@ function ToolEndEntry({ entry }: { entry: AgentLogEntry }) {
   const needsExpand = result.length > 150;
 
   return (
-    <div className="pl-10 border-l-2 border-amber-500/40">
-      <div className="flex items-center gap-1">
+    <div className="min-w-0 border-l-2 border-amber-500/40 pl-10">
+      <div className="flex min-w-0 items-center gap-1">
         <span className={clsx('text-xs font-mono', isSuccess ? 'text-emerald-400' : 'text-red-400')}>
           {isSuccess ? '✅' : '❌'} 返回:
         </span>
@@ -141,7 +141,7 @@ function ToolEndEntry({ entry }: { entry: AgentLogEntry }) {
         )}
       </div>
       <pre className={clsx(
-        'text-xs font-mono whitespace-pre-wrap break-all mt-0.5',
+        'text-xs font-mono whitespace-pre-wrap break-all mt-0.5 min-w-0',
         isSuccess ? 'text-emerald-300/80' : 'text-red-300/80',
         !expanded && needsExpand && 'line-clamp-3'
       )}>
@@ -157,8 +157,8 @@ function ContentEntry({ entry }: { entry: AgentLogEntry }) {
   const needsExpand = content.length > 300 || content.split('\n').length > 4;
 
   return (
-    <div className="pl-6 border-l-2 border-blue-500/40">
-      <div className="flex items-center gap-1">
+    <div className="min-w-0 border-l-2 border-blue-500/40 pl-6">
+      <div className="flex min-w-0 items-center gap-1">
         <span className="text-blue-300 text-xs">📄 输出:</span>
         {needsExpand && (
           <button 
@@ -170,7 +170,7 @@ function ContentEntry({ entry }: { entry: AgentLogEntry }) {
         )}
       </div>
       <p className={clsx(
-        'text-white text-sm mt-0.5 whitespace-pre-wrap',
+        'text-white text-sm mt-0.5 whitespace-pre-wrap break-words',
         !expanded && needsExpand && 'line-clamp-4'
       )}>
         {content}
@@ -266,10 +266,10 @@ export function AgentTerminalLog({ entries, className }: AgentTerminalLogProps) 
   };
 
   return (
-    <div className={clsx('flex flex-col', className)}>
+    <div className={clsx('flex min-w-0 max-w-full flex-col overflow-hidden', className)}>
       {/* Agent 过滤栏 */}
       {agentNames.length > 0 && (
-        <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+        <div className="mb-3 flex min-w-0 flex-wrap items-center gap-1.5">
           <button
             onClick={() => setActiveFilter('all')}
             className={clsx(
@@ -286,7 +286,7 @@ export function AgentTerminalLog({ entries, className }: AgentTerminalLogProps) 
               key={name}
               onClick={() => setActiveFilter(name)}
               className={clsx(
-                'px-2.5 py-1 rounded-full text-xs font-medium transition-colors inline-flex items-center gap-1',
+                'inline-flex min-w-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors',
                 activeFilter === name
                   ? 'bg-brand-green text-ink'
                   : 'bg-surface-soft text-slate hover:bg-hairline'
@@ -302,7 +302,7 @@ export function AgentTerminalLog({ entries, className }: AgentTerminalLogProps) 
       {/* 日志内容 */}
       <div
         ref={scrollRef}
-        className="bg-canvas-dark rounded-lg p-lg max-h-[600px] overflow-y-auto font-mono text-sm"
+        className="max-h-[600px] min-w-0 max-w-full overflow-y-auto overflow-x-hidden rounded-lg bg-canvas-dark p-lg font-mono text-sm"
       >
         {filteredEntries.length === 0 ? (
           <div className="text-center py-xl text-on-dark-muted">
@@ -316,7 +316,7 @@ export function AgentTerminalLog({ entries, className }: AgentTerminalLogProps) 
             </p>
           </div>
         ) : (
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             {filteredEntries.map((entry, index) => (
               <div key={entry.id}>
                 {shouldShowHeader(entry, index) && (

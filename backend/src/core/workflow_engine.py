@@ -6,6 +6,7 @@
 本引擎仅负责状态管理、进度追踪和前端 API 兼容。
 """
 import asyncio
+import hashlib
 import json
 import re
 import time
@@ -752,6 +753,23 @@ class PatentWorkflowEngine:
                         event_callback("CEO Agent", "agent.thinking",
                             f"⚠️ 质量审查发现问题，启动修正迭代（第{context.iteration_count}轮）",
                             {"agent_name": "CEO Agent", "thought": "质量审查未通过，需要修正"})
+                        issue_summary = "\n".join(
+                            f"{index}. {issue}"
+                            for index, issue in enumerate(review_issues[:12], start=1)
+                        ) or "审查报告要求继续优化，但未返回结构化问题明细。"
+                        event_callback(
+                            "CEO Agent",
+                            "agent.content",
+                            f"📋 第{context.iteration_count}轮审查问题\n{issue_summary}",
+                            {
+                                "agent_name": "CEO Agent",
+                                "content": issue_summary,
+                                "phase": "quality_review",
+                                "iteration_count": context.iteration_count,
+                                "review_score": context.latest_review_score,
+                                "remediation_path": remediation_path,
+                            },
+                        )
 
                     if context.iteration_count > safety_limit:
                         self._logger.warning(
@@ -797,12 +815,36 @@ class PatentWorkflowEngine:
                         )
 
                     if remediation_path == "ANALYZE_MORE":
+                        if event_callback:
+                            event_callback(
+                                "CEO Agent",
+                                "agent.dispatch",
+                                f"🎯 调度 → 需求分析 Agent（根据审查问题补充方案，第{context.iteration_count}轮）",
+                                {
+                                    "from_agent": "CEO Agent",
+                                    "to_agent": _PHASE_DISPLAY_NAMES.get(WorkflowState.REQUIREMENT_ANALYSIS, "需求分析 Agent"),
+                                    "task_description": "\n".join(review_issues[:8]),
+                                    "iteration_count": context.iteration_count,
+                                },
+                            )
                         await self._execute_remediation_phase(
                             context,
                             WorkflowState.REQUIREMENT_ANALYSIS,
                             event_callback=event_callback,
                         )
                     elif remediation_path == "SEARCH_MORE":
+                        if event_callback:
+                            event_callback(
+                                "CEO Agent",
+                                "agent.dispatch",
+                                f"🎯 调度 → 检索分析 Agent（根据审查问题补充检索，第{context.iteration_count}轮）",
+                                {
+                                    "from_agent": "CEO Agent",
+                                    "to_agent": _PHASE_DISPLAY_NAMES.get(WorkflowState.RETRIEVAL_ANALYSIS, "检索分析 Agent"),
+                                    "task_description": "\n".join(review_issues[:8]),
+                                    "iteration_count": context.iteration_count,
+                                },
+                            )
                         await self._execute_remediation_phase(
                             context,
                             WorkflowState.RETRIEVAL_ANALYSIS,
@@ -2013,9 +2055,10 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         )
 
     def _missing_drawing_references(self, draft: Dict[str, Any]) -> List[str]:
-        referenced = self._extract_referenced_figure_numbers(draft)
+        planned_specs = self._planned_drawing_specs(draft)
+        referenced = [spec["figure_number"] for spec in planned_specs]
         if not referenced:
-            return [] if self._draft_has_drawing_artifact(draft) else ["图1"]
+            return []
 
         drawings = draft.get("drawings", [])
         if not isinstance(drawings, list):
@@ -2025,8 +2068,64 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             for drawing in drawings
             if isinstance(drawing, dict)
             and bool(drawing.get("artifact_url") or drawing.get("artifactUrl") or drawing.get("file_path"))
+            and drawing.get("prompt_version") == "patent_drawing_v2"
         }
         return [figure for figure in referenced if figure not in generated]
+
+    def _planned_drawing_specs(self, draft: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Return the canonical, bounded drawing plan for the current patent draft.
+
+        LLM drafts often mention many figure numbers while still describing the same
+        few concepts. The DOCX generator and reviewer need a stable plan so we do
+        not create duplicate figures like 图2-图11 all named "方法流程示意图".
+        """
+        if not isinstance(draft, dict) or not self._draft_requires_drawings(draft):
+            return []
+
+        description = draft.get("description", {}) or {}
+        if not isinstance(description, dict):
+            description = {}
+        combined = "\n".join(
+            str(part or "")
+            for part in (
+                description.get("drawings_description"),
+                description.get("description_of_drawings"),
+                description.get("summary_of_invention"),
+                description.get("detailed_description"),
+                json.dumps(draft.get("claims", {}), ensure_ascii=False),
+            )
+        )
+        referenced_count = len(self._extract_referenced_figure_numbers(draft))
+
+        canonical_specs = [
+            {
+                "figure_number": "图1",
+                "title": "系统结构示意图",
+                "description": "沉浸式Cave折幕空间中固定显示面、姿态可调显示面、姿态驱动机构、显示控制端和处理控制单元的连接关系。",
+            },
+            {
+                "figure_number": "图2",
+                "title": "方法流程示意图",
+                "description": "获取显示面姿态和空间边界参数、确定边界投影关系、生成映射关系并同步输出补偿后视频画面的处理流程。",
+            },
+            {
+                "figure_number": "图3",
+                "title": "姿态变化与空间边界示意图",
+                "description": "显示面角度变化时相邻显示面之间的边界投影、重叠区域和空白区域的空间关系。",
+            },
+            {
+                "figure_number": "图4",
+                "title": "画面补偿与重映射示意图",
+                "description": "外转空白区域补偿、内转遮挡区域裁剪、删除或重分配以及多显示面同步重映射关系。",
+            },
+        ]
+
+        required_count = 2
+        if referenced_count >= 3 or re.search(r"(姿态|角度|边界|投影|空间)", combined):
+            required_count = 3
+        if referenced_count >= 4 or re.search(r"(补偿|裁剪|遮挡|空白|重映射|重排|删除|重分配)", combined):
+            required_count = 4
+        return canonical_specs[:required_count]
 
     async def _ensure_required_patent_drawings(
         self,
@@ -2039,9 +2138,15 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             return draft
         if not self._draft_requires_drawings(draft):
             return draft
+        planned_specs = self._planned_drawing_specs(draft)
+        draft["drawings"] = self._normalize_drawing_metadata(
+            draft.get("drawings", []),
+            planned_specs=planned_specs,
+        )
         missing_figures = self._missing_drawing_references(draft)
         if not missing_figures:
             return draft
+        spec_by_number = {spec["figure_number"]: spec for spec in planned_specs}
 
         description = draft.get("description", {}) or {}
         if not isinstance(description, dict):
@@ -2065,22 +2170,18 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             tool = PatentDrawingGeneratorTool()
             generated_drawings: List[Dict[str, Any]] = []
             for figure_number in missing_figures:
-                title = "专利附图"
-                if figure_number == "图1":
-                    title = "系统结构示意图"
-                elif "流程" in drawing_description or figure_number == "图2":
-                    title = "方法流程示意图"
-                elif any(keyword in drawing_description for keyword in ("补偿", "重映射", "遮挡", "空白")):
-                    title = "画面补偿示意图"
+                spec = spec_by_number.get(figure_number, {})
+                title = spec.get("title") or "专利附图"
+                figure_description = spec.get("description") or drawing_description
                 result = await tool.execute(
                     tech_description=(
                         f"{context.original_description}\n\n"
                         f"权利要求摘要：{json.dumps(draft.get('claims', {}), ensure_ascii=False)[:1200]}\n\n"
-                        f"请仅生成{figure_number}对应的附图。附图说明：{drawing_description}"
+                        f"请仅生成{figure_number}对应的附图。附图主题：{title}。附图说明：{figure_description}"
                     ),
                     task_id=context.task_id,
                     title=title,
-                    description=drawing_description,
+                    description=figure_description,
                     profile_id="patent.writer.v1",
                     figure_number=figure_number,
                 )
@@ -2093,7 +2194,10 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 existing = draft.get("drawings", [])
                 if not isinstance(existing, list):
                     existing = []
-                draft["drawings"] = [*existing, *generated_drawings]
+                draft["drawings"] = self._normalize_drawing_metadata(
+                    [*existing, *generated_drawings],
+                    planned_specs=planned_specs,
+                )
                 draft["drawings_generated_by"] = "patent_drawing_generator"
                 if event_callback:
                     event_callback(
@@ -2296,7 +2400,10 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 "最终，控制器按照统一时间戳将固定显示面、姿态可调显示面和补充显示区域的内容同步输出，以保证沉浸式展示空间中的画面连续性和姿态适配效果。"
             )
         repaired["description"] = description
-        repaired["drawings"] = self._normalize_drawing_metadata(repaired.get("drawings", []))
+        repaired["drawings"] = self._normalize_drawing_metadata(
+            repaired.get("drawings", []),
+            planned_specs=self._planned_drawing_specs(repaired),
+        )
         repaired["_remediation_applied"] = {
             "round": context.iteration_count,
             "source": "quality_review_suggestions",
@@ -2342,31 +2449,40 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         return ""
 
     def _build_consistent_drawings_description(self, draft: Dict[str, Any]) -> str:
-        figure_titles = {
-            "图1": "本发明沉浸式展示空间的系统结构示意图",
-            "图2": "本发明显示姿态自适应控制与画面连续性补偿方法的流程示意图",
-            "图3": "外转空白补偿与内转遮挡裁剪重排的空间关系示意图",
-            "图4": "姿态-内容-补偿联合映射关系的数据结构示意图",
-            "图5": "外转空白区域几何边界计算流程示意图",
-            "图6": "内转遮挡区域掩膜与内容重排流程示意图",
-        }
-        referenced = self._extract_referenced_figure_numbers(draft)
-        if not referenced:
-            referenced = ["图1", "图2", "图3", "图4", "图5", "图6"]
-        lines = [f"{figure}为{figure_titles.get(figure, figure + '专利附图')}。" for figure in referenced]
+        specs = self._planned_drawing_specs(draft)
+        if not specs:
+            specs = [
+                {
+                    "figure_number": "图1",
+                    "title": "系统结构示意图",
+                    "description": "沉浸式Cave折幕空间中固定显示面、姿态可调显示面和处理控制单元的连接关系。",
+                },
+                {
+                    "figure_number": "图2",
+                    "title": "方法流程示意图",
+                    "description": "根据显示面姿态变化生成补偿、裁剪和重映射视频画面的处理流程。",
+                },
+            ]
+        lines = [f"{spec['figure_number']}为本发明{spec['title']}。" for spec in specs]
         return "\n".join(lines)
 
-    def _normalize_drawing_metadata(self, drawings: object) -> List[Dict[str, Any]]:
+    def _normalize_drawing_metadata(
+        self,
+        drawings: object,
+        planned_specs: Optional[List[Dict[str, str]]] = None,
+    ) -> List[Dict[str, Any]]:
         if not isinstance(drawings, list):
             return []
-        title_map = {
-            "图1": "系统结构示意图",
-            "图2": "方法流程示意图",
-            "图3": "空间关系示意图",
-            "图4": "联合映射关系数据结构示意图",
-            "图5": "外转空白区域几何边界计算流程示意图",
-            "图6": "内转遮挡区域掩膜与内容重排流程示意图",
-        }
+        if planned_specs is None:
+            planned_specs = [
+                {"figure_number": "图1", "title": "系统结构示意图", "description": ""},
+                {"figure_number": "图2", "title": "方法流程示意图", "description": ""},
+                {"figure_number": "图3", "title": "姿态变化与空间边界示意图", "description": ""},
+                {"figure_number": "图4", "title": "画面补偿与重映射示意图", "description": ""},
+            ]
+        title_map = {spec["figure_number"]: spec["title"] for spec in planned_specs}
+        description_map = {spec["figure_number"]: spec.get("description", "") for spec in planned_specs}
+        allowed_numbers = set(title_map)
         normalized: List[Dict[str, Any]] = []
         seen: set[str] = set()
         for index, item in enumerate(drawings, start=1):
@@ -2380,6 +2496,8 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             ).strip()
             if not re.match(r"^图\d+$", figure_number):
                 figure_number = f"图{index}"
+            if allowed_numbers and figure_number not in allowed_numbers:
+                continue
             if figure_number in seen:
                 continue
             seen.add(figure_number)
@@ -2388,7 +2506,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             raw_title = str(drawing.get("title") or "").strip()
             raw_title = re.sub(rf"^{re.escape(figure_number)}\s*[:：、.．-]?\s*", "", raw_title).strip()
             drawing["title"] = title_map.get(figure_number, raw_title or "专利附图")
-            drawing["description"] = f"{figure_number}为{drawing['title']}。"
+            drawing["description"] = description_map.get(figure_number) or f"{figure_number}为{drawing['title']}。"
             normalized.append(drawing)
         return normalized
 
@@ -2448,6 +2566,41 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             missing_figures = self._missing_drawing_references(draft)
             if missing_figures:
                 issues.append(f"drawing_artifacts_missing:{','.join(missing_figures)}")
+            planned_figures = self._planned_drawing_specs(draft)
+            drawings = draft.get("drawings", [])
+            if isinstance(drawings, list):
+                normalized_drawings = self._normalize_drawing_metadata(
+                    drawings,
+                    planned_specs=planned_figures,
+                )
+                titles = [
+                    str(drawing.get("title") or "").strip()
+                    for drawing in normalized_drawings
+                    if isinstance(drawing, dict) and str(drawing.get("title") or "").strip()
+                ]
+                if len(titles) != len(set(titles)):
+                    issues.append("drawing_titles_duplicate")
+                if len(drawings) > len(normalized_drawings) and normalized_drawings:
+                    issues.append("drawing_artifacts_excessive_or_duplicate")
+                file_hashes: Dict[str, str] = {}
+                for drawing in normalized_drawings:
+                    if not isinstance(drawing, dict):
+                        continue
+                    file_path = drawing.get("file_path")
+                    if not isinstance(file_path, str) or not file_path:
+                        continue
+                    path = _Path(file_path)
+                    if not path.is_file():
+                        continue
+                    try:
+                        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                    except Exception:
+                        continue
+                    figure_number = str(drawing.get("figure_number") or "")
+                    if digest in file_hashes:
+                        issues.append(f"drawing_artifacts_duplicate_content:{file_hashes[digest]},{figure_number}")
+                        break
+                    file_hashes[digest] = figure_number
 
         return issues
 

@@ -546,6 +546,7 @@ async def restore_stores_from_db() -> None:
 
 def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
     _recover_context_from_export_artifacts(context)
+    _sync_workflow_terminal_state(context)
 
     # 读取时归一化 — 确保旧数据也能适配前端格式
     req_norm = workflow_engine._normalize_phase_output("requirement_analysis", context.requirement_analysis or {})
@@ -778,6 +779,65 @@ def _recover_context_from_export_artifacts(context: WorkflowContext) -> None:
     _drop_superseded_recovered_phases(context)
 
 
+def _sync_workflow_terminal_state(context: WorkflowContext) -> None:
+    """Prevent stale persisted terminal states from hiding unfinished quality work."""
+    final_docx = _find_final_docx(context.task_id)
+    review = context.review_report if isinstance(context.review_report, dict) else {}
+    needs_review_fix = bool(review) and workflow_engine._needs_quality_remediation(review)
+    final_document_stale = False
+    if isinstance(context.patent_draft, dict):
+        existing_drawings = context.patent_draft.get("drawings", [])
+        planned_specs = workflow_engine._planned_drawing_specs(context.patent_draft)
+        normalized_drawings = workflow_engine._normalize_drawing_metadata(
+            existing_drawings,
+            planned_specs=planned_specs,
+        )
+        if isinstance(existing_drawings, list) and normalized_drawings != existing_drawings:
+            context.patent_draft["drawings"] = normalized_drawings
+            final_document_stale = True
+        if final_document_stale:
+            context.patent_draft.pop("final_document", None)
+            context.patent_draft.pop("docx_path", None)
+            context.metadata["final_document_stale"] = {
+                "reason": "drawing_metadata_normalized_after_review",
+                "corrected_at": datetime.now().isoformat(),
+            }
+        elif context.metadata.get("final_document_stale"):
+            final_document_stale = True
+            context.patent_draft.pop("final_document", None)
+            context.patent_draft.pop("docx_path", None)
+    draft_issues = workflow_engine._reviewable_content_issues(
+        context.patent_draft if isinstance(context.patent_draft, dict) else {}
+    )
+
+    if context.current_phase == EngineWorkflowState.COMPLETED and (
+        not final_docx or needs_review_fix or draft_issues or final_document_stale
+    ):
+        context.current_phase = (
+            EngineWorkflowState.QUALITY_REVIEW
+            if needs_review_fix
+            else EngineWorkflowState.PATENT_WRITING
+        )
+        context.metadata["terminal_state_corrected"] = {
+            "previous_state": "completed",
+            "reason": (
+                "quality_review_requires_remediation"
+                if needs_review_fix
+                else "final_docx_stale_or_draft_incomplete"
+            ),
+            "corrected_at": datetime.now().isoformat(),
+        }
+        if needs_review_fix:
+            context.metadata.setdefault(
+                "quality_remediation",
+                {
+                    "classification": "write_more",
+                    "recommended_next_action": "continue_auto_fix",
+                    "resume_phase": EngineWorkflowState.PATENT_WRITING.value,
+                },
+            )
+
+
 def _linked_workflow_state(conv: Dict[str, Any]) -> Optional[str]:
     task_id = conv.get("linked_workflow_id")
     if not isinstance(task_id, str) or not task_id:
@@ -785,11 +845,17 @@ def _linked_workflow_state(conv: Dict[str, Any]) -> Optional[str]:
     context = workflow_engine.get_workflow(task_id)
     if not context:
         return None
+    _recover_context_from_export_artifacts(context)
+    _sync_workflow_terminal_state(context)
     return context.current_phase.value
 
 
 def _conversation_detail_payload(conv: Dict[str, Any]) -> Dict[str, Any]:
-    return {**conv, "workflow_state": _linked_workflow_state(conv)}
+    return {
+        **conv,
+        "workflow_state": _linked_workflow_state(conv),
+        "active_reply": _conversation_active_reply_payload(conv),
+    }
 
 
 def _conversation_summary_payload(conv: Dict[str, Any]) -> Dict[str, Any]:
@@ -802,6 +868,7 @@ def _conversation_summary_payload(conv: Dict[str, Any]) -> Dict[str, Any]:
         "status": conv["status"],
         "linked_workflow_id": conv.get("linked_workflow_id"),
         "workflow_state": _linked_workflow_state(conv),
+        "active_reply": _conversation_active_reply_payload(conv),
     }
 
 
@@ -1270,6 +1337,87 @@ def _queue_conversation_event(conv_id: str, event_type: str, data: Dict[str, Any
     del queue[:-200]
 
 
+def _conversation_active_reply_payload(conv: Dict[str, Any] | None) -> Optional[Dict[str, Any]]:
+    if not conv:
+        return None
+    active_reply = conv.get("active_reply")
+    if not isinstance(active_reply, dict) or not active_reply.get("active"):
+        return None
+    return {
+        "active": True,
+        "stream_call_id": active_reply.get("stream_call_id"),
+        "started_at": active_reply.get("started_at"),
+        "updated_at": active_reply.get("updated_at"),
+        "status": active_reply.get("status") or "running",
+        "message": active_reply.get("message") or "正在回复中...",
+    }
+
+
+async def _set_conversation_active_reply(
+    conv_id: str,
+    *,
+    stream_call_id: str,
+    message: str = "正在回复中...",
+    status: str = "running",
+) -> None:
+    now = datetime.now().isoformat()
+    async with conversations_lock:
+        conv = conversations_store.get(conv_id)
+        if not conv:
+            return
+        active_reply = conv.get("active_reply") if isinstance(conv.get("active_reply"), dict) else {}
+        conv["active_reply"] = {
+            **active_reply,
+            "active": True,
+            "stream_call_id": stream_call_id,
+            "started_at": active_reply.get("started_at") or now,
+            "updated_at": now,
+            "status": status,
+            "message": message,
+        }
+        conv["updated_at"] = now
+        payload = _conversation_active_reply_payload(conv)
+    if payload:
+        _queue_conversation_event(conv_id, "conversation_state", {"active_reply": payload})
+    await _persist_conversation(conv_id)
+
+
+async def _clear_conversation_active_reply(
+    conv_id: str,
+    *,
+    stream_call_id: str | None = None,
+    status: str = "completed",
+    error: str | None = None,
+) -> None:
+    now = datetime.now().isoformat()
+    async with conversations_lock:
+        conv = conversations_store.get(conv_id)
+        if not conv:
+            return
+        active_reply = conv.get("active_reply")
+        if isinstance(active_reply, dict):
+            existing_call_id = active_reply.get("stream_call_id")
+            if stream_call_id and existing_call_id and existing_call_id != stream_call_id:
+                return
+        active_stream_call_id = stream_call_id
+        if not active_stream_call_id and isinstance(active_reply, dict):
+            active_stream_call_id = active_reply.get("stream_call_id")
+        conv["active_reply"] = {
+            "active": False,
+            "stream_call_id": active_stream_call_id,
+            "updated_at": now,
+            "status": status,
+            "message": error or "",
+        }
+        conv["updated_at"] = now
+    _queue_conversation_event(
+        conv_id,
+        "conversation_state",
+        {"active_reply": {"active": False, "status": status, "updated_at": now, "message": error or ""}},
+    )
+    await _persist_conversation(conv_id)
+
+
 async def _execute_full_workflow_compat(
     context: WorkflowContext,
     *,
@@ -1437,34 +1585,21 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
 @router.post("/workflows/{task_id}/resume")
 async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
     """恢复工作流执行
-    - 中断的流程从当前阶段继续执行
-    - 已完成的流程自动进入迭代修正（从撰写阶段重新开始）
+    - 恢复后重新进入完整质量门流程
+    - 质量审查不合格时由 CEO 继续调度对应 Agent 修复并复审
     """
     async with workflow_lock:
         context = workflow_engine.get_workflow(task_id)
     if not context:
         raise HTTPException(status_code=404, detail="工作流不存在")
+    _recover_context_from_export_artifacts(context)
+    _sync_workflow_terminal_state(context)
+    _restore_workflow_disclosure_from_conversation(context)
 
-    force_start_from = None
-    if context.current_phase == WorkflowState.COMPLETED:
-        # 已完成的工作流 → 进入迭代修正模式
-        if context.iteration_count >= context.max_iterations:
-            raise HTTPException(
-                status_code=400,
-                detail=f"已达到最大迭代次数（{context.max_iterations}），无法继续修正",
-            )
-        force_start_from = WorkflowState.PATENT_WRITING
-        context.iteration_count += 1
-
-    elif context.current_phase in [WorkflowState.FAILED, WorkflowState.CANCELLED]:
+    if context.current_phase in [WorkflowState.FAILED, WorkflowState.CANCELLED]:
         raise HTTPException(
             status_code=400,
             detail=f"工作流已终止，无法恢复（状态: {context.current_phase.value}）",
-        )
-    elif context.current_phase == EngineWorkflowState.AWAITING_USER_DECISION:
-        raise HTTPException(
-            status_code=400,
-            detail="当前工作流正在等待用户决策，请调用 /workflows/{task_id}/decision",
         )
 
     async def phase_callback(phase, result):
@@ -1484,16 +1619,45 @@ async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
         await _persist_events(task_id)
         await _persist_workflow(task_id)
 
+    def _workflow_event_callback(agent_name: str, event_type: str, message: str, data: Dict[str, Any]):
+        task_events.setdefault(task_id, []).append(
+            WorkflowEventResponse(
+                task_id=task_id,
+                timestamp=datetime.now(),
+                agent=agent_name,
+                message=message,
+                event_type=event_type,
+                data=data,
+            )
+        )
+
     async def run_resume():
+        async def agent_event_callback(event: Dict[str, Any]):
+            event = dict(event)
+            event.setdefault("task_id", task_id)
+            event.setdefault("timestamp", datetime.now().isoformat())
+            message = _agent_work_message("", event)
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent=str(event.get("agent_name") or event.get("agent_id") or "agent"),
+                    message=message["content"],
+                    event_type=str(event.get("event_type") or "agent.work"),
+                    data=event,
+                )
+            await _persist_events(task_id)
+
         try:
-            await workflow_engine.resume_workflow(
+            await _execute_full_workflow_compat(
                 context,
                 phase_callback=phase_callback,
-                force_start_from=force_start_from,
+                event_callback=_workflow_event_callback,
+                agent_event_callback=agent_event_callback,
             )
             async with workflow_lock:
                 _append_workflow_terminal_event(task_id, context, "专利工作流已恢复并完成")
             await _persist_events(task_id)
+            await _persist_workflow(task_id)
         except Exception as e:
             async with workflow_lock:
                 _append_workflow_event(
@@ -1503,6 +1667,7 @@ async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
                     event_type="workflow.failed",
                 )
             await _persist_events(task_id)
+            await _persist_workflow(task_id)
             logger.exception("工作流恢复后台任务失败", exc_info=e)
 
     background_tasks.add_task(run_resume)
@@ -3866,6 +4031,8 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
         )
 
+    stream_call_id = f"conv-{conv_id}-{uuid.uuid4()}"
+
     # 添加用户消息
     now = datetime.now().isoformat()
     user_msg = {
@@ -3882,6 +4049,11 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
         if conv:
             conv["messages"].append(user_msg)
             conv["updated_at"] = now
+    await _set_conversation_active_reply(
+        conv_id,
+        stream_call_id=stream_call_id,
+        message="正在分析并回复...",
+    )
 
     async def event_generator():
         import json as _json
@@ -3934,7 +4106,6 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
         final_content = ""
         result_holder: Dict[str, Any] = {"result": None, "error": None, "done": False}
         sequence_counter = {"value": 0}
-        stream_call_id = f"conv-{conv_id}-{uuid.uuid4()}"
 
         def append_agent_activity(
             event_type: str,
@@ -4058,6 +4229,12 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                 await asyncio.sleep(0.05)
 
             if result_holder["error"]:
+                await _clear_conversation_active_reply(
+                    conv_id,
+                    stream_call_id=stream_call_id,
+                    status="failed",
+                    error=str(result_holder["error"]),
+                )
                 return {"error": result_holder["error"]}
 
             result = result_holder["result"]
@@ -4090,13 +4267,19 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                     confirmation_data = {"question": question, "options": options}
                     clean_content = re.sub(confirm_pattern, '', clean_content).strip()
 
+            assistant_metadata = {}
+            if has_recommendation:
+                assistant_metadata["recommend_create_patent"] = True
+            if confirmation_data:
+                assistant_metadata["confirmation"] = confirmation_data
+
             assistant_msg = {
                 "id": str(uuid.uuid4()),
                 "role": "assistant",
                 "content": clean_content,
                 "timestamp": datetime.now().isoformat(),
                 "type": "text",
-                "metadata": {"recommend_create_patent": has_recommendation} if has_recommendation else None,
+                "metadata": assistant_metadata or None,
                 "tool_calls": tool_calls_data if tool_calls_data else None,
                 "agent_events": persisted_agent_events if persisted_agent_events else None,
             }
@@ -4112,6 +4295,7 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                         c["title"] = title + ("..." if len(content) > 50 else "")
 
             await _persist_conversation(conv_id)
+            await _clear_conversation_active_reply(conv_id, stream_call_id=stream_call_id)
             return {
                 "message": assistant_msg,
                 "content": clean_content,
@@ -4147,6 +4331,12 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
 
             # 处理最终结果
             if result_holder["error"]:
+                await _clear_conversation_active_reply(
+                    conv_id,
+                    stream_call_id=stream_call_id,
+                    status="failed",
+                    error=str(result_holder["error"]),
+                )
                 yield f"event: error\ndata: {_json.dumps({'error': result_holder['error']}, ensure_ascii=False)}\n\n"
             else:
                 finalized_result = await finalize_agent_result()
@@ -4170,6 +4360,12 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                 yield f"event: done\ndata: {_json.dumps({'message': assistant_msg, 'has_recommendation': has_recommendation, 'needs_confirmation': confirmation_data is not None, 'conversation_id': conv_id}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
+            await _clear_conversation_active_reply(
+                conv_id,
+                stream_call_id=stream_call_id,
+                status="failed",
+                error=str(e),
+            )
             yield f"event: error\ndata: {_json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
         finally:
             if not finalized["done"] and finalization_task is None:
@@ -4550,6 +4746,10 @@ async def stream_conversation_events(conv_id: str):
 
         last_sent = 0
         idle_ticks = 0
+        async with conversations_lock:
+            initial_conv = conversations_store.get(conv_id)
+            initial_active_reply = _conversation_active_reply_payload(initial_conv)
+        yield f"event: conversation_state\ndata: {_json.dumps({'active_reply': initial_active_reply}, ensure_ascii=False)}\n\n"
         while True:
             sent_this_tick = False
             while True:
@@ -4567,15 +4767,20 @@ async def stream_conversation_events(conv_id: str):
             async with conversations_lock:
                 conv = conversations_store.get(conv_id)
                 linked_id = conv.get("linked_workflow_id") if conv else None
+                active_reply = _conversation_active_reply_payload(conv)
             context = workflow_engine.get_workflow(linked_id) if linked_id else None
-            if last_sent > 0 and (not context or context.current_phase in [EngineWorkflowState.COMPLETED, EngineWorkflowState.FAILED, EngineWorkflowState.CANCELLED]):
+            if (
+                last_sent > 0
+                and not active_reply
+                and (not context or context.current_phase in [EngineWorkflowState.COMPLETED, EngineWorkflowState.FAILED, EngineWorkflowState.CANCELLED])
+            ):
                 async with conversations_lock:
                     conversation_event_queues.pop(conv_id, None)
                 yield "event: done\ndata: {}\n\n"
                 break
 
             idle_ticks += 1
-            if not linked_id and idle_ticks >= 1:
+            if not linked_id and not active_reply and idle_ticks >= 1:
                 break
             if idle_ticks > 30 and not sent_this_tick:
                 yield "event: heartbeat\ndata: {}\n\n"
@@ -5596,6 +5801,25 @@ async def export_patent_docx(task_id: str):
 @router.get("/workflows/{task_id}/export/docx")
 async def export_workflow_patent_docx(task_id: str):
     """从工作流导出专利文档为DOCX格式"""
+    async with workflow_lock:
+        context = workflow_engine.get_workflow(task_id)
+    if not context:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+    _recover_context_from_export_artifacts(context)
+    _sync_workflow_terminal_state(context)
+
+    draft_data = context.patent_draft if isinstance(context.patent_draft, dict) else {}
+    if context.current_phase != EngineWorkflowState.COMPLETED:
+        raise HTTPException(
+            status_code=409,
+            detail="最终 DOCX 尚未生成或已因质量问题失效。请等待 CEO 调度修复、复审通过后再下载。",
+        )
+    if context.metadata.get("final_document_stale"):
+        raise HTTPException(
+            status_code=409,
+            detail="最终 DOCX 已因草稿或附图变更失效。请等待重新审查并生成新的最终 DOCX。",
+        )
+
     final_docx = _find_final_docx(task_id)
     if final_docx:
         return FileResponse(
@@ -5604,12 +5828,6 @@ async def export_workflow_patent_docx(task_id: str):
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
-    async with workflow_lock:
-        context = workflow_engine.get_workflow(task_id)
-    if not context:
-        raise HTTPException(status_code=404, detail="工作流不存在")
-
-    draft_data = context.patent_draft if isinstance(context.patent_draft, dict) else {}
     existing_docx_path = str(draft_data.get("docx_path") or "")
     if existing_docx_path and os.path.isfile(existing_docx_path) and "/final/" in existing_docx_path:
         return FileResponse(

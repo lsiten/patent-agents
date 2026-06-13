@@ -91,7 +91,7 @@ def _safe_figure_filename(figure_number: str) -> str:
     return f"fig{digits or '1'}.png"
 
 
-def _write_fallback_png(output_path: Path, title: str, tech_description: str) -> None:
+def _write_fallback_png(output_path: Path, title: str, tech_description: str, figure_number: str) -> None:
     """Write a local line-art PNG so generated DOCX files can embed it."""
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -110,40 +110,30 @@ def _write_fallback_png(output_path: Path, title: str, tech_description: str) ->
         body_font = ImageFont.load_default()
         small_font = ImageFont.load_default()
 
-    def center_text(x: int, y: int, text: str, font: Any) -> None:
+    def safe_text(x: int, y: int, text: str, font: Any, anchor: str = "lt") -> None:
         try:
-            bbox = draw.textbbox((0, 0), text, font=font)
-            draw.text((x - (bbox[2] - bbox[0]) / 2, y), text, fill="black", font=font)
+            if anchor == "center":
+                bbox = draw.textbbox((0, 0), text, font=font)
+                draw.text((x - (bbox[2] - bbox[0]) / 2, y), text, fill="black", font=font)
+            else:
+                draw.text((x, y), text, fill="black", font=font)
         except UnicodeEncodeError:
             fallback = "Patent Figure"
-            bbox = draw.textbbox((0, 0), fallback, font=font)
-            draw.text((x - (bbox[2] - bbox[0]) / 2, y), fallback, fill="black", font=font)
+            if anchor == "center":
+                bbox = draw.textbbox((0, 0), fallback, font=font)
+                draw.text((x - (bbox[2] - bbox[0]) / 2, y), fallback, fill="black", font=font)
+            else:
+                draw.text((x, y), fallback, fill="black", font=font)
 
-    center_text(600, 36, title or "专利附图", title_font)
-    center_text(600, 78, (tech_description or "可调沉浸式显示系统")[:60], small_font)
+    def center_text(x: int, y: int, text: str, font: Any) -> None:
+        safe_text(x, y, text, font, anchor="center")
 
-    boxes = [
-        ((110, 170, 370, 320), "1 固定屏幕"),
-        ((470, 140, 730, 290), "2 可调屏幕"),
-        ((830, 170, 1090, 320), "3 地面/相邻屏"),
-        ((120, 520, 350, 640), "4 入口交互与身高检测"),
-        ((430, 560, 770, 680), "5 姿态控制与映射模块"),
-        ((850, 520, 1080, 640), "6 画面补偿/过渡生成"),
-    ]
-    for box, label in boxes:
-        draw.rectangle(box, outline="black", width=3)
-        center_text((box[0] + box[2]) // 2, (box[1] + box[3]) // 2 - 10, label, body_font)
+    def box(x1: int, y1: int, x2: int, y2: int, label: str, font: Any = body_font) -> None:
+        draw.rectangle((x1, y1, x2, y2), outline="black", width=3)
+        center_text((x1 + x2) // 2, (y1 + y2) // 2 - 10, label, font)
 
-    arrows = [
-        ((370, 245), (470, 215)),
-        ((730, 215), (830, 245)),
-        ((240, 320), (240, 520)),
-        ((960, 320), (960, 520)),
-        ((350, 580), (430, 610)),
-        ((850, 580), (770, 610)),
-    ]
-    for start, end in arrows:
-        draw.line([start, end], fill="black", width=3)
+    def arrow(start: tuple[int, int], end: tuple[int, int], width: int = 3) -> None:
+        draw.line([start, end], fill="black", width=width)
         dx = 1 if end[0] >= start[0] else -1
         dy = 1 if end[1] >= start[1] else -1
         draw.polygon(
@@ -151,8 +141,112 @@ def _write_fallback_png(output_path: Path, title: str, tech_description: str) ->
             fill="black",
         )
 
-    center_text(600, 380, "根据用户输入、身高或视频内容生成目标屏幕姿态", small_font)
-    center_text(600, 420, "外转空白区域填补；内转遮挡区域裁剪、删除或重分配", small_font)
+    def dashed_rect(rect: tuple[int, int, int, int], label: str) -> None:
+        x1, y1, x2, y2 = rect
+        dash = 18
+        for x in range(x1, x2, dash * 2):
+            draw.line([(x, y1), (min(x + dash, x2), y1)], fill="black", width=2)
+            draw.line([(x, y2), (min(x + dash, x2), y2)], fill="black", width=2)
+        for y in range(y1, y2, dash * 2):
+            draw.line([(x1, y), (x1, min(y + dash, y2))], fill="black", width=2)
+            draw.line([(x2, y), (x2, min(y + dash, y2))], fill="black", width=2)
+        center_text((x1 + x2) // 2, y2 + 12, label, small_font)
+
+    def rotated_quad(points: list[tuple[int, int]], label: str) -> None:
+        draw.polygon(points, outline="black", fill="white")
+        draw.line(points + [points[0]], fill="black", width=3)
+        cx = sum(x for x, _ in points) // len(points)
+        cy = sum(y for _, y in points) // len(points)
+        center_text(cx, cy - 10, label, body_font)
+
+    def draw_system_structure() -> None:
+        box(80, 160, 300, 285, "1 固定显示面")
+        rotated_quad([(455, 135), (705, 170), (670, 315), (420, 280)], "2 姿态可调显示面")
+        box(900, 160, 1120, 285, "3 地面/相邻显示面")
+        box(95, 530, 315, 650, "4 入口交互终端")
+        box(430, 520, 760, 670, "5 处理控制单元")
+        box(880, 525, 1110, 650, "6 姿态驱动机构")
+        box(455, 365, 735, 445, "7 姿态反馈单元")
+        for start, end in [
+            ((315, 590), (430, 595)),
+            ((760, 595), (880, 595)),
+            ((995, 525), (650, 315)),
+            ((595, 365), (595, 315)),
+            ((430, 560), (300, 255)),
+            ((760, 555), (900, 255)),
+        ]:
+            arrow(start, end)
+        center_text(600, 720, "结构连接关系：交互/检测 → 控制 → 驱动/反馈 → 多显示面同步输出", small_font)
+
+    def draw_method_flow() -> None:
+        steps = [
+            ((70, 180, 260, 270), "S101 获取用户/视频输入"),
+            ((340, 180, 530, 270), "S102 确定目标姿态"),
+            ((610, 180, 800, 270), "S103 采集实际姿态"),
+            ((880, 180, 1070, 270), "S104 建立边界投影"),
+            ((210, 500, 430, 590), "S105 判定空白/遮挡"),
+            ((500, 500, 720, 590), "S106 生成补偿/裁剪"),
+            ((790, 500, 1010, 590), "S107 同步重映射输出"),
+        ]
+        for rect, label in steps:
+            box(*rect, label, small_font)
+        for start, end in [
+            ((260, 225), (340, 225)),
+            ((530, 225), (610, 225)),
+            ((800, 225), (880, 225)),
+            ((975, 270), (900, 500)),
+            ((790, 545), (720, 545)),
+            ((500, 545), (430, 545)),
+        ]:
+            arrow(start, end)
+        draw.arc((300, 300, 900, 720), 20, 160, fill="black", width=2)
+        arrow((310, 430), (260, 270), width=2)
+        center_text(600, 355, "依据姿态反馈闭环更新映射参数", small_font)
+
+    def draw_spatial_boundary() -> None:
+        draw.line([(170, 640), (1030, 640)], fill="black", width=3)
+        center_text(600, 660, "统一三维坐标系 X-Y 平面", small_font)
+        box(170, 265, 375, 545, "固定显示面 A")
+        rotated_quad([(520, 210), (770, 275), (720, 550), (470, 485)], "可调显示面 B")
+        draw.line([(375, 310), (520, 275)], fill="black", width=2)
+        draw.line([(375, 500), (470, 485)], fill="black", width=2)
+        dashed_rect((380, 300, 510, 500), "空白区域 P1")
+        dashed_rect((695, 290, 825, 520), "重叠/遮挡区域 P2")
+        draw.ellipse((555, 70, 645, 160), outline="black", width=3)
+        center_text(600, 165, "观看参考点 O", small_font)
+        arrow((600, 160), (445, 340), width=2)
+        arrow((600, 160), (745, 340), width=2)
+        safe_text(830, 365, "边界投影线", small_font)
+        draw.line([(780, 320), (950, 410)], fill="black", width=2)
+
+    def draw_compensation_mapping() -> None:
+        box(70, 170, 300, 300, "原始视频帧")
+        box(455, 120, 745, 240, "补偿视口生成")
+        box(455, 320, 745, 440, "遮挡掩膜/裁剪")
+        box(900, 170, 1130, 300, "重映射输出帧")
+        dashed_rect((110, 360, 280, 520), "待补偿空白块")
+        dashed_rect((930, 360, 1100, 520), "同步输出区域")
+        arrow((300, 235), (455, 180))
+        arrow((300, 235), (455, 380))
+        arrow((745, 180), (900, 235))
+        arrow((745, 380), (900, 235))
+        draw.line([(160, 220), (260, 220), (260, 270), (160, 270), (160, 220)], fill="black", width=2)
+        draw.line([(960, 220), (1070, 220), (1070, 270), (960, 270), (960, 220)], fill="black", width=2)
+        center_text(600, 590, "外转：生成补偿内容；内转：生成可见掩膜并删除/重分配被遮挡内容", small_font)
+
+    center_text(600, 36, title or "专利附图", title_font)
+    center_text(600, 78, (tech_description or "可调沉浸式显示系统")[:60], small_font)
+
+    digits = "".join(ch for ch in str(figure_number or "") if ch.isdigit())
+    if digits == "2":
+        draw_method_flow()
+    elif digits == "3":
+        draw_spatial_boundary()
+    elif digits == "4":
+        draw_compensation_mapping()
+    else:
+        draw_system_structure()
+
     image.save(output_path, format="PNG")
 
 
@@ -230,13 +324,13 @@ class PatentDrawingGeneratorTool:
         fallback_path = output_dir / output_name
 
         image_config = _resolve_image_config(str(kwargs.get("profile_id") or "patent.writer.v1"))
-        prompt = self._build_prompt(title, tech_description)
+        prompt = self._build_prompt(title, tech_description, figure_number, description)
 
         try:
             _generate_image_file(prompt, output_path, image_config)
         except Exception as exc:
             try:
-                _write_fallback_png(fallback_path, title, tech_description)
+                _write_fallback_png(fallback_path, title, tech_description, figure_number)
                 mime_type = "image/png"
             except Exception:
                 fallback_path = output_dir / f"{output_path.stem}.svg"
@@ -255,6 +349,8 @@ class PatentDrawingGeneratorTool:
                             "artifact_url": f"/api/v1/workflows/{task_id or 'default'}/artifacts/draft/drawings/{fallback_path.name}",
                             "mime_type": mime_type,
                             "fallback": True,
+                            "prompt_version": "patent_drawing_v2",
+                            "layout": _layout_key_for_figure(figure_number),
                             "warning": f"AI image generation unavailable: {exc}",
                         }
                     ]
@@ -275,6 +371,8 @@ class PatentDrawingGeneratorTool:
                         "file_path": str(output_path),
                         "artifact_url": f"/api/v1/workflows/{task_id or 'default'}/artifacts/draft/drawings/{output_path.name}",
                         "mime_type": "image/png",
+                        "prompt_version": "patent_drawing_v2",
+                        "layout": _layout_key_for_figure(figure_number),
                     }
                 ]
             },
@@ -283,9 +381,29 @@ class PatentDrawingGeneratorTool:
         )
 
     @staticmethod
-    def _build_prompt(title: str, tech_description: str) -> str:
+    def _build_prompt(title: str, tech_description: str, figure_number: str, description: str = "") -> str:
+        layout_requirements = {
+            "图1": "画成系统结构框图：固定显示面、姿态可调显示面、地面/相邻显示面、入口交互终端、处理控制单元、姿态驱动机构、姿态反馈单元之间的连接关系。",
+            "图2": "画成方法流程图：S101到S107的步骤框和顺序箭头，体现获取输入、确定姿态、采集反馈、边界投影、判定空白/遮挡、补偿裁剪、同步输出。",
+            "图3": "画成空间几何示意图：固定显示面A、倾斜的可调显示面B、观看参考点O、边界投影线、空白区域P1、重叠/遮挡区域P2。",
+            "图4": "画成画面处理映射示意图：原始视频帧、补偿视口生成、遮挡掩膜/裁剪、重映射输出帧、待补偿空白块和同步输出区域。",
+        }
+        normalized_figure = str(figure_number or "图1").replace(" ", "")
         return (
             "生成一张黑白线稿风格的中国专利说明书附图，避免照片质感和装饰性背景。"
-            f"附图标题：{title}。技术方案：{tech_description}。"
-            "要求用模块框图、流程箭头和编号标注表达核心结构或步骤。"
+            f"图号：{normalized_figure}。附图标题：{title}。"
+            f"本图专属说明：{description or layout_requirements.get(normalized_figure, '')}。"
+            f"必须采用的构图：{layout_requirements.get(normalized_figure, '画成与图1至图4不同的专利线稿构图。')}。"
+            f"技术方案：{tech_description}。"
+            "要求只表达本图主题，不要复用其他图的布局；使用模块框、流程箭头、几何边界、区域标号和编号标注。"
         )
+
+
+def _layout_key_for_figure(figure_number: str) -> str:
+    digits = "".join(ch for ch in str(figure_number or "") if ch.isdigit())
+    return {
+        "1": "system_structure",
+        "2": "method_flow",
+        "3": "spatial_boundary",
+        "4": "compensation_mapping",
+    }.get(digits or "1", f"figure_{digits or '1'}")

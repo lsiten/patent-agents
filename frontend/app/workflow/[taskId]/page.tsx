@@ -633,19 +633,19 @@ export default function WorkflowPage() {
   };
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden bg-surface py-section-lg">
-      <div className="container mx-auto px-md">
+    <div className="h-full min-h-0 w-full min-w-0 max-w-full overflow-y-auto overflow-x-hidden bg-surface py-section-lg">
+      <div className="mx-auto w-full min-w-0 max-w-screen-2xl px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-md mb-xl">
-          <div>
-            <h1 className="text-heading-3 font-euclid font-medium text-ink mb-xs">
+        <div className="mb-xl flex min-w-0 flex-col items-start justify-between gap-md md:flex-row md:items-center">
+          <div className="min-w-0">
+            <h1 className="mb-xs break-words text-heading-3 font-euclid font-medium text-ink">
               {workflow?.title || '专利申请流程'}
             </h1>
-            <p className="text-body-sm text-steel">
+            <p className="break-all text-body-sm text-steel">
               任务 ID: {taskId}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-wrap items-center justify-start gap-3 md:justify-end">
             <Badge 
               variant={
                 error ? 'orange' :
@@ -844,17 +844,17 @@ export default function WorkflowPage() {
         )}
 
         {/* Progress Stepper */}
-        <Card className="mb-xl">
+        <Card className="mb-xl min-w-0 overflow-hidden">
           <CardContent className="pt-xl">
-            <div className="flex items-center justify-between overflow-x-auto pb-md">
+            <div className="flex w-full min-w-0 items-center gap-lg overflow-x-auto overflow-y-hidden pb-md">
               {workflowSteps.map((step, index) => {
                 const Icon = step.icon;
                 const isCompleted = index < currentStepIndex || currentState === 'completed';
                 const isCurrent = index === currentStepIndex && currentState !== 'completed';
 
                 return (
-                  <div key={step.state} className="flex items-center">
-                    <div className="flex flex-col items-center min-w-[100px]">
+                  <div key={step.state} className="flex flex-none items-center">
+                    <div className="flex min-w-[5rem] flex-col items-center">
                       <div
                         className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
                           isCompleted
@@ -896,20 +896,20 @@ export default function WorkflowPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid lg:grid-cols-3 gap-xl">
+          <div className="grid min-w-0 gap-xl lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
             {/* Agent Status Cards */}
-            <div className="lg:col-span-1 space-y-md">
+            <div className="min-w-0 space-y-md">
               <h2 className="text-heading-5 font-euclid font-medium text-ink mb-md">
                 Agent 工作状态
               </h2>
               {agents.map((agent) => (
-                <Card key={agent.id} hoverable>
+                <Card key={agent.id} hoverable className="min-w-0">
                   <CardContent className="pt-lg">
-                    <div className="flex items-start justify-between gap-md">
-                      <div className="flex items-center gap-md">
+                    <div className="flex min-w-0 items-start justify-between gap-md">
+                      <div className="flex min-w-0 items-center gap-md">
                         <span className="text-2xl">{agent.icon}</span>
-                        <div>
-                          <h3 className="text-body-md-medium font-medium text-ink">
+                        <div className="min-w-0">
+                          <h3 className="break-words text-body-md-medium font-medium text-ink">
                             {agent.name}
                           </h3>
                           <p className="text-caption text-steel">{agent.role}</p>
@@ -917,7 +917,7 @@ export default function WorkflowPage() {
                       </div>
                       {getStatusBadge(agent.status)}
                     </div>
-                    <p className="mt-md text-body-sm text-steel">
+                    <p className="mt-md break-words text-body-sm text-steel">
                       {agent.description}
                     </p>
                     {agent.id !== 'ceo' && (agent.status === 'completed' || agent.status === 'error') && (
@@ -951,31 +951,31 @@ export default function WorkflowPage() {
             </div>
 
             {/* Main Content - Event Log and Data Preview */}
-            <div className="lg:col-span-2 space-y-xl">
+            <div className="min-w-0 space-y-xl">
               {/* Event Log - Agent Terminal */}
-              <Card>
+              <Card className="min-w-0 overflow-hidden">
                 <CardHeader>
                   <CardTitle>实时工作日志</CardTitle>
                   <CardDescription>
                     各 Agent 的思考过程、工具调用和输出记录
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="min-w-0 overflow-hidden">
                   <AgentTerminalLog entries={allLogs} />
                 </CardContent>
               </Card>
 
               {/* Data Preview Tabs */}
-              <Card>
+              <Card className="min-w-0 overflow-hidden">
                 <CardHeader>
                   <CardTitle>阶段输出预览</CardTitle>
                   <CardDescription>
                     查看各阶段生成的结构化数据和文档
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="min-w-0 overflow-hidden">
                   <Tabs defaultValue="requirement">
-                    <TabsList variant="pill" className="mb-lg">
+                    <TabsList variant="pill" className="mb-lg max-w-full overflow-x-auto">
                       <TabsTrigger value="requirement" variant="pill">
                         需求分析
                       </TabsTrigger>

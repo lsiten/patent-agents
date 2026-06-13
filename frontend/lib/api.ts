@@ -760,10 +760,20 @@ export interface ConversationSummary {
   linked_workflow_id?: string | null;
   workflow_task_id?: string | null;
   workflow_state?: string | null;
+  active_reply?: ConversationActiveReply | null;
 }
 
 export interface ConversationDetail extends ConversationSummary {
   messages: ChatMessage[];
+}
+
+export interface ConversationActiveReply {
+  active: boolean;
+  stream_call_id?: string | null;
+  started_at?: string | null;
+  updated_at?: string | null;
+  status?: string | null;
+  message?: string | null;
 }
 
 export interface CreateConversationRequest {
@@ -878,6 +888,7 @@ export const conversationApi = {
       onAgentWork?: (data: AgentWorkEvent) => void;
       onAgentActivity?: (data: AgentEvent) => void;
       onConversationMessage?: (data: ChatMessage) => void;
+      onConversationState?: (data: { active_reply?: ConversationActiveReply | null }) => void;
       onDone?: () => void;
       onError?: (error: string) => void;
     },
@@ -930,6 +941,9 @@ export const conversationApi = {
                 break;
               case 'conversation_message':
                 callbacks.onConversationMessage?.(parsed);
+                break;
+              case 'conversation_state':
+                callbacks.onConversationState?.(parsed);
                 break;
               case 'done':
                 callbacks.onDone?.();

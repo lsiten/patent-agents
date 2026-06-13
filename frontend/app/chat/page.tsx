@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Suspense, useState, useRef, useEffect, useCallback, useMemo, useLayoutEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Send, Bot, User, Sparkles, FileText, Loader2, Plus, Trash2,
@@ -19,7 +19,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { clsx } from 'clsx';
 import { conversationApi, workflowApi } from '@/lib/api';
-import type { ConversationSummary } from '@/lib/api';
+import type { ConversationActiveReply, ConversationSummary } from '@/lib/api';
 import type { AgentEvent, AgentWorkEvent, ChatMessage } from '@/types';
 
 const terminalWorkflowStates = new Set(['completed', 'failed', 'cancelled']);
@@ -160,6 +160,65 @@ function createLocalChatMessage(
     content,
     timestamp: new Date().toISOString(),
     ...options,
+  };
+}
+
+function createActiveReplyMessage(activeReply: ConversationActiveReply): ChatMessage {
+  const callId = activeReply.stream_call_id || `active-reply-${Date.now()}`;
+  return {
+    id: `assistant-stream-${callId}`,
+    role: 'assistant',
+    content: activeReply.message || '正在回复中...',
+    timestamp: activeReply.started_at || activeReply.updated_at || new Date().toISOString(),
+    type: 'text',
+    isStreaming: true,
+    metadata: { active_reply: true, stream_call_id: callId },
+    agent_events: [
+      {
+        id: `${callId}-restored`,
+        sequence: 0,
+        call_id: callId,
+        type: 'status',
+        agent_name: 'patent.ceo.v1',
+        timestamp: activeReply.updated_at || activeReply.started_at || new Date().toISOString(),
+        message: activeReply.message || '正在回复中...',
+        data: { restored: true, status: activeReply.status || 'running' },
+      },
+    ],
+  };
+}
+
+function applyActiveReplyToMessages(messages: ChatMessage[], activeReply?: ConversationActiveReply | null): ChatMessage[] {
+  const withoutRestored = messages.filter((message) => message.metadata?.active_reply !== true);
+  if (!activeReply?.active) return withoutRestored;
+  const hasStreaming = withoutRestored.some((message) => message.isStreaming);
+  return hasStreaming ? withoutRestored : [...withoutRestored, createActiveReplyMessage(activeReply)];
+}
+
+function restoreConversationUiState(messages: ChatMessage[], convId: string, hasWorkflow: boolean) {
+  const assistantMessages = messages.filter((message) => message.role === 'assistant');
+  const lastAssistant = assistantMessages.at(-1);
+  const lastRecommendation = [...assistantMessages]
+    .reverse()
+    .find((message) => message.metadata?.recommend_create_patent === true);
+  const pendingConfirmation = !hasWorkflow && lastAssistant?.metadata?.confirmation && isRecord(lastAssistant.metadata.confirmation)
+    ? {
+        question: typeof lastAssistant.metadata.confirmation.question === 'string'
+          ? lastAssistant.metadata.confirmation.question
+          : '',
+        options: Array.isArray(lastAssistant.metadata.confirmation.options)
+          ? lastAssistant.metadata.confirmation.options.filter((option): option is string => typeof option === 'string')
+          : [],
+        convId,
+      }
+    : null;
+
+  return {
+    recommendStartWorkflow: !hasWorkflow && Boolean(lastRecommendation),
+    suggestedTitle: typeof lastRecommendation?.metadata?.suggested_title === 'string'
+      ? lastRecommendation.metadata.suggested_title
+      : null,
+    pendingConfirmation: pendingConfirmation?.question ? pendingConfirmation : null,
   };
 }
 
@@ -306,6 +365,7 @@ function ChatPageContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingConv, setIsLoadingConv] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'connecting' | 'connected' | 'disconnected'>('idle');
+  const [activeReply, setActiveReply] = useState<ConversationActiveReply | null>(null);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [, setError] = useState<string | null>(null);
@@ -316,6 +376,7 @@ function ChatPageContent() {
   const [editTitleValue, setEditTitleValue] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [composerHeight, setComposerHeight] = useState(0);
 
   // Workflow state
   const [workflowTaskId, setWorkflowTaskId] = useState<string | null>(null);
@@ -345,6 +406,7 @@ function ChatPageContent() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
 
   const filteredMessages = useMemo(() => {
     if (!searchQuery.trim()) return messages;
@@ -355,6 +417,24 @@ function ChatPageContent() {
   }, [messages, searchQuery]);
   const visibleWorkflowTaskId = activeConvId ? workflowTaskId : null;
   const visibleWorkflowState = activeConvId ? workflowState : null;
+
+  useLayoutEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) return;
+
+    const updateHeight = () => {
+      setComposerHeight(Math.ceil(composer.getBoundingClientRect().height));
+    };
+    updateHeight();
+
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(composer);
+    window.addEventListener('resize', updateHeight);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateHeight);
+    };
+  }, [pendingFile, pendingConfirmation, recommendStartWorkflow, activeConvId]);
 
   const appendSystemMessage = useCallback(
     (content: string, tone: 'info' | 'error' = 'info') => {
@@ -467,13 +547,22 @@ function ChatPageContent() {
     try {
       const detail = await conversationApi.get(convId);
       if (conversationLoadSeqRef.current !== loadSeq) return;
-      setMessages(detail.messages.length > 0 ? detail.messages : [createWelcomeMessage()]);
+      const nextActiveReply = detail.active_reply?.active ? detail.active_reply : null;
+      const hasWorkflow = Boolean(detail.linked_workflow_id);
+      const persistedMessages = detail.messages.length > 0 ? detail.messages : [createWelcomeMessage()];
+      const restoredUiState = restoreConversationUiState(persistedMessages, convId, hasWorkflow);
+      setActiveReply(nextActiveReply);
+      setIsLoading(Boolean(nextActiveReply));
+      setConnectionStatus(nextActiveReply ? 'connected' : 'idle');
+      setMessages(applyActiveReplyToMessages(
+        persistedMessages,
+        nextActiveReply,
+      ));
       setWorkflowTaskId(detail.linked_workflow_id ?? null);
       setWorkflowState(detail.status ?? null);
-      if (detail.linked_workflow_id) {
-        setPendingConfirmation(null);
-        setRecommendStartWorkflow(false);
-      }
+      setPendingConfirmation(nextActiveReply ? null : restoredUiState.pendingConfirmation);
+      setRecommendStartWorkflow(nextActiveReply ? false : restoredUiState.recommendStartWorkflow);
+      setSuggestedTitle(restoredUiState.suggestedTitle);
 
       if (detail.linked_workflow_id) {
         try {
@@ -506,6 +595,7 @@ function ChatPageContent() {
       setActiveConvId(convIdFromParam);
       setConnectionStatus('idle');
       setIsLoading(false);
+      setActiveReply(null);
 
       if (skipNextConversationLoadRef.current === convIdFromParam) {
         skipNextConversationLoadRef.current = null;
@@ -521,6 +611,7 @@ function ChatPageContent() {
     setActiveConvId(null);
     setConnectionStatus('idle');
     setIsLoading(false);
+    setActiveReply(null);
     setMessages([createWelcomeMessage()]);
     setIsLoadingConv(false);
     setWorkflowTaskId(null);
@@ -546,6 +637,7 @@ function ChatPageContent() {
       setActiveConvId(linkedConversation.id);
       setConnectionStatus('idle');
       setIsLoading(false);
+      setActiveReply(null);
       setPendingConfirmation(null);
       setRecommendStartWorkflow(false);
       setDispatchActivities([]);
@@ -564,9 +656,29 @@ function ChatPageContent() {
   }, [activeConvId, conversations, convIdFromParam, loadConversation, taskIdFromParam]);
 
   useEffect(() => {
-    if (!activeConvId || !workflowTaskId || (workflowState && terminalWorkflowStates.has(workflowState))) return;
+    const shouldStreamConversationEvents = Boolean(
+      activeConvId
+      && (
+        activeReply?.active
+        || (workflowTaskId && !(workflowState && terminalWorkflowStates.has(workflowState)))
+      )
+    );
+    if (!activeConvId || !shouldStreamConversationEvents) return;
 
     const stream = conversationApi.eventStream(activeConvId, {
+      onConversationState: (event) => {
+        const nextActiveReply = event.active_reply?.active ? event.active_reply : null;
+        const wasReplying = Boolean(activeReply?.active);
+        setActiveReply(nextActiveReply);
+        setIsLoading(Boolean(nextActiveReply));
+        setMessages((current) => applyActiveReplyToMessages(current, nextActiveReply));
+        if (!nextActiveReply && wasReplying) {
+          setConnectionStatus('idle');
+          void loadConversation(activeConvId);
+        } else {
+          setConnectionStatus(nextActiveReply ? 'connected' : 'idle');
+        }
+      },
       onAgentWork: (event) => {
         setDispatchActivities((current) => updateDispatchActivities(current, event));
         if (event.event_type === 'agent.work.failed') {
@@ -574,10 +686,22 @@ function ChatPageContent() {
         }
       },
       onAgentActivity: (event) => {
-        setMessages((current) => updateWorkflowActivityMessage(current, workflowTaskId, event));
+        if (workflowTaskId) {
+          setMessages((current) => updateWorkflowActivityMessage(current, workflowTaskId, event));
+        } else {
+          setMessages((current) => {
+            const nextActiveReply = activeReply?.active ? activeReply : null;
+            const withPlaceholder = applyActiveReplyToMessages(current, nextActiveReply);
+            return withPlaceholder.map((message) => (
+              message.metadata?.active_reply === true
+                ? { ...message, agent_events: [...(message.agent_events || []), event] }
+                : message
+            ));
+          });
+        }
       },
       onConversationMessage: (message) => {
-        setMessages((current) => upsertMessage(current, message));
+        setMessages((current) => applyActiveReplyToMessages(upsertMessage(current, message), activeReply));
       },
       onDone: () => {
         void loadConversation(activeConvId);
@@ -586,7 +710,7 @@ function ChatPageContent() {
     });
 
     return () => stream.abort();
-  }, [activeConvId, loadConversation, workflowState, workflowTaskId]);
+  }, [activeConvId, activeReply, loadConversation, workflowState, workflowTaskId]);
 
   useEffect(() => {
     if (!activeConvId || !workflowTaskId) return;
@@ -1266,7 +1390,7 @@ function ChatPageContent() {
       </aside>
 
       {/* Main Chat Area */}
-      <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+      <div className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
         {/* Header */}
         <div className="flex-shrink-0 border-b border-hairline bg-canvas/95 px-6 py-3 backdrop-blur">
           <div className="flex min-w-0 items-center justify-between gap-3">
@@ -1375,21 +1499,36 @@ function ChatPageContent() {
         )}
 
         {/* Messages */}
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-surface/35">
-          <div className="flex min-h-full w-full min-w-0 flex-col space-y-6 px-4 pb-6 pt-6 sm:px-6 lg:px-8">
+        <div className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-surface/35">
+          {!activeConvId && messages.length === 1 && messages[0]?.id === 'welcome' && !isLoadingConv && (
+            <div
+              className="pointer-events-none absolute inset-x-0 top-0 flex min-w-0 items-center justify-center px-4 text-center sm:px-6 lg:px-8"
+              style={{
+                bottom: `calc(${composerHeight}px + env(safe-area-inset-bottom))`,
+              }}
+            >
+              <div className="mx-auto max-w-md">
+                <MessageSquare className="mx-auto mb-4 h-12 w-12 text-slate/30" />
+                <h2 className="mb-2 text-lg font-semibold text-ink">开始新的专利对话</h2>
+                <p className="text-sm text-slate">
+                  描述您的发明创造，AI 专利代理人将帮助您梳理技术方案、评估专利价值，并生成专业的专利申请文件。
+                </p>
+              </div>
+            </div>
+          )}
+          <div
+            className="flex min-h-full w-full min-w-0 flex-col space-y-6 px-4 pt-6 sm:px-6 lg:px-8"
+            style={{
+              paddingBottom: `calc(${composerHeight}px + env(safe-area-inset-bottom) + 1rem)`,
+            }}
+          >
 
-            {isLoadingConv ? (
+            {isLoadingConv && messages.length === 0 ? (
               <div className="flex justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-brand-green-dark" />
               </div>
             ) : !activeConvId && messages.length === 1 && messages[0]?.id === 'welcome' ? (
-              <div className="flex flex-1 flex-col items-center justify-center text-center">
-                <MessageSquare className="w-12 h-12 text-slate/30 mb-4" />
-                <h2 className="text-lg font-semibold text-ink mb-2">开始新的专利对话</h2>
-                <p className="text-sm text-slate max-w-md mb-6">
-                  描述您的发明创造，AI 专利代理人将帮助您梳理技术方案、评估专利价值，并生成专业的专利申请文件。
-                </p>
-              </div>
+              <div className="flex-1" aria-hidden="true" />
             ) : (searchQuery ? filteredMessages : messages).length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center text-center">
                 <Bot className="w-10 h-10 text-slate/30 mb-3" />
@@ -1731,8 +1870,11 @@ function ChatPageContent() {
         )}
 
         {/* Input Area */}
-        <div className="z-30 min-w-0 flex-shrink-0 overflow-hidden border-t border-hairline bg-canvas/98 px-4 py-3 shadow-[0_-10px_24px_rgba(0,30,43,0.08)] backdrop-blur sm:px-6 lg:px-8">
-          <div className="w-full min-w-0 max-w-full">
+        <div
+          ref={composerRef}
+          className="absolute inset-x-0 bottom-0 z-40 min-w-0 overflow-hidden border-t border-hairline bg-canvas/98 px-4 py-3 shadow-[0_-10px_24px_rgba(0,30,43,0.08)] backdrop-blur sm:px-6 lg:px-8"
+        >
+          <div className="mx-auto w-full min-w-0 max-w-full">
             {pendingFile && (
               <div className="mb-2 flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-lg border border-hairline bg-canvas px-3 py-2 text-sm">
                 <FileText className="w-4 h-4 text-slate-600 flex-shrink-0" />

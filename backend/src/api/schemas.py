@@ -384,6 +384,7 @@ class ConversationSummary(BaseModel):
     status: str
     linked_workflow_id: Optional[str] = None
     workflow_state: Optional[str] = None
+    active_reply: Optional[Dict[str, Any]] = None
 
 
 class ToolCallInfo(BaseModel):
@@ -444,6 +445,7 @@ class ConversationDetail(BaseModel):
     status: str
     linked_workflow_id: Optional[str] = None
     workflow_state: Optional[str] = None
+    active_reply: Optional[Dict[str, Any]] = None
 
 
 class ConversationListResponse(BaseModel):
