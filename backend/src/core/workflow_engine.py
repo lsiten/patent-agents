@@ -335,11 +335,14 @@ class PatentWorkflowEngine:
     ) -> WorkflowContext:
         """创建新的工作流"""
         context = WorkflowContext(task_id=task_id, user_id=user_id, target_country=target_country)
-        context.original_description = description
-        context.title = self._extract_title(description)
+        cleaned_description = self._sanitize_disclosure_text(description)
+        context.original_description = cleaned_description
+        context.title = self._extract_title(cleaned_description)
         context.metadata = {
             **context.metadata,
             "target_country": target_country,
+            "raw_disclosure": description,
+            "disclosure_sanitized": cleaned_description != description,
         }
         if patent_type_preference is not None:
             context.metadata = {
@@ -360,18 +363,46 @@ class PatentWorkflowEngine:
         return context
 
     @staticmethod
+    def _sanitize_disclosure_text(description: str) -> str:
+        """Turn meeting transcripts into technical disclosure text before drafting."""
+        if not description:
+            return ""
+        text = str(description).replace("\r\n", "\n").replace("\r", "\n")
+        cleaned_lines: List[str] = []
+        speaker_ts = re.compile(r"^\s*[\u4e00-\u9fa5A-Za-z0-9_·（）()、\s]{1,30}[（(]\d{2}:\d{2}:\d{2}[）)]\s*[：:]?\s*")
+        plain_ts = re.compile(r"^\s*[（(]?\d{2}:\d{2}:\d{2}[）)]?\s*[：:]?\s*")
+        filename_noise = re.compile(r"^\s*(文件名|任务编号|生成时间|逐字稿|会议记录|转写文本)\s*[：:]")
+        for raw_line in text.split("\n"):
+            line = raw_line.strip()
+            if not line or filename_noise.search(line):
+                continue
+            line = speaker_ts.sub("", line)
+            line = plain_ts.sub("", line)
+            line = re.sub(r"\s+", " ", line).strip()
+            if not line:
+                continue
+            if line in {"嗯", "啊", "对", "行", "好的", "那先写", "那写吧"}:
+                continue
+            cleaned_lines.append(line)
+        cleaned = "\n".join(cleaned_lines).strip()
+        return cleaned or str(description).strip()
+
+    @staticmethod
     def _extract_title(description: str) -> str:
         """从技术描述中提取专利标题"""
         if not description:
             return "未命名专利"
+        text = PatentWorkflowEngine._sanitize_disclosure_text(description)
+        if re.search(r"Cave|折幕|沉浸式|多屏|显示面|姿态|补偿|遮挡|裁剪", text, re.I):
+            return "一种基于Cave折幕视频的处理方法及系统"
         # 取第一句或前40字符作为标题
-        text = description.strip()
         # 按句号、换行截断（逗号不截断，保留完整短语）
         for sep in ["。", ".", "\n", "；", ";"]:
             idx = text.find(sep, 0, 80)
             if idx > 0:
                 text = text[:idx]
                 break
+        text = re.sub(r"^本发明(?:公开|涉及|提供|提出)了?", "", text).strip(" ：:，,。")
         # 如果仍然太长，在逗号处截断
         if len(text) > 40:
             comma_idx = text.find("，", 0, 50) or text.find(",", 0, 50)
@@ -521,6 +552,15 @@ class PatentWorkflowEngine:
                                 event_callback=event_callback,
                             )
                             agent_text = json.dumps(context_data, ensure_ascii=False)[:500] if isinstance(context_data, dict) else str(context_data)[:500]
+                        elif agent_id == "quality_reviewer":
+                            agent_text, context_data = await self._run_quality_review_with_timeout(
+                                service,
+                                profile_id,
+                                task_desc,
+                                context,
+                                event_callback=event_callback,
+                            )
+                            agent_tool_results = []
                         else:
                             # 流式调用 Agent（发射 thinking/tool_call 事件）
                             agent_result = await self._run_agent_stream(
@@ -592,6 +632,12 @@ class PatentWorkflowEngine:
                     context_data = await self._ensure_required_patent_drawings(
                         context,
                         context_data,
+                        event_callback=event_callback,
+                    )
+                    context_data = await self._refresh_working_draft_docx(
+                        context,
+                        context_data,
+                        checkpoint="附图补齐",
                         event_callback=event_callback,
                     )
                     context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
@@ -817,33 +863,32 @@ class PatentWorkflowEngine:
                             {"from_agent": "CEO Agent", "to_agent": "专利撰写 Agent", "task_description": revision_prompt[:300]})
 
                     try:
-                        agent_result = await self._run_agent_stream(
-                            service, "patent.writer.v1", revision_prompt,
-                            context, agent_name="专利撰写 Agent",
+                        context_data = await self._generate_patent_in_sections(
+                            service,
+                            "patent.writer.v1",
+                            revision_prompt,
+                            context,
                             event_callback=event_callback,
                         )
+                        agent_text = json.dumps(context_data, ensure_ascii=False)[:500]
+                        agent_tool_results = []
                     except Exception as exc:
                         self._logger.warning(
                             f"Patent writer revision failed, applying fallback repairs: {exc}",
                             task_id=context.task_id,
                         )
-                        agent_result = {
-                            "text": "",
-                            "tool_results": [],
+                        agent_text = ""
+                        agent_tool_results = []
+                        context_data = {
+                            "failed": True,
+                            "completed": False,
+                            "error": str(exc),
                             "structured_result": {
                                 "failed": True,
                                 "completed": False,
                                 "error": str(exc),
                             },
                         }
-                    agent_text = agent_result.get("text", "")
-                    agent_tool_results = agent_result.get("tool_results", [])
-                    context_data = self._build_context_data_from_agent_response(
-                        "patent_writer",
-                        agent_text,
-                        agent_tool_results,
-                        agent_result.get("structured_result"),
-                    )
 
                     if event_callback:
                         event_callback("专利撰写 Agent", "agent.content",
@@ -865,6 +910,12 @@ class PatentWorkflowEngine:
                         context_data = await self._ensure_required_patent_drawings(
                             context,
                             context_data,
+                            event_callback=event_callback,
+                        )
+                        context_data = await self._refresh_working_draft_docx(
+                            context,
+                            context_data,
+                            checkpoint=f"修正第{context.iteration_count}轮",
                             event_callback=event_callback,
                         )
                         context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
@@ -896,18 +947,13 @@ class PatentWorkflowEngine:
                             f"🎯 调度 → 质量审查 Agent（第{context.iteration_count + 1}轮审查）",
                             {"from_agent": "CEO Agent", "to_agent": "质量审查 Agent", "task_description": review_prompt[:300]})
 
-                    agent_result = await self._run_agent_stream(
-                        service, "patent.quality_reviewer.v1", review_prompt,
-                        context, agent_name="质量审查 Agent",
+                    agent_text, context_data = await self._run_quality_review_with_timeout(
+                        service,
+                        "patent.quality_reviewer.v1",
+                        review_prompt,
+                        context,
                         event_callback=event_callback,
-                    )
-                    agent_text = agent_result.get("text", "")
-                    agent_tool_results = agent_result.get("tool_results", [])
-                    context_data = self._build_context_data_from_agent_response(
-                        "quality_reviewer",
-                        agent_text,
-                        agent_tool_results,
-                        agent_result.get("structured_result"),
+                        round_label=f"第{context.iteration_count + 1}轮",
                     )
 
                     if event_callback:
@@ -1081,12 +1127,26 @@ class PatentWorkflowEngine:
                         task_id=context.task_id,
                         tech_description=context.original_description,
                         drawings=draft.get("drawings", []),
+                        output_stage="final",
                     )
                     if docx_result.get("success"):
                         docx_path = docx_result.get("file_path", "")
                         context.patent_draft["docx_path"] = docx_path
                         if docx_result.get("figures"):
                             context.patent_draft["docx_figures"] = docx_result.get("figures")
+                        context.patent_draft["final_document"] = {
+                            "file_path": docx_path,
+                            "filename": _Path(docx_path).name if docx_path else "",
+                            "download_url": f"/api/v1/workflows/{context.task_id}/export/docx",
+                        }
+                        context.metadata["final_document_path"] = docx_path
+                        try:
+                            _persist_phase_result(context.task_id, "patent_draft", context.patent_draft)
+                        except Exception as persist_exc:
+                            self._logger.warning(
+                                f"Failed to persist final patent draft metadata: {persist_exc}",
+                                task_id=context.task_id,
+                            )
                         self._logger.info(f"Final DOCX generated after quality review: {docx_path}")
                         if event_callback:
                             event_callback("CEO Agent", "agent.content",
@@ -1663,7 +1723,15 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             return True
 
         # 检查各子审查中是否有严重问题
-        for section_key in ("formal_compliance_review", "claims_review", "description_review", "consistency_review"):
+        for section_key in (
+            "formal_compliance_review",
+            "claims_review",
+            "description_review",
+            "consistency_review",
+            "drawing_review",
+            "drawings_review",
+            "figure_review",
+        ):
             section = review_report.get(section_key, {})
             if isinstance(section, dict):
                 issues = section.get("issues", [])
@@ -2076,13 +2144,13 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             tool = PatentDrawingGeneratorTool()
             generated_drawings: List[Dict[str, Any]] = []
             for figure_number in missing_figures:
-                title = f"{figure_number} 专利附图"
+                title = "专利附图"
                 if figure_number == "图1":
-                    title = f"{figure_number} 系统结构示意图"
+                    title = "系统结构示意图"
                 elif "流程" in drawing_description or figure_number == "图2":
-                    title = f"{figure_number} 方法流程示意图"
+                    title = "方法流程示意图"
                 elif any(keyword in drawing_description for keyword in ("补偿", "重映射", "遮挡", "空白")):
-                    title = f"{figure_number} 画面补偿示意图"
+                    title = "画面补偿示意图"
                 result = await tool.execute(
                     tech_description=(
                         f"{context.original_description}\n\n"
@@ -2121,6 +2189,64 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             self._logger.warning(f"Failed to generate required patent drawings: {exc}")
             draft.setdefault("_drawing_generation_error", str(exc)[:500])
 
+        return draft
+
+    async def _refresh_working_draft_docx(
+        self,
+        context: WorkflowContext,
+        draft: Dict[str, Any],
+        checkpoint: str,
+        event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        """Refresh draft/working_draft.docx after section writing or drawing generation.
+
+        This is a non-final working document. The final DOCX is still generated only
+        after the quality review passes.
+        """
+        if not isinstance(draft, dict) or draft.get("_agent_failed") is True:
+            return draft
+        try:
+            from src.agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
+
+            docx_result = await PatentDocxGeneratorTool().execute(
+                title=context.title or "专利申请文件",
+                claims=draft.get("claims", {}),
+                description=draft.get("description", {}),
+                abstract=draft.get("abstract", ""),
+                task_id=context.task_id,
+                tech_description=context.original_description,
+                drawings=draft.get("drawings", []),
+                output_stage="draft",
+                file_name="working_draft.docx",
+            )
+            if isinstance(docx_result, dict) and docx_result.get("success"):
+                draft["working_docx_path"] = docx_result.get("file_path", "")
+                if docx_result.get("figures"):
+                    draft["working_docx_figures"] = docx_result.get("figures")
+                if event_callback:
+                    event_callback(
+                        "专利撰写 Agent",
+                        "agent.content",
+                        f"📝 已刷新工作草稿 DOCX：{checkpoint}",
+                        {
+                            "agent_name": "专利撰写 Agent",
+                            "phase": "patent_writing",
+                            "checkpoint": checkpoint,
+                            "content": json.dumps(
+                                {
+                                    "working_docx_path": draft.get("working_docx_path"),
+                                    "figures": draft.get("working_docx_figures", []),
+                                },
+                                ensure_ascii=False,
+                            ),
+                        },
+                    )
+        except Exception as exc:
+            self._logger.warning(
+                f"Failed to refresh working draft DOCX at {checkpoint}: {exc}",
+                task_id=context.task_id,
+            )
+            draft["_working_docx_error"] = str(exc)[:500]
         return draft
 
     def _apply_review_suggestions_to_draft(
@@ -2338,7 +2464,9 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             seen.add(figure_number)
             drawing = dict(item)
             drawing["figure_number"] = figure_number
-            drawing["title"] = title_map.get(figure_number, str(drawing.get("title") or f"{figure_number} 专利附图"))
+            raw_title = str(drawing.get("title") or "").strip()
+            raw_title = re.sub(rf"^{re.escape(figure_number)}\s*[:：、.．-]?\s*", "", raw_title).strip()
+            drawing["title"] = title_map.get(figure_number, raw_title or "专利附图")
             drawing["description"] = f"{figure_number}为{drawing['title']}。"
             normalized.append(drawing)
         return normalized
@@ -3347,9 +3475,11 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         """
         req_data = json.dumps(context.requirement_analysis, ensure_ascii=False)[:2000] if context.requirement_analysis else ""
         ret_data = json.dumps(context.retrieval_report, ensure_ascii=False)[:1500] if context.retrieval_report else ""
+        task_context = str(base_task or "").strip()
         tech_content = "\n\n".join(
             part
             for part in [
+                f"当前撰写任务/修正要求：\n{task_context}" if task_context else "",
                 context.original_description,
                 json.dumps(context.requirement_analysis or {}, ensure_ascii=False),
                 json.dumps(context.retrieval_report or {}, ensure_ascii=False),
@@ -3391,6 +3521,50 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     },
                 )
 
+        async def _run_writer_tool(
+            tool_name: str,
+            parameters: Dict[str, Any],
+            call_factory: Callable[[], Any],
+            timeout_seconds: int = 90,
+        ) -> Dict[str, Any]:
+            """Run a writer-owned tool with progress events and a bounded wait.
+
+            Section drafting must keep moving: a single slow LLM/tool call should not
+            block the whole patent document from being written into the working DOCX.
+            """
+            await _emit_tool_start(tool_name, parameters)
+            try:
+                result = await asyncio.wait_for(call_factory(), timeout=timeout_seconds)
+                if not isinstance(result, dict):
+                    result = {"success": True, "data": {"content": str(result)}}
+                await _emit_tool_end(
+                    tool_name,
+                    parameters,
+                    result,
+                    bool(result.get("success", True)),
+                )
+                return result
+            except Exception as exc:
+                result = {
+                    "success": False,
+                    "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+                    "data": {},
+                }
+                await _emit_tool_end(tool_name, parameters, result, False)
+                if event_callback:
+                    event_callback(
+                        "专利撰写 Agent",
+                        "agent.thinking",
+                        f"⚠️ {tool_name} 调用超时或失败，继续使用分段兜底内容写入草稿",
+                        {
+                            "agent_name": "专利撰写 Agent",
+                            "thought": "writer_tool_timeout_fallback",
+                            "tool_name": tool_name,
+                            "error": result["error"],
+                        },
+                    )
+                return result
+
         # Deterministically orchestrate the writer-owned Hermes tools first. This keeps
         # long patent drafting visible and prevents the writer agent from looping on tools.
         try:
@@ -3404,13 +3578,108 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             abstract_text = ""
             rule_based_draft = self._build_rule_based_patent_sections(context)
 
+            async def _checkpoint_writer_draft(checkpoint: str) -> None:
+                """Persist current section-level content and refresh draft/working_draft.docx."""
+                prior_checkpoints = []
+                if isinstance(context.patent_draft, dict):
+                    prior_checkpoints = list(context.patent_draft.get("drafting_checkpoints", []) or [])
+
+                current_draft: Dict[str, Any] = {
+                    "claims": {
+                        "independent_claim": claims_data.get("independent_claim", ""),
+                        "dependent_claims": claims_data.get("dependent_claims", []),
+                    },
+                    "description": {
+                        "technical_field": description_data.get("technical_field", ""),
+                        "background_art": description_data.get("background_art", ""),
+                        "summary_of_invention": description_data.get("summary_of_invention", ""),
+                        "drawings_description": description_data.get("drawings_description", ""),
+                        "detailed_description": description_data.get("detailed_description", ""),
+                    },
+                    "abstract": abstract_text,
+                    "drawings": drawings_data,
+                    "docx_path": "",
+                    "drafting_checkpoints": [
+                        *prior_checkpoints,
+                        {"checkpoint": checkpoint, "timestamp": datetime.now().isoformat()},
+                    ],
+                }
+                context.patent_draft = current_draft
+
+                try:
+                    _persist_phase_result(context.task_id, "patent_draft", current_draft)
+                except Exception:
+                    pass
+
+                try:
+                    from src.agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
+
+                    docx_result = await PatentDocxGeneratorTool().execute(
+                        title=context.title or "专利申请文件",
+                        claims=current_draft["claims"],
+                        description=current_draft["description"],
+                        abstract=current_draft["abstract"],
+                        task_id=context.task_id,
+                        tech_description=context.original_description,
+                        drawings=current_draft.get("drawings", []),
+                        output_stage="draft",
+                        file_name="working_draft.docx",
+                    )
+                    if isinstance(docx_result, dict) and docx_result.get("success"):
+                        current_draft["working_docx_path"] = docx_result.get("file_path", "")
+                        if docx_result.get("figures"):
+                            current_draft["working_docx_figures"] = docx_result.get("figures")
+                        context.patent_draft = current_draft
+                        try:
+                            _persist_phase_result(context.task_id, "patent_draft", current_draft)
+                        except Exception:
+                            pass
+                        if event_callback:
+                            event_callback(
+                                "专利撰写 Agent",
+                                "agent.content",
+                                f"📝 已写入工作草稿 DOCX：{checkpoint}",
+                                {
+                                    "agent_name": "专利撰写 Agent",
+                                    "phase": "patent_writing",
+                                    "checkpoint": checkpoint,
+                                    "content": json.dumps(
+                                        {
+                                            "working_docx_path": current_draft.get("working_docx_path"),
+                                            "figures": current_draft.get("working_docx_figures", []),
+                                        },
+                                        ensure_ascii=False,
+                                    ),
+                                },
+                            )
+                    elif event_callback:
+                        event_callback(
+                            "专利撰写 Agent",
+                            "agent.thinking",
+                            f"⚠️ 工作草稿 DOCX 暂未写入成功：{checkpoint}",
+                            {
+                                "agent_name": "专利撰写 Agent",
+                                "phase": "patent_writing",
+                                "checkpoint": checkpoint,
+                                "result": docx_result,
+                            },
+                        )
+                except Exception as exc:
+                    self._logger.warning(
+                        f"Failed to write incremental working DOCX checkpoint {checkpoint}: {exc}",
+                        task_id=context.task_id,
+                    )
+                    current_draft["_working_docx_error"] = str(exc)[:500]
+
             claim_params = {
                 "features": tech_content[:12000],
                 "protection_scope": "覆盖Cave折幕视频处理方法、系统、设备及存储介质",
             }
-            await _emit_tool_start("claim_drafter", claim_params)
-            claim_result = await ClaimDrafterTool().execute(**claim_params)
-            await _emit_tool_end("claim_drafter", claim_params, claim_result, bool(claim_result.get("success", True)))
+            claim_result = await _run_writer_tool(
+                "claim_drafter",
+                claim_params,
+                lambda: ClaimDrafterTool().execute(**claim_params),
+            )
             claim_data = claim_result.get("data", {}) if isinstance(claim_result, dict) else {}
             claims_data = self._normalize_claims_payload(
                 claim_data,
@@ -3428,6 +3697,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                             "thought": "rule_based_claims_fallback",
                         },
                     )
+            await _checkpoint_writer_draft("权利要求书")
 
             claims_text = json.dumps(claims_data, ensure_ascii=False)
             section_map = {
@@ -3444,13 +3714,10 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     "technical_content": tech_content[:12000],
                     "claims": claims_text[:6000],
                 }
-                await _emit_tool_start("description_writer", desc_params)
-                section_result = await writer_tool.execute(**desc_params)
-                await _emit_tool_end(
+                section_result = await _run_writer_tool(
                     "description_writer",
                     desc_params,
-                    section_result,
-                    bool(section_result.get("success", True)) if isinstance(section_result, dict) else True,
+                    lambda params=desc_params: writer_tool.execute(**params),
                 )
                 section_data = section_result.get("data", {}) if isinstance(section_result, dict) else {}
                 section_content = section_data.get("content", "") if isinstance(section_data, dict) else ""
@@ -3469,19 +3736,32 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                         )
                 if section_content:
                     description_data[field_name] = section_content
+                    await _checkpoint_writer_draft(
+                        {
+                            "technical_field": "技术领域",
+                            "background_art": "背景技术",
+                            "summary_of_invention": "发明内容",
+                            "drawings_description": "附图说明",
+                            "detailed_description": "具体实施方式",
+                        }.get(field_name, field_name)
+                    )
 
             support_params = {
                 "claims": claims_text[:10000],
                 "description": json.dumps(description_data, ensure_ascii=False)[:14000],
             }
-            await _emit_tool_start("support_checker", support_params)
-            support_result = await SupportCheckerTool().execute(**support_params)
-            await _emit_tool_end("support_checker", support_params, support_result, True)
+            support_result = await _run_writer_tool(
+                "support_checker",
+                support_params,
+                lambda: SupportCheckerTool().execute(**support_params),
+                timeout_seconds=60,
+            )
 
             if not abstract_text:
                 summary = str(description_data.get("summary_of_invention") or "")
                 detailed = str(description_data.get("detailed_description") or "")
                 abstract_text = str(rule_based_draft.get("abstract") or summary or detailed or context.original_description)[:600]
+                await _checkpoint_writer_draft("说明书摘要")
 
             required_sections_present = all(
                 str(description_data.get(key) or "").strip()
@@ -3493,6 +3773,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 )
             )
             if claims_data.get("independent_claim") and required_sections_present:
+                existing_draft = context.patent_draft if isinstance(context.patent_draft, dict) else {}
                 patent_result = {
                     "claims": {
                         "independent_claim": claims_data.get("independent_claim", ""),
@@ -3510,6 +3791,9 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     "docx_path": "",
                     "support_check": support_result,
                     "full_response": "",
+                    "drafting_checkpoints": existing_draft.get("drafting_checkpoints", []),
+                    "working_docx_path": existing_draft.get("working_docx_path", ""),
+                    "working_docx_figures": existing_draft.get("working_docx_figures", []),
                 }
                 claims_count = 1 + len(patent_result["claims"]["dependent_claims"])
                 sections_count = sum(1 for v in patent_result["description"].values() if v)
@@ -5498,6 +5782,68 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         repaired += "]" * open_brackets + "}" * open_braces
 
         return repaired
+
+    async def _run_quality_review_with_timeout(
+        self,
+        service,
+        profile_id: str,
+        review_prompt: str,
+        context: WorkflowContext,
+        event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
+        round_label: str = "",
+        timeout_seconds: int = 150,
+    ) -> tuple[str, Dict[str, Any]]:
+        """Run the quality reviewer with a bounded wait and deterministic fallback.
+
+        Quality review is a gate, so it must always produce a structured result. If
+        the reviewer LLM/tool chain hangs, the local review still checks the draft
+        and drawings, then lets the normal remediation loop decide whether to fix
+        or finalize.
+        """
+        label = f"（{round_label}）" if round_label else ""
+        try:
+            agent_result = await asyncio.wait_for(
+                self._run_agent_stream(
+                    service,
+                    profile_id,
+                    review_prompt,
+                    context,
+                    agent_name="质量审查 Agent",
+                    event_callback=event_callback,
+                ),
+                timeout=timeout_seconds,
+            )
+            agent_text = agent_result.get("text", "")
+            context_data = self._build_context_data_from_agent_response(
+                "quality_reviewer",
+                agent_text,
+                agent_result.get("tool_results", []),
+                agent_result.get("structured_result"),
+            )
+            return agent_text, context_data
+        except asyncio.TimeoutError:
+            reason = f"质量审查 Agent{label}超过 {timeout_seconds}s 未完成"
+        except Exception as exc:
+            reason = f"质量审查 Agent{label}执行异常：{str(exc)[:180]}"
+
+        self._logger.warning(
+            f"{reason}; using deterministic quality review fallback",
+            task_id=context.task_id,
+        )
+        if event_callback:
+            event_callback(
+                "质量审查 Agent",
+                "agent.thinking",
+                f"⚠️ {reason}，启用本地质量门审查（含附图检查）",
+                {
+                    "agent_name": "质量审查 Agent",
+                    "thought": "deterministic_quality_review_fallback",
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
+
+        review = self._build_deterministic_quality_review(context, reason=reason)
+        return json.dumps(review, ensure_ascii=False)[:500], review
 
     async def _run_agent_stream(
         self,

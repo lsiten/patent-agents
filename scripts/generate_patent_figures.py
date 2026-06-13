@@ -30,6 +30,25 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 
+def _gen_img_script_path() -> Path:
+    return (
+        Path.home()
+        / ".config" / "opencode" / "skills" / "gen-img" / "scripts" / "gen-img.mjs"
+    )
+
+
+def _has_image_generation_backend() -> bool:
+    has_img_config = any(
+        k.startswith("IMAGE_GEN_") and k.endswith("_API_KEY")
+        for k in os.environ
+    )
+    has_llm_config = any(
+        k.startswith("LLM_") and k.endswith("_API_KEY")
+        for k in os.environ
+    )
+    return (has_img_config or has_llm_config) and _gen_img_script_path().exists()
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Matplotlib 绘制
 # ═══════════════════════════════════════════════════════════════════
@@ -182,12 +201,8 @@ def draw_ai_figures(
     gen-img.mjs 会自动从环境变量读取 IMAGE_GEN_* / LLM_* / 旧版配置，
     无需在此手动传 api_key。
     """
-    gen_img_script = (
-        Path.home()
-        / ".config" / "opencode" / "skills" / "gen-img" / "scripts" / "gen-img.mjs"
-    )
+    gen_img_script = _gen_img_script_path()
     if not gen_img_script.exists():
-        print(f"  ! gen-img 脚本不存在: {gen_img_script}", file=sys.stderr)
         return []
 
     results: List[Dict[str, str]] = []
@@ -260,23 +275,15 @@ def main():
     print(f"生成专利附图 → {output_dir}")
 
     if args.ai:
-        # 检测 gen-img 可用性：IMAGE_GEN_* > LLM_*
-        has_img_config = any(
-            k.startswith("IMAGE_GEN_") and k.endswith("_API_KEY")
-            for k in os.environ
-        )
-        has_llm_config = any(
-            k.startswith("LLM_") and k.endswith("_API_KEY")
-            for k in os.environ
-        )
-        if has_img_config or has_llm_config:
+        # 检测 gen-img 可用性：IMAGE_GEN_* > LLM_*，脚本不存在时安静回退。
+        if _has_image_generation_backend():
             print("\n[AI 模式]")
             results = draw_ai_figures(args.tech_desc, output_dir)
             if not results:
                 print("  AI 生成无结果，回退到 matplotlib")
                 results = draw_matplotlib_figures(args.tech_desc, output_dir)
         else:
-            print("  ! 未检测到 AI 配置（IMAGE_GEN_* / LLM_*），回退到 matplotlib")
+            print("  未检测到可用 AI 生图后端，回退到 matplotlib")
             results = draw_matplotlib_figures(args.tech_desc, output_dir)
     else:
         print("\n[matplotlib 模式]")

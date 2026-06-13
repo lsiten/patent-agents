@@ -416,6 +416,14 @@ def _linked_workflow_conversation(task_id: str) -> Optional[dict]:
     return None
 
 
+def _linked_workflow_conversation_id(task_id: str) -> str:
+    """Return the conversation id linked to a workflow, if it is loaded in memory."""
+    for conv_id, conv in conversations_store.items():
+        if conv.get("linked_workflow_id") == task_id:
+            return conv_id
+    return ""
+
+
 def _conversation_disclosure_text(conv: Optional[dict]) -> str:
     """Extract the strongest disclosure text from a linked conversation."""
     if not conv:
@@ -431,8 +439,11 @@ def _conversation_disclosure_text(conv: Optional[dict]) -> str:
 def _restore_workflow_disclosure_from_conversation(context: WorkflowContext) -> None:
     disclosure = _conversation_disclosure_text(_linked_workflow_conversation(context.task_id))
     if disclosure:
-        context.original_description = disclosure
-        context.title = workflow_engine._extract_title(disclosure)
+        cleaned_disclosure = workflow_engine._sanitize_disclosure_text(disclosure)
+        context.original_description = cleaned_disclosure
+        context.title = workflow_engine._extract_title(cleaned_disclosure)
+        context.metadata["raw_disclosure"] = disclosure
+        context.metadata["disclosure_sanitized"] = cleaned_disclosure != disclosure
 
 
 async def _persist_org_tree() -> None:
@@ -1720,6 +1731,12 @@ async def restart_workflow(task_id: str, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=404, detail="工作流不存在")
 
     _restore_workflow_disclosure_from_conversation(context)
+    conv_id = str(context.metadata.get("conversation_id") or "")
+    if not conv_id:
+        async with conversations_lock:
+            conv_id = _linked_workflow_conversation_id(task_id)
+        if conv_id:
+            context.metadata["conversation_id"] = conv_id
 
     # 重置所有阶段输出
     context.requirement_analysis = {}
@@ -1796,10 +1813,15 @@ async def restart_workflow(task_id: str, background_tasks: BackgroundTasks):
                 if c:
                     c["messages"].append(message)
                     c["updated_at"] = datetime.now().isoformat()
-            _queue_conversation_event(conv_id, "agent_work", event)
-            _queue_conversation_event(conv_id, "conversation_message", message)
+            if conv_id:
+                _queue_conversation_event(conv_id, "agent_work", event)
+                activity = _agent_activity_from_workflow_event(event)
+                if activity:
+                    _queue_conversation_event(conv_id, "agent_activity", activity)
+                _queue_conversation_event(conv_id, "conversation_message", message)
             await _persist_events(task_id)
-            await _persist_conversation(conv_id)
+            if conv_id:
+                await _persist_conversation(conv_id)
 
         try:
             await _execute_full_workflow_compat(
@@ -5621,77 +5643,18 @@ async def export_workflow_patent_docx(task_id: str):
     if not context:
         raise HTTPException(status_code=404, detail="工作流不存在")
 
-    patent_draft = context.patent_draft
-    if not patent_draft:
-        raise HTTPException(status_code=400, detail="工作流尚未生成专利文档，请等待撰写阶段完成")
-
-    draft_data = patent_draft if isinstance(patent_draft, dict) else patent_draft
-    existing_docx_path = draft_data.get("docx_path") if isinstance(draft_data, dict) else ""
-    if existing_docx_path and os.path.isfile(existing_docx_path):
+    draft_data = context.patent_draft if isinstance(context.patent_draft, dict) else {}
+    existing_docx_path = str(draft_data.get("docx_path") or "")
+    if existing_docx_path and os.path.isfile(existing_docx_path) and "/final/" in existing_docx_path:
         return FileResponse(
             path=existing_docx_path,
             filename=f"patent_{task_id}.docx",
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
 
-    # 处理 {agent, output, summary} 格式：尝试从 output 字段解析 JSON
-    if "output" in draft_data and "agent" in draft_data and isinstance(draft_data.get("output"), str):
-        import re
-        output_text = draft_data["output"]
-        parsed_data = None
-        
-        # 方法1：尝试从 markdown code block 中提取 JSON
-        json_block_match = re.search(r'```json\s*([\s\S]*?)(?:\s*```|$)', output_text)
-        if json_block_match:
-            json_str = json_block_match.group(1).strip()
-            try:
-                parsed_data = json.loads(json_str)
-            except json.JSONDecodeError:
-                # 尝试修复截断的 JSON
-                parsed_data = _repair_truncated_json(json_str)
-        
-        # 方法2：尝试找文本中第一个 { 到最后一个 } 的范围
-        if not parsed_data or "claims" not in parsed_data:
-            first_brace = output_text.find("{")
-            last_brace = output_text.rfind("}")
-            if first_brace >= 0 and last_brace > first_brace:
-                json_str = output_text[first_brace:last_brace + 1]
-                try:
-                    parsed_data = json.loads(json_str)
-                except json.JSONDecodeError:
-                    parsed_data = _repair_truncated_json(json_str)
-        
-        if parsed_data and "claims" in parsed_data:
-            draft_data = parsed_data
-
-    # 工作流输出格式: {claims: {independent_claim, dependent_claims}, description: {...}, abstract}
-    claims_raw = draft_data.get("claims", {})
-    desc_raw = draft_data.get("description", {})
-
-    # 使用 PatentDocxGeneratorTool 生成（工作流格式与工具格式天然兼容）
-    from ..agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
-
-    title = context.requirement_analysis.get("patent_title", "专利申请文件")
-    tool = PatentDocxGeneratorTool()
-    result = await tool.execute(
-        title=title,
-        claims=claims_raw if isinstance(claims_raw, dict) else {},
-        description=desc_raw if isinstance(desc_raw, dict) else {},
-        abstract=draft_data.get("abstract", ""),
-        tech_description=draft_data.get(
-            "tech_description",
-            context.requirement_analysis.get("tech_description", ""),
-        ),
-        task_id=task_id,
-    )
-    if not result["success"]:
-        raise HTTPException(status_code=500, detail=f"生成DOCX失败: {result.get('error')}")
-    filepath = result["file_path"]
-
-    return FileResponse(
-        path=filepath,
-        filename=f"patent_{task_id}.docx",
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    raise HTTPException(
+        status_code=409,
+        detail="最终 DOCX 尚未生成。请等待撰写、附图生成和质量审查全部通过后再下载。",
     )
 
 
