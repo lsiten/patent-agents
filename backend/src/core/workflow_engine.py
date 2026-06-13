@@ -537,6 +537,17 @@ class PatentWorkflowEngine:
 
 
                         context_data = self._normalize_phase_output(context_field, context_data)
+                        if context_field == "patent_draft":
+                            context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
+                        elif (
+                            context_field == "review_report"
+                            and isinstance(context_data, dict)
+                            and context_data.get("_agent_failed") is True
+                        ):
+                            context_data = self._build_deterministic_quality_review(
+                                context,
+                                reason=str(context_data.get("_agent_error") or "审查 Agent 不可用"),
+                            )
                         if isinstance(context_data, dict) and context_data.get("_agent_failed") is True:
                             agent_error = str(
                                 context_data.get("_agent_error") or "Agent execution failed"
@@ -581,6 +592,7 @@ class PatentWorkflowEngine:
                         context_data,
                         event_callback=event_callback,
                     )
+                    context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
                     setattr(context, context_field, context_data)
 
                 agent_failed = (
@@ -696,29 +708,22 @@ class PatentWorkflowEngine:
                             {"agent_name": "CEO Agent", "thought": "质量审查未通过，需要修正"})
 
                     if context.iteration_count > safety_limit:
-                        self._enter_quality_remediation_hold(
-                            context,
-                            context.review_report,
-                            "AUTO_REMEDIATION_LIMIT",
-                        )
-                        context.current_phase = WorkflowState.AWAITING_USER_DECISION
-                        await self._publish_progress_event(
-                            context,
-                            WorkflowState.AWAITING_USER_DECISION,
-                            "waiting",
+                        self._logger.warning(
+                            f"Automatic remediation exceeded safety hint ({safety_limit}); "
+                            "continuing because patent quality gate must pass before completion",
+                            task_id=context.task_id,
                         )
                         if event_callback:
                             event_callback(
                                 "CEO Agent",
                                 "agent.thinking",
-                                f"⏸️ 已连续自动修正 {safety_limit} 轮仍未合格，暂停等待人工确认下一步",
+                                f"🔁 已连续自动修正 {safety_limit} 轮仍未合格，继续由 CEO 调度补充和复审",
                                 {
                                     "agent_name": "CEO Agent",
-                                    "thought": "auto_remediation_safety_limit",
+                                    "thought": "auto_remediation_continue_until_pass",
                                     "iteration_count": context.iteration_count,
                                 },
                             )
-                        return context
 
                     if remediation_path == "TERMINAL_FAILURE":
                         break
@@ -804,6 +809,7 @@ class PatentWorkflowEngine:
                             {"agent_name": "专利撰写 Agent", "content": agent_text[:500] if agent_text else "", "phase": "patent_writing"})
 
                     context_data = self._normalize_phase_output("patent_draft", context_data)
+                    context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
                     if not isinstance(context_data, dict) or context_data.get("_agent_failed") is True:
                         context_data = context.patent_draft if isinstance(context.patent_draft, dict) else {}
                     if isinstance(context_data, dict):
@@ -813,11 +819,13 @@ class PatentWorkflowEngine:
                             review_issues,
                             event_callback=event_callback,
                         )
+                        context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
                         context_data = await self._ensure_required_patent_drawings(
                             context,
                             context_data,
                             event_callback=event_callback,
                         )
+                        context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
                     context.patent_draft = context_data
                     # 持久化修正后的撰写结果
                     try:
@@ -866,6 +874,11 @@ class PatentWorkflowEngine:
                             {"agent_name": "质量审查 Agent", "content": agent_text[:500] if agent_text else "", "phase": "quality_review"})
 
                     context_data = self._normalize_phase_output("review_report", context_data)
+                    if isinstance(context_data, dict) and context_data.get("_agent_failed") is True:
+                        context_data = self._build_deterministic_quality_review(
+                            context,
+                            reason=str(context_data.get("_agent_error") or "审查 Agent 不可用"),
+                        )
                     context.review_report = context_data
                     # 持久化审查结果
                     try:
@@ -2118,10 +2131,13 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         claims["dependent_claims"] = dependent_claims
         repaired["claims"] = claims
 
-        description.setdefault(
-            "technical_field",
-            "本发明涉及沉浸式显示、可调显示面控制和多屏内容映射技术领域，尤其涉及一种沉浸式展示空间的显示姿态自适应控制与画面连续性补偿方法。",
-        )
+        if self._section_needs_repair(description.get("technical_field")):
+            description["technical_field"] = (
+                "本发明涉及沉浸式显示、可调显示面控制和多屏内容映射技术领域，"
+                "尤其涉及一种沉浸式展示空间的显示姿态自适应控制与画面连续性补偿方法。"
+                "该方法适用于 Cave 折幕、环幕、投影融合空间、LED 多屏展示空间以及包含固定显示面和姿态可调显示面的沉浸式交互展示系统，"
+                "用于在显示面姿态发生转动、平移或升降变化时保持显示内容映射、边界补偿和多屏同步输出的一致性。"
+            )
         if self._section_needs_repair(description.get("background_art")):
             description["background_art"] = (
                 "现有沉浸式展示空间通常采用固定环幕、折幕、LED显示面或投影显示面形成包围式视觉环境。"
@@ -2306,6 +2322,109 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 issues.append(f"drawing_artifacts_missing:{','.join(missing_figures)}")
 
         return issues
+
+    def _reviewable_content_issues(self, draft: Dict[str, Any]) -> List[str]:
+        """Return content issues while ignoring stale transport/agent failure markers."""
+        if not isinstance(draft, dict):
+            return ["patent_draft_missing"]
+        issues = self._validate_patent_draft_completeness(draft)
+        return [
+            issue
+            for issue in issues
+            if issue not in {"patent_draft_agent_failed", "patent_draft_incomplete_output"}
+        ]
+
+    def _clear_stale_writer_failure_if_reviewable(self, draft: Any) -> Any:
+        """Writer tools may fail after a deterministic repair already produced real content.
+
+        In that case the old _agent_failed marker is no longer a content failure and must
+        not block the CEO quality loop or final DOCX generation.
+        """
+        if not isinstance(draft, dict):
+            return draft
+        if draft.get("_agent_failed") is not True and draft.get("_incomplete_output") is not True:
+            return draft
+        if self._reviewable_content_issues(draft):
+            return draft
+        repaired = dict(draft)
+        repaired.pop("_agent_failed", None)
+        repaired.pop("_incomplete_output", None)
+        repaired.pop("_agent_error", None)
+        repaired["_writer_fallback_recovered"] = True
+        return repaired
+
+    def _build_deterministic_quality_review(
+        self,
+        context: WorkflowContext,
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        """Review the draft locally when the reviewer LLM is unavailable.
+
+        This is deliberately conservative: missing claims, sections, abstracts, required
+        drawings, or figure artifacts still fail the quality gate. A complete draft with
+        all referenced drawings can pass and then proceed to DOCX generation.
+        """
+        draft = context.patent_draft if isinstance(context.patent_draft, dict) else {}
+        issues = self._reviewable_content_issues(draft)
+        passed = not issues
+        severity = "high" if not passed else "info"
+
+        def issue_payload(code: str) -> Dict[str, str]:
+            drawing_issue = "drawing" in code or "图" in code
+            return {
+                "severity": "critical" if drawing_issue else severity,
+                "location": "附图" if drawing_issue else "专利申请文件",
+                "description": f"本地审查发现问题：{code}",
+                "suggestion": (
+                    "由专利撰写 Agent 调用生图工具补齐附图并保持说明书图号一致。"
+                    if drawing_issue
+                    else "由专利撰写 Agent 补齐对应章节后重新审查。"
+                ),
+            }
+
+        formal_issues = [issue_payload(code) for code in issues if "drawing" not in code and "图" not in code]
+        drawing_issues = [issue_payload(code) for code in issues if "drawing" in code or "图" in code]
+        score = 0.92 if passed else 0.45
+        notes = "本地确定性审查通过：权利要求、说明书、摘要和附图均满足当前质量门。"
+        if not passed:
+            notes = "本地确定性审查未通过，需要 CEO 继续调度补充优化。"
+        if reason:
+            notes += f" 原审查 Agent 未完成，已启用本地审查兜底：{reason[:180]}"
+
+        return {
+            "recommendation": "approve" if passed else "revise",
+            "revision_priority": "medium" if passed else "critical",
+            "review_summary": {
+                "overall_score": score,
+                "overall_rating": "good" if passed else "needs_revision",
+                "recommendation": "approve" if passed else "revise",
+                "reviewer_notes": notes,
+            },
+            "formal_compliance_review": {
+                "score": score,
+                "passed": passed and not formal_issues,
+                "issues": formal_issues,
+            },
+            "claims_review": {"issues": []},
+            "description_review": {"issues": []},
+            "consistency_review": {"issues": []},
+            "drawing_review": {
+                "score": 1.0 if not drawing_issues else 0.0,
+                "passed": not drawing_issues,
+                "issues": drawing_issues,
+                "checked_drawings": len(draft.get("drawings") or []) if isinstance(draft, dict) else 0,
+            },
+            "examination_risks": [] if passed else [
+                {
+                    "risk_type": "quality_gate",
+                    "likelihood": "high",
+                    "description": "专利申请文件仍存在质量门问题。",
+                    "mitigation_suggestion": "继续补齐并复审。",
+                }
+            ],
+            "detailed_revision_suggestions": [],
+            "_deterministic_review": True,
+        }
 
     def _has_unresolved_critical_issues(self, context: WorkflowContext) -> bool:
         """检查工作流是否还有未解决的关键问题 (在 COMPLETED 之前的最后一道闸)

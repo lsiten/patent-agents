@@ -549,7 +549,7 @@ export default function WorkflowPage() {
 
   if (!taskId) {
     return (
-      <div className="py-section-lg bg-surface min-h-screen">
+      <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden bg-surface py-section-lg">
         <div className="container mx-auto px-md">
           <Card className="border-red-200 bg-red-50">
             <CardContent className="pt-lg">
@@ -633,7 +633,7 @@ export default function WorkflowPage() {
   };
 
   return (
-    <div className="py-section-lg bg-surface min-h-screen">
+    <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden bg-surface py-section-lg">
       <div className="container mx-auto px-md">
         {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-md mb-xl">
