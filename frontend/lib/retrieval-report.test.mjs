@@ -58,7 +58,7 @@ test('builds fallback patent url when url is missing', async () => {
   assert.equal(references[0].url, 'https://patents.google.com/patent/US1234567B2');
 });
 
-test('falls back to legacy similar_patents and preserves comparison fields', async () => {
+test('normalizes similar_patents and preserves comparison fields', async () => {
   const { getRetrievalPatentReferences } = await loadModule();
   const references = getRetrievalPatentReferences({
     similar_patents: [

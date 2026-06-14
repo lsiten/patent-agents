@@ -12,38 +12,12 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-FEATURE_RULES = [
-    {
-        "name": "目标空间姿态信息获取",
-        "keywords": ["姿态", "角度", "位置", "开合", "身高", "用户"],
-        "description": "获取显示面、用户或内容相关的姿态/位置/角度参数，作为生成显示空间目标姿态的输入。",
-        "technical_significance": "为动态显示面调整和个性化显示提供参数基础。",
-    },
-    {
-        "name": "目标空间姿态生成",
-        "keywords": ["目标", "生成", "调节", "可调", "屏幕", "显示装置"],
-        "description": "根据输入参数生成一个或多个可调显示装置的目标姿态或目标显示面布局。",
-        "technical_significance": "将用户需求、显示范围和内容约束转化为可执行的显示控制目标。",
-    },
-    {
-        "name": "边界投影与重叠/空白区域判定",
-        "keywords": ["边界", "投影", "重叠", "空白", "遮挡", "缝隙"],
-        "description": "确定相邻显示面之间的边界投影关系，并识别外转产生的空白区域或内转产生的遮挡/重叠区域。",
-        "technical_significance": "为后续裁剪、补偿、删除和重映射提供空间判定依据。",
-    },
-    {
-        "name": "视频内容补偿、裁剪与重映射",
-        "keywords": ["补偿", "裁剪", "删除", "重映射", "过渡", "连续"],
-        "description": "针对姿态变化后的显示区域生成补充显示数据，或对重叠/遮挡内容进行裁剪、删除、重映射及过渡处理。",
-        "technical_significance": "保持多显示面视频内容连续性，降低折幕姿态变化造成的割裂感。",
-    },
-    {
-        "name": "多显示面同步输出控制",
-        "keywords": ["同步", "输出", "多屏", "显示面", "Cave", "折幕"],
-        "description": "将处理后的视频内容同步输出至对应显示面，维持沉浸式空间中的一致显示效果。",
-        "technical_significance": "保证多显示面协同显示和沉浸式观看体验。",
-    },
-]
+ACTION_KEYWORDS = {
+    "input": ["获取", "采集", "接收", "输入", "检测", "识别", "读取"],
+    "process": ["确定", "生成", "计算", "处理", "控制", "匹配", "训练", "分析"],
+    "output": ["输出", "显示", "发送", "存储", "反馈", "执行", "更新"],
+    "exception": ["异常", "失败", "冲突", "风险", "误差", "补偿", "校正"],
+}
 
 
 def _normalize_text(text: str) -> str:
@@ -55,6 +29,20 @@ def _normalize_text(text: str) -> str:
 def _contains_any(text: str, keywords: list[str]) -> bool:
     lower = text.lower()
     return any(keyword.lower() in lower for keyword in keywords)
+
+
+def _ordered_terms(text: str, limit: int = 12) -> list[str]:
+    terms = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fa5]{2,}", text or "")
+    stop_words = {"这个", "然后", "就是", "可以", "需要", "进行", "一个", "一种", "我们", "他们"}
+    ordered = []
+    for term in terms:
+        clean = term.strip()
+        if len(clean) < 2 or clean in stop_words or clean in ordered:
+            continue
+        ordered.append(clean)
+        if len(ordered) >= limit:
+            break
+    return ordered
 
 
 class TechFeatureExtractorTool(HermesTool):
@@ -86,17 +74,23 @@ class TechFeatureExtractorTool(HermesTool):
 
         text = _normalize_text(tech_description)
         features = []
-        for rule in FEATURE_RULES:
-            if _contains_any(text, rule["keywords"]):
+        key_terms = _ordered_terms(text)
+        for category, keywords in ACTION_KEYWORDS.items():
+            evidence = [keyword for keyword in keywords if keyword.lower() in text.lower()]
+            if evidence:
+                label = {
+                    "input": "输入信息获取",
+                    "process": "核心处理逻辑",
+                    "output": "结果输出或执行",
+                    "exception": "异常处理或校正机制",
+                }[category]
                 features.append(
                     {
-                        "name": rule["name"],
-                        "description": rule["description"],
+                        "name": label,
+                        "description": f"围绕当前技术对象（{ '、'.join(key_terms[:5]) or '待Agent判断' }）执行{label}。",
                         "is_innovative": True,
-                        "technical_significance": rule["technical_significance"],
-                        "evidence_keywords": [
-                            keyword for keyword in rule["keywords"] if keyword.lower() in text.lower()
-                        ],
+                        "technical_significance": "为撰写 Agent 组织方法步骤、系统模块和从属限定提供客观输入信号。",
+                        "evidence_keywords": evidence,
                     }
                 )
 
@@ -112,19 +106,19 @@ class TechFeatureExtractorTool(HermesTool):
             )
 
         problem_parts = []
-        if _contains_any(text, ["空白", "缝隙", "补偿"]):
-            problem_parts.append("显示面姿态变化后产生空白或缝隙")
-        if _contains_any(text, ["遮挡", "重叠", "裁剪", "删除"]):
-            problem_parts.append("显示内容因内转或边界变化产生遮挡、重叠或错位")
-        if _contains_any(text, ["连续", "沉浸", "同步"]):
-            problem_parts.append("多显示面内容连续性和沉浸感不足")
+        if _contains_any(text, ["问题", "缺陷", "不足", "难以", "无法"]):
+            problem_parts.append("原始描述中包含待解决问题信号")
+        if _contains_any(text, ["误差", "冲突", "异常", "失败", "风险"]):
+            problem_parts.append("原始描述中包含异常或可靠性问题信号")
+        if _contains_any(text, ["效率", "准确", "稳定", "同步", "连续", "安全"]):
+            problem_parts.append("原始描述中包含性能或效果改进信号")
         technical_problem = "；".join(problem_parts) or "非结构化技术构思需要转化为可执行、可保护的技术方案"
 
         core_innovation = "、".join(feature["name"] for feature in features[:4])
         beneficial_effects = [
-            "提升折幕/Cave空间中多显示面画面的连续性",
-            "降低姿态变化导致的空白、遮挡、重叠和内容错位",
-            "支持可调显示装置在不同用户或内容条件下的自适应显示",
+            "提高当前技术流程的可执行性和稳定性",
+            "降低当前技术问题导致的异常、误差或处理失败风险",
+            "为方法、系统、设备和介质权利要求提供可对应的技术效果",
         ]
 
         data = {

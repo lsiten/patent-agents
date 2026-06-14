@@ -321,7 +321,7 @@ def _strip_transcript_artifacts(text: Any) -> str:
 
 
 def _normalize_figure_title(title: Any, figure_number: str = "") -> str:
-    """Keep figure captions from becoming '图1 图1 ...'."""
+    """Keep figure captions from duplicating their figure number."""
     title_text = _strip_transcript_artifacts(title)
     figure_number = _coerce_text(figure_number).strip()
     if figure_number:
@@ -540,7 +540,7 @@ class PatentDocxGeneratorTool:
                           "description_of_drawings": "..."}
             abstract: 说明书摘要
             task_id: 任务ID
-            tech_description: 原始技术方案描述（仅兼容旧调用；优先使用 drawings）
+            tech_description: 清洗后的技术方案描述（仅用于元数据；优先使用 drawings）
             drawings: patent_drawing_generator 已生成的附图元数据列表
 
         Returns:
@@ -566,8 +566,8 @@ class PatentDocxGeneratorTool:
             _set_section_margins(first_section, margins)
 
             title = _strip_transcript_artifacts(title) or "专利申请文件"
-            if re.search(r"这样我开个头|任\s*$|纪烜晓|双证律师|^\s*(这个东西|那先写|那写吧)", title):
-                title = "一种基于Cave折幕视频的处理方法及系统"
+            if re.search(r"(?:开个头|^\s*这个|那先写|那写吧|说话人|律师)|[\(（]\d{2}:\d{2}:\d{2}[\)）]", title):
+                title = "专利申请文件"
             abstract = _coerce_text(abstract)
 
             # ── 说明书摘要 ── (仅在有内容时生成)

@@ -74,7 +74,6 @@ class PatentSearchTool(HermesTool):
                 "total_found": len(results),
                 "search_strategy": "real_data_source_query",
                 "keywords_used": [query],
-                "mock_used": False,
             }
             
             return make_tool_output(

@@ -21,6 +21,24 @@ TERM_MAPPINGS = {
     "补洞": "空白区域补偿",
 }
 
+DISPLAY_CONTEXT_KEYWORDS = (
+    "显示",
+    "屏幕",
+    "多屏",
+    "投影",
+    "视频",
+    "画面",
+    "Cave",
+    "折幕",
+    "LED",
+)
+
+DISPLAY_GLOSSARY = {
+    "显示面": "用于显示视频内容的显示单元，包括固定显示面和可调显示面。",
+    "目标空间姿态信息": "表征显示面相对位置、目标角度、目标开合程度等的信息。",
+    "边界投影关系": "相邻显示面的边界在目标空间中的投影、重叠或空白关系。",
+}
+
 
 class TerminologyNormalizerTool(HermesTool):
     """术语规范化工具"""
@@ -51,19 +69,18 @@ class TerminologyNormalizerTool(HermesTool):
         logger.info("Normalizing terminology", domain=domain)
         normalized = text or ""
         applied = []
-        for original, target in TERM_MAPPINGS.items():
-            if original in normalized:
-                normalized = normalized.replace(original, target)
-                applied.append({"original": original, "normalized": target, "reason": "统一为专利上位术语"})
+        context = f"{domain or ''}\n{normalized}"
+        is_display_context = any(keyword.lower() in context.lower() for keyword in DISPLAY_CONTEXT_KEYWORDS)
+        if is_display_context:
+            for original, target in TERM_MAPPINGS.items():
+                if original in normalized:
+                    normalized = normalized.replace(original, target)
+                    applied.append({"original": original, "normalized": target, "reason": "显示/视频场景术语一致化"})
         data = {
             "normalized_text": normalized,
             "term_mappings": applied,
             "consistency_issues": [],
-            "key_terms_glossary": {
-                "显示面": "用于显示视频内容的显示单元，包括固定显示面和可调显示面。",
-                "目标空间姿态信息": "表征显示面相对位置、目标角度、目标开合程度等的信息。",
-                "边界投影关系": "相邻显示面的边界在目标空间中的投影、重叠或空白关系。",
-            },
+            "key_terms_glossary": DISPLAY_GLOSSARY if is_display_context else {},
         }
         return make_tool_output(
             tool_name=self.name,

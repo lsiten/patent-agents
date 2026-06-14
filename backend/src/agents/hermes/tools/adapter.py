@@ -816,7 +816,7 @@ PATENT_TOOL_DEFINITIONS = [
                 "properties": {
                     "tech_description": {
                         "type": "string",
-                        "description": "需要绘制为专利附图的技术方案、系统结构或流程描述",
+                        "description": "专利整体技术方案背景，仅用于辅助理解附图内容",
                     },
                     "task_id": {
                         "type": "string",
@@ -824,18 +824,18 @@ PATENT_TOOL_DEFINITIONS = [
                     },
                     "title": {
                         "type": "string",
-                        "description": "附图标题，例如：系统结构示意图、方法流程图",
+                        "description": "该图在说明书中的附图标题",
                     },
                     "description": {
                         "type": "string",
-                        "description": "附图说明文本，可用于前端展示和说明书附图说明",
+                        "description": "必填。该图必须绘制的具体内容，包括对象、模块/步骤/结构、连接关系、箭头方向、编号和本图与其他图的区别。必须来自当前专利真实内容，工具不会套用内置模板。",
                     },
                     "figure_number": {
                         "type": "string",
                         "description": "附图编号，例如：图1、图2、图3。生成多张附图时必须分别调用并传入对应编号。",
                     },
                 },
-                "required": ["tech_description", "task_id"],
+                "required": ["tech_description", "task_id", "description"],
             },
         },
         "handler": _handle_patent_drawing_generator,
@@ -871,7 +871,7 @@ PATENT_TOOL_DEFINITIONS = [
                     },
                     "tech_description": {
                         "type": "string",
-                        "description": "原始技术方案描述，仅用于旧流程兼容兜底；新流程应优先传入 drawings。",
+                        "description": "清洗后的技术方案描述，仅用于生成文档元数据和上下文；不得替代 drawings 附图元数据。",
                     },
                     "drawings": {
                         "type": "array",

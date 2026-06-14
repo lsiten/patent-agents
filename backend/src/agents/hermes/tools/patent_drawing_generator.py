@@ -113,15 +113,33 @@ class PatentDrawingGeneratorTool:
         **kwargs: Any,
     ) -> Dict[str, Any]:
         start_time = datetime.now()
+        figure_number = str(kwargs.get("figure_number") or "图1")
+        drawing_description = str(description or "").strip()
+        if len(drawing_description) < 20:
+            return make_tool_output(
+                tool_name=self.name,
+                data={
+                    "drawings": [],
+                    "figure_number": figure_number,
+                    "title": title,
+                    "prompt_version": "patent_drawing_v3",
+                    "layout": _layout_key_for_figure(figure_number),
+                },
+                success=False,
+                error=(
+                    "description must contain the concrete drawing content for this figure. "
+                    "The drawing tool does not provide built-in patent content templates."
+                ),
+                start_time=start_time,
+            )
         output_dir = self._exports_root / (task_id or "default") / "draft" / "drawings"
         output_dir.mkdir(parents=True, exist_ok=True)
-        figure_number = str(kwargs.get("figure_number") or "图1")
         output_name = str(kwargs.get("output_name") or _safe_figure_filename(figure_number))
         if not output_name.lower().endswith(".png"):
             output_name = f"{Path(output_name).stem or 'fig1'}.png"
         output_path = output_dir / output_name
         image_config = _resolve_image_config(str(kwargs.get("profile_id") or "patent.writer.v1"))
-        prompt = self._build_prompt(title, tech_description, figure_number, description)
+        prompt = self._build_prompt(title, tech_description, figure_number, drawing_description)
 
         try:
             _generate_image_file(prompt, output_path, image_config)
@@ -133,16 +151,15 @@ class PatentDrawingGeneratorTool:
                     "drawings": [],
                     "figure_number": figure_number,
                     "title": title,
-                    "prompt_version": "patent_drawing_v2",
+                    "prompt_version": "patent_drawing_v3",
                     "layout": _layout_key_for_figure(figure_number),
                     "image_config_source": image_config.source,
                 },
                 success=False,
-                error=f"AI image generation failed; no mock or local fallback drawing was created: {exc}",
+                error=f"AI image generation failed; no drawing artifact was created: {exc}",
                 start_time=start_time,
             )
 
-        drawing_description = description or tech_description
         return make_tool_output(
             tool_name=self.name,
             data={
@@ -154,7 +171,7 @@ class PatentDrawingGeneratorTool:
                         "file_path": str(output_path),
                         "artifact_url": f"/api/v1/workflows/{task_id or 'default'}/artifacts/draft/drawings/{output_path.name}",
                         "mime_type": "image/png",
-                        "prompt_version": "patent_drawing_v2",
+                        "prompt_version": "patent_drawing_v3",
                         "layout": _layout_key_for_figure(figure_number),
                     }
                 ]
@@ -165,28 +182,18 @@ class PatentDrawingGeneratorTool:
 
     @staticmethod
     def _build_prompt(title: str, tech_description: str, figure_number: str, description: str = "") -> str:
-        layout_requirements = {
-            "图1": "画成系统结构框图：固定显示面、姿态可调显示面、地面/相邻显示面、入口交互终端、处理控制单元、姿态驱动机构、姿态反馈单元之间的连接关系。",
-            "图2": "画成方法流程图：S101到S107的步骤框和顺序箭头，体现获取输入、确定姿态、采集反馈、边界投影、判定空白/遮挡、补偿裁剪、同步输出。",
-            "图3": "画成空间几何示意图：固定显示面A、倾斜的可调显示面B、观看参考点O、边界投影线、空白区域P1、重叠/遮挡区域P2。",
-            "图4": "画成画面处理映射示意图：原始视频帧、补偿视口生成、遮挡掩膜/裁剪、重映射输出帧、待补偿空白块和同步输出区域。",
-        }
         normalized_figure = str(figure_number or "图1").replace(" ", "")
         return (
             "生成一张黑白线稿风格的中国专利说明书附图，避免照片质感和装饰性背景。"
             f"图号：{normalized_figure}。附图标题：{title}。"
-            f"本图专属说明：{description or layout_requirements.get(normalized_figure, '')}。"
-            f"必须采用的构图：{layout_requirements.get(normalized_figure, '画成与图1至图4不同的专利线稿构图。')}。"
-            f"技术方案：{tech_description}。"
-            "要求只表达本图主题，不要复用其他图的布局；使用模块框、流程箭头、几何边界、区域标号和编号标注。"
+            f"本图必须表达的具体内容：{description}。"
+            f"专利整体技术方案背景：{tech_description}。"
+            "只能依据“本图必须表达的具体内容”决定图中模块、步骤、结构、连接线、箭头和编号。"
+            "不得套用内置领域模板，不得复用其他图的布局，不得只替换标题。"
+            "如果适合用框图、流程图、结构示意图或关系图，请根据本图具体内容自行选择最清楚的专利线稿表达。"
         )
 
 
 def _layout_key_for_figure(figure_number: str) -> str:
     digits = "".join(ch for ch in str(figure_number or "") if ch.isdigit())
-    return {
-        "1": "system_structure",
-        "2": "method_flow",
-        "3": "spatial_boundary",
-        "4": "compensation_mapping",
-    }.get(digits or "1", f"figure_{digits or '1'}")
+    return f"figure_{digits or '1'}"

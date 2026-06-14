@@ -12,7 +12,20 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-CORE_TERMS = ["显示面", "姿态", "边界", "投影", "重叠", "空白", "补偿", "裁剪", "重映射", "同步"]
+STOP_TERMS = {"一种", "根据", "所述", "包括", "其特征在于", "方法", "系统", "装置", "设备", "介质", "步骤"}
+
+
+def _core_terms_from_claims(claims: str) -> list[str]:
+    terms = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fa5]{2,}", claims or "")
+    ordered = []
+    for term in terms:
+        clean = term.strip()
+        if len(clean) < 2 or clean in STOP_TERMS or clean in ordered:
+            continue
+        ordered.append(clean)
+        if len(ordered) >= 24:
+            break
+    return ordered
 
 
 class SupportVerifierTool(HermesTool):
@@ -46,7 +59,7 @@ class SupportVerifierTool(HermesTool):
         try:
             claim_text = claims or ""
             desc_text = description or ""
-            missing = [term for term in CORE_TERMS if term in claim_text and term not in desc_text]
+            missing = [term for term in _core_terms_from_claims(claim_text) if term not in desc_text]
             claim_numbers = re.findall(r"(?:^|\n)\s*(\d+)[\.、]", claim_text) or ["1"]
             verification_results = []
             support_issues = []

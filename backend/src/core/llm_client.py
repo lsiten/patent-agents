@@ -1,6 +1,6 @@
 """
 LLM API 客户端封装
-支持 OpenAI、Anthropic，提供统一接口、自动重试、Fallback、Token 计数
+支持 OpenAI、Anthropic，提供统一接口、自动重试、Token 计数
 """
 import asyncio
 import json
@@ -618,27 +618,13 @@ class LLMClientFactory:
         return cls._instances[provider]
 
     @classmethod
-    def get_fallback_chain(cls) -> List[BaseLLMClient]:
-        """获取 Fallback 客户端链"""
-        clients = []
-        
-        # 首先根据 active_provider 获取主客户端
+    def get_active_clients(cls) -> List[BaseLLMClient]:
+        """获取当前激活供应商客户端。"""
         active_provider = settings.llm.active_provider
         if active_provider in ("spark", "openai-spark"):
-            # 星火使用 OpenAI 兼容格式
-            try:
-                clients.append(cls.get_client(LLMProvider.OPENAI))
-            except Exception as e:
-                logger.warning("Failed to create Spark client", error=str(e))
-        else:
-            # 使用 fallback_order 配置
-            for provider_name in settings.llm.fallback_order:
-                try:
-                    provider = LLMProvider(provider_name)
-                    clients.append(cls.get_client(provider))
-                except (ValueError, Exception) as e:
-                    logger.warning("Skipping fallback provider", provider=provider_name, error=str(e))
-        return clients
+            return [cls.get_client(LLMProvider.OPENAI)]
+        provider = LLMProvider(active_provider)
+        return [cls.get_client(provider)]
 
     @classmethod
     def reset(cls) -> None:
@@ -649,11 +635,11 @@ class LLMClientFactory:
 class LLMService:
     """
     LLM 服务层
-    提供带 Fallback、重试、错误处理的高级接口
+    提供重试、错误处理的高级接口
     """
 
     def __init__(self):
-        self._clients = LLMClientFactory.get_fallback_chain()
+        self._clients = LLMClientFactory.get_active_clients()
         self._logger = get_logger("llm_service")
 
     async def chat_completion(
@@ -668,62 +654,31 @@ class LLMService:
         **kwargs,
     ) -> LLMResponse:
         """
-        聊天补全，支持自动 Fallback
+        聊天补全，仅使用当前激活供应商
         """
         if not self._clients:
             raise LLMError("No LLM clients available")
 
-        errors = []
-
-        for i, client in enumerate(self._clients):
-            try:
-                if i > 0:
-                    self._logger.info(
-                        "Trying fallback provider",
-                        provider=client.__class__.__name__,
-                        previous_errors=len(errors),
-                    )
-
-                response = await client.chat_completion(
-                    messages=messages,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    tools=tools,
-                    response_format=response_format,
-                    **kwargs,
-                )
-
-                if i > 0:
-                    self._logger.info(
-                        "Fallback provider succeeded",
-                        provider=client.__class__.__name__,
-                    )
-
-                return response
-
-            except (LLMRateLimitError, LLMAuthError) as e:
-                # 这些错误应该尝试 Fallback
-                errors.append(str(e))
-                self._logger.warning(
-                    "LLM provider failed, trying fallback",
-                    provider=client.__class__.__name__,
-                    error=str(e),
-                )
-                continue
-
-            except Exception as e:
-                # 其他错误也尝试 Fallback
-                errors.append(str(e))
-                self._logger.warning(
-                    "Unexpected error with LLM provider, trying fallback",
-                    provider=client.__class__.__name__,
-                    error=str(e),
-                )
-                continue
-
-        # 所有 Provider 都失败
-        raise LLMError(f"All LLM providers failed: {'; '.join(errors)}")
+        client = self._clients[0]
+        try:
+            return await client.chat_completion(
+                messages=messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                tools=tools,
+                response_format=response_format,
+                **kwargs,
+            )
+        except (LLMRateLimitError, LLMAuthError):
+            raise
+        except Exception as e:
+            self._logger.warning(
+                "LLM provider failed",
+                provider=client.__class__.__name__,
+                error=str(e),
+            )
+            raise
 
     async def structured_output(
         self,

@@ -148,10 +148,6 @@ class LLMSettings(BaseSettings):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, alias="LLM_TEMPERATURE")
     max_tokens: int = Field(default=4096, alias="LLM_MAX_TOKENS")
     timeout: int = Field(default=120, description="LLM请求超时(秒)", alias="LLM_TIMEOUT")
-    enable_fallback: bool = Field(default=True, description="启用LLM降级策略")
-    fallback_order: List[str] = Field(
-        default_factory=lambda: ["openai", "anthropic"]
-    )
     max_retries: int = Field(default=3, description="最大重试次数")
     retry_delay: float = Field(default=1.0, description="重试延迟(秒)")
 
@@ -240,14 +236,6 @@ class LLMSettings(BaseSettings):
 
         base["provider"] = provider
         return base
-
-    @field_validator("fallback_order")
-    @classmethod
-    def validate_fallback_order(cls, v: List[str]) -> List[str]:
-        if not all(p in TEXT_LLM_PROVIDERS for p in v):
-            raise ValueError(f"Fallback providers must be one of {TEXT_LLM_PROVIDERS}")
-        return v
-
 
 class ImageGenSettings(BaseSettings):
     """生图 API 配置 — 支持多供应商，base_url / api_key / model_id 三元组"""
@@ -353,7 +341,7 @@ class ImageGenSettings(BaseSettings):
         """
         return self.resolve_for_agent()
 
-    def resolve_with_llm_fallback(
+    def resolve_without_text_llm(
         self,
         llm_settings: "LLMSettings",
         overrides: Optional[Dict[str, Any]] = None,
@@ -361,8 +349,7 @@ class ImageGenSettings(BaseSettings):
         """
         解析最终生图配置。
 
-        历史方法名保留兼容调用方，但不再回退到文字 LLM。附图生成只能使用
-        agent 生图配置或系统生图配置。
+        附图生成只能使用 agent 生图配置或系统生图配置。
         """
         return self.resolve_for_agent(overrides)
 

@@ -459,7 +459,6 @@ export interface ModelConfigSectionResponse {
 export interface SystemConfigResponse {
   text_llm: ModelConfigSectionResponse;
   image_gen: ModelConfigSectionResponse;
-  image_gen_fallback_to_llm: boolean;
 }
 
 export interface ProviderConfigUpdate {

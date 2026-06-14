@@ -59,11 +59,11 @@ class DescriptionWriterTool(HermesTool):
             section_name = SECTION_NAME_MAP.get(section_type, section_type)
             content_hint = (technical_content or "").strip()[:1200]
             section_plan = {
-                "technical_field": ["说明本发明属于沉浸式多屏/折幕视频显示处理领域。"],
-                "background": ["概述固定显示面与可调显示面在姿态变化时产生遮挡、空白、错位和不同步问题。"],
-                "summary": ["围绕姿态获取、边界关系判定、裁剪/补偿/重映射和同步输出描述技术方案及效果。"],
-                "drawings": ["逐图列明系统结构、方法流程、边界投影关系、补偿/裁剪示意；不要重复图号。"],
-                "detailed": ["按步骤描述目标空间姿态信息、区域判定算法、外转补偿、内转裁剪重排和同步输出实施例。"],
+                "technical_field": ["说明本发明所属或直接应用的具体技术领域，不得写成发明本身或混入实施方案。"],
+                "background": ["按宏观现有技术、可检索公开技术、仍未解决的具体技术问题三部分组织。"],
+                "summary": ["围绕要解决的技术问题、技术方案和有益效果描述，并与权利要求保持一致。"],
+                "drawings": ["逐图列明实际生成的附图编号、标题和用途；不要重复图号或复用相同图意。"],
+                "detailed": ["按权利要求步骤和附图标号展开实施方式，确保每个权利要求特征均有对应公开。"],
             }.get(section_type, ["围绕技术内容撰写该章节，确保与权利要求一一支持。"])
             data = {
                 "section_type": section_type,

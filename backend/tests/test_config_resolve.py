@@ -211,7 +211,7 @@ class TestImageGenResolveResponseShape:
         assert set(result.keys()) >= {"provider", "base_url", "api_key", "model_id"}
 
 
-class TestImageGenResolveWithLLMFallback:
+class TestImageGenResolveWithoutTextLLM:
     def test_uses_image_config_when_image_api_key_is_configured(self):
         image_gen = make_image_gen()
         llm = make_llm(
@@ -220,14 +220,14 @@ class TestImageGenResolveWithLLMFallback:
             llm_openai_model="gpt-4o",
         )
 
-        result = image_gen.resolve_with_llm_fallback(llm)
+        result = image_gen.resolve_without_text_llm(llm)
 
         assert result["provider"] == "azure_aoai"
         assert result["api_key"] == "global-azure-key"
         assert result["base_url"] == "https://azure.example/v1"
         assert result["model_id"] == "gpt-image-2"
 
-    def test_falls_back_to_llm_config_when_image_api_key_is_absent(self):
+    def test_requires_image_config_when_image_api_key_is_absent(self):
         image_gen = make_image_gen(
             image_gen_azure_aoai_api_key=None,
             image_gen_openai_api_key=None,
@@ -238,21 +238,21 @@ class TestImageGenResolveWithLLMFallback:
             llm_openai_model="gpt-4o",
         )
 
-        result = image_gen.resolve_with_llm_fallback(llm)
+        result = image_gen.resolve_without_text_llm(llm)
 
-        assert result["provider"] == "openai"
-        assert result["api_key"] == "llm-openai-key"
-        assert result["base_url"] == "https://llm.example/v1"
+        assert result["provider"] == "azure_aoai"
+        assert result["api_key"] == ""
+        assert result["base_url"] == "https://azure.example/v1"
         assert result["model_id"] == "gpt-image-2"
 
-    def test_agent_image_override_is_applied_before_llm_fallback(self):
+    def test_agent_image_override_is_applied_before_system_config(self):
         image_gen = make_image_gen(
             image_gen_azure_aoai_api_key=None,
             image_gen_openai_api_key=None,
         )
         llm = make_llm(llm_openai_api_key="llm-openai-key")
 
-        result = image_gen.resolve_with_llm_fallback(
+        result = image_gen.resolve_without_text_llm(
             llm,
             {
                 "provider": "openai",

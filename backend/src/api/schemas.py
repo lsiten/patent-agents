@@ -521,7 +521,6 @@ class SystemConfigResponse(BaseModel):
     """系统配置响应"""
     text_llm: ModelConfigSectionResponse
     image_gen: ModelConfigSectionResponse
-    image_gen_fallback_to_llm: bool = False
 
 
 class ProviderConfigUpdate(BaseModel):

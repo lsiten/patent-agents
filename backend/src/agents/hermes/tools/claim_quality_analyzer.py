@@ -41,7 +41,7 @@ class ClaimQualityAnalyzerTool(HermesTool):
             if not claim_numbers:
                 issues.append({"claim_number": 1, "issue_type": "format", "description": "未识别到规范编号的权利要求", "suggestion": "按1、2、3或1. 2.格式重排。"})
             if len(text) < 300:
-                issues.append({"claim_number": 1, "issue_type": "support", "description": "权利要求内容过短，可能未覆盖完整技术方案", "suggestion": "补充姿态获取、边界判定、裁剪/补偿/重映射、同步输出等核心特征。"})
+                issues.append({"claim_number": 1, "issue_type": "support", "description": "权利要求内容过短，可能未覆盖完整技术方案", "suggestion": "基于当前发明事实补充输入获取、核心处理、结果输出及必要从属限定。"})
             if re.search(r"比如|这个|东西|然后|你", text):
                 issues.append({"claim_number": 1, "issue_type": "clarity", "description": "存在口语化表述", "suggestion": "改为专利规范术语。"})
             if "其特征在于" not in text and "包括" not in text:
@@ -62,7 +62,6 @@ class ClaimQualityAnalyzerTool(HermesTool):
                     "claim_count": len(claim_numbers),
                     "text_length": len(text),
                     "has_open_transition": "包括" in text or "其特征在于" in text,
-                    "uses_display_surface_term": "显示面" in text,
                     "has_oral_terms": bool(re.search(r"比如|这个|东西|然后|你", text)),
                     **hard_rule_report.get("metrics", {}),
                 },

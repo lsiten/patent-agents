@@ -36,6 +36,7 @@ from src.core.patent_compliance import (
     normalize_claims_payload_linebreaks,
     sanitize_transcript_text,
     validate_claim_rules,
+    validate_patent_manual_draft,
     validate_patent_document_structure,
 )
 
@@ -385,8 +386,6 @@ class PatentWorkflowEngine:
         if not description:
             return "未命名专利"
         text = PatentWorkflowEngine._sanitize_disclosure_text(description)
-        if re.search(r"Cave|折幕|沉浸式|多屏|显示面|姿态|补偿|遮挡|裁剪", text, re.I):
-            return "一种基于Cave折幕视频的处理方法及系统"
         # 取第一句或前40字符作为标题
         # 按句号、换行截断（逗号不截断，保留完整短语）
         for sep in ["。", ".", "\n", "；", ";"]:
@@ -2194,64 +2193,66 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             for drawing in drawings
             if isinstance(drawing, dict)
             and bool(drawing.get("artifact_url") or drawing.get("artifactUrl") or drawing.get("file_path"))
-            and drawing.get("prompt_version") == "patent_drawing_v2"
+            and str(drawing.get("prompt_version") or "").startswith("patent_drawing_")
         }
         return [figure for figure in referenced if figure not in generated]
 
     def _planned_drawing_specs(self, draft: Dict[str, Any]) -> List[Dict[str, str]]:
-        """Return the canonical, bounded drawing plan for the current patent draft.
+        """Return figure specs explicitly provided by the Agent draft.
 
-        LLM drafts often mention many figure numbers while still describing the same
-        few concepts. The DOCX generator and reviewer need a stable plan so we do
-        not create duplicate figures like 图2-图11 all named "方法流程示意图".
+        The workflow must not invent drawing content. It only normalizes figures
+        that already appear in the writer's drawing metadata or drawing-description
+        section, then asks the writer Agent to generate missing artifacts.
         """
-        if not isinstance(draft, dict) or not self._draft_requires_drawings(draft):
+        if not isinstance(draft, dict):
             return []
 
         description = draft.get("description", {}) or {}
         if not isinstance(description, dict):
             description = {}
-        combined = "\n".join(
-            str(part or "")
-            for part in (
-                description.get("drawings_description"),
-                description.get("description_of_drawings"),
-                description.get("summary_of_invention"),
-                description.get("detailed_description"),
-                json.dumps(draft.get("claims", {}), ensure_ascii=False),
-            )
+        specs_by_number: Dict[str, Dict[str, str]] = {}
+
+        drawings = draft.get("drawings", [])
+        if isinstance(drawings, list):
+            for item in drawings:
+                if not isinstance(item, dict):
+                    continue
+                figure_number = str(item.get("figure_number") or item.get("figure") or "").replace(" ", "")
+                if not re.fullmatch(r"图\d+", figure_number):
+                    continue
+                title = str(item.get("title") or f"{figure_number}附图").strip()
+                desc = str(item.get("description") or item.get("caption") or "").strip()
+                specs_by_number[figure_number] = {
+                    "figure_number": figure_number,
+                    "title": title,
+                    "description": desc,
+                }
+
+        drawing_text = str(
+            description.get("drawings_description")
+            or description.get("description_of_drawings")
+            or ""
         )
-        referenced_count = len(self._extract_referenced_figure_numbers(draft))
+        for match in re.finditer(r"(图\d+)[^\n。；;]*[。；;\n]?", drawing_text):
+            sentence = match.group(0).strip(" \n；;。")
+            figure_number = match.group(1).replace(" ", "")
+            if not sentence:
+                continue
+            existing = specs_by_number.get(figure_number, {})
+            title = existing.get("title") or sentence
+            if len(title) > 30:
+                title = f"{figure_number}附图"
+            specs_by_number[figure_number] = {
+                "figure_number": figure_number,
+                "title": title,
+                "description": existing.get("description") or sentence,
+            }
 
-        canonical_specs = [
-            {
-                "figure_number": "图1",
-                "title": "系统结构示意图",
-                "description": "沉浸式Cave折幕空间中固定显示面、姿态可调显示面、姿态驱动机构、显示控制端和处理控制单元的连接关系。",
-            },
-            {
-                "figure_number": "图2",
-                "title": "方法流程示意图",
-                "description": "获取显示面姿态和空间边界参数、确定边界投影关系、生成映射关系并同步输出补偿后视频画面的处理流程。",
-            },
-            {
-                "figure_number": "图3",
-                "title": "姿态变化与空间边界示意图",
-                "description": "显示面角度变化时相邻显示面之间的边界投影、重叠区域和空白区域的空间关系。",
-            },
-            {
-                "figure_number": "图4",
-                "title": "画面补偿与重映射示意图",
-                "description": "外转空白区域补偿、内转遮挡区域裁剪、删除或重分配以及多显示面同步重映射关系。",
-            },
-        ]
+        def _figure_sort_key(item: Dict[str, str]) -> int:
+            digits = re.sub(r"\D+", "", item.get("figure_number", ""))
+            return int(digits or 0)
 
-        required_count = 2
-        if referenced_count >= 3 or re.search(r"(姿态|角度|边界|投影|空间)", combined):
-            required_count = 3
-        if referenced_count >= 4 or re.search(r"(补偿|裁剪|遮挡|空白|重映射|重排|删除|重分配)", combined):
-            required_count = 4
-        return canonical_specs[:required_count]
+        return sorted(specs_by_number.values(), key=_figure_sort_key)
 
     async def _ensure_required_patent_drawings(
         self,
@@ -2265,6 +2266,23 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         if not self._draft_requires_drawings(draft):
             return draft
         planned_specs = self._planned_drawing_specs(draft)
+        if self._draft_requires_drawings(draft) and not planned_specs:
+            draft["_drawing_plan_required"] = {
+                "issue": "需要附图，但专利撰写 Agent 未给出逐图附图说明和绘图内容",
+                "required_action": "请专利撰写 Agent 先补齐每张附图的图号、标题、具体绘图内容，再调用生图工具。",
+            }
+            if event_callback:
+                event_callback(
+                    "CEO Agent",
+                    "agent.content",
+                    "🧭 需要附图但缺少逐图绘图方案，已交回专利撰写 Agent 补齐",
+                    {
+                        "agent_name": "CEO Agent",
+                        "phase": "patent_writing",
+                        "content": json.dumps(draft["_drawing_plan_required"], ensure_ascii=False),
+                    },
+                )
+            return draft
         draft["drawings"] = self._normalize_drawing_metadata(
             draft.get("drawings", []),
             planned_specs=planned_specs,
@@ -2280,7 +2298,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         drawing_description = str(
             description.get("drawings_description")
             or description.get("description_of_drawings")
-            or "图1为本发明的系统结构或方法流程示意图。"
+            or ""
         )
         if event_callback:
             event_callback(
@@ -2294,8 +2312,8 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             drawing_specs = [spec_by_number.get(number, {"figure_number": number}) for number in missing_figures]
             agent_prompt = f"""你是专利撰写 Agent。当前草稿引用了附图，但缺少可访问的附图文件。
 
-请你作为 Agent 自行判断每张图的绘图重点，并通过 Hermes 工具 `patent_drawing_generator` 分别生成缺失附图。
-工作流只负责把缺失图号和草稿上下文交给你，不能代替你调用生图工具。
+请你基于当前专利草稿中已经写明的逐图附图说明，通过 Hermes 工具 `patent_drawing_generator` 分别生成缺失附图。
+工作流只负责把缺失图号和草稿上下文交给你，不能代替你决定图中技术内容或调用生图工具。
 
 【任务 ID】
 {context.task_id}
@@ -2314,16 +2332,17 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 
 【严格要求】
 1. 必须由你调用 `patent_drawing_generator` 生成每一个缺失图号对应的附图。
-2. 每张图必须主题不同，不能只换标题而复用相同内容。
-3. 图号、标题、说明必须与专利草稿一致。
-4. 不要生成最终 DOCX。
-5. 最终只输出严格 JSON：
+2. 每张图的 `description` 必须是该图具体绘图内容，不能为空，不能只写“图X为……示意图”。
+3. 每张图必须主题不同，不能只换标题而复用相同内容。
+4. 图号、标题、说明必须与专利草稿一致。
+5. 不要生成最终 DOCX。
+6. 最终只输出严格 JSON：
 {{
   "drawings": [
     {{
       "figure_number": "图1",
-      "title": "系统结构示意图",
-      "description": "图1为……示意图。",
+      "title": "当前草稿中该图的真实附图标题",
+      "description": "当前草稿中该图必须表达的具体对象、结构、步骤、连接关系或状态变化。",
       "file_path": "/absolute/path/to/figure.png",
       "artifact_url": "/api/v1/workflows/{context.task_id}/artifacts/...",
       "mime_type": "image/png"
@@ -2441,142 +2460,44 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         review_issues: List[str],
         event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
-        """Apply deterministic structure repairs from reviewer feedback before re-review.
+        """Attach reviewer feedback and deterministic formatting before re-review.
 
-        This is a CEO safety net for remediation rounds: the patent writer agent still gets
-        the first chance to revise, but timeouts or incomplete writer output must not end the
-        flow or erase a usable draft.
+        The workflow engine must not synthesize patent substance locally. Subjective
+        remediation belongs to the responsible Hermes Agent via its LLM; this method only
+        preserves the current draft, normalizes objective formatting, and records what the
+        CEO needs to route back into the loop.
         """
         if not isinstance(draft, dict):
             draft = {}
         repaired = dict(draft)
-        description = dict(repaired.get("description") or {})
-        claims = dict(repaired.get("claims") or {})
+        claims = repaired.get("claims")
+        if isinstance(claims, dict):
+            repaired["claims"] = normalize_claims_payload_linebreaks(claims)
 
-        suggestion_text = "\n".join(str(issue) for issue in review_issues if issue)
-        suggested_title = self._extract_suggested_content_for_section(
-            context.review_report or {},
-            ("发明名称", "title"),
-        )
-        title = (
-            repaired.get("title")
-            or repaired.get("patent_title")
-            or context.title
-            or suggested_title
-            or "沉浸式展示空间的显示姿态自适应控制与画面连续性补偿方法"
-        )
-        repaired["title"] = str(title).strip()
-        context.title = repaired["title"]
-
-        suggested_abstract = self._extract_suggested_content_for_section(
-            context.review_report or {},
-            ("说明书摘要", "abstract"),
-        )
-        abstract = str(repaired.get("abstract") or "").strip()
-        if len(abstract) < 80 or "摘要为空" in suggestion_text:
-            repaired["abstract"] = suggested_abstract or (
-                "本发明公开一种沉浸式展示空间的显示姿态自适应控制与画面连续性补偿方法。"
-                "该方法获取体验者的人体信息、观看位置或定制输入，确定观看参考点和姿态可调显示面的目标姿态，"
-                "建立固定显示面与姿态可调显示面的统一三维坐标系，并根据目标姿态参数或实际姿态反馈生成显示内容映射参数。"
-                "当姿态变化产生显示间隙时，基于相邻显示面的边界投影计算未覆盖区域并生成补偿显示数据；"
-                "当姿态变化产生遮挡或重叠时，生成可见区域掩膜并对原始显示内容进行裁剪、重排或几何重映射。"
-                "各显示面按统一时间戳同步输出，从而在显示姿态自适应变化时保持多显示面画面连续性。"
-            )
-
-        independent_claim = str(claims.get("independent_claim") or "").strip()
-        if (
-            not independent_claim
-            or "统一三维坐标系" not in independent_claim
-            or "边界坐标" not in independent_claim
-        ):
-            claims["independent_claim"] = (
-                "1. 一种沉浸式展示空间的显示姿态自适应控制与画面连续性补偿方法，"
-                "所述沉浸式展示空间包括固定显示面和至少一个姿态可调显示面，其特征在于，包括："
-                "S1、获取体验者的人体信息、观看位置和/或定制输入，确定观看参考点，"
-                "并调用姿态-内容-补偿联合映射关系生成姿态可调显示面的目标姿态参数以及显示内容映射参数；"
-                "S2、驱动所述姿态可调显示面运动至目标姿态，获取实际姿态参数，"
-                "并在固定显示面和姿态可调显示面的统一三维坐标系中计算各显示面的边界坐标及姿态变换后的边界坐标；"
-                "S3、根据变换后的边界坐标与相邻显示面的边界坐标之间的投影关系，确定未覆盖区域、显示间隙、重叠区域和/或遮挡区域，"
-                "并生成补偿显示数据、可见区域掩膜以及对应的裁剪、缩放、重排和/或几何重映射参数；"
-                "S4、按照统一时间戳将重构后的显示内容、补偿显示数据和/或重映射后的显示内容同步输出至所述固定显示面和所述姿态可调显示面，"
-                "以保持多显示面画面的连续性。"
-            )
-
-        dependent_claims = claims.get("dependent_claims", [])
-        if not isinstance(dependent_claims, list):
-            dependent_claims = [str(dependent_claims)] if str(dependent_claims or "").strip() else []
-        algorithm_claims = [
-            "2. 根据权利要求1所述的方法，其特征在于，所述姿态-内容-补偿联合映射关系包括人体信息范围、观看参考点、目标姿态参数、纹理坐标映射矩阵、视口裁剪边界、边缘融合权重和补偿类型之间的对应关系。",
-            "3. 根据权利要求1所述的方法，其特征在于，所述未覆盖区域由姿态变换后的姿态可调显示面的第一边界线、相邻固定显示面或相邻姿态可调显示面的第二边界线以及观看参考点的投影关系确定。",
-            "4. 根据权利要求1所述的方法，其特征在于，所述可见区域掩膜根据各显示面的深度顺序、投影重叠区域和预设可见性规则生成，并用于确定原始显示内容中的保留显示区域和待裁剪区域。",
-            "5. 根据权利要求1所述的方法，其特征在于，所述显示内容映射参数包括投影矩阵、纹理坐标映射矩阵、视口边界坐标、补偿区域边界坐标和边缘融合权重中的至少一种。",
-            "6. 根据权利要求1所述的方法，其特征在于，当目标姿态参数位于两个预设离散姿态之间时，对两个预设离散姿态对应的显示内容映射矩阵、补偿区域边界坐标和边缘融合权重进行插值计算。",
-        ]
-        existing_claim_text = "\n".join(str(claim) for claim in dependent_claims)
-        for claim in algorithm_claims:
-            if claim[:18] not in existing_claim_text:
-                dependent_claims.append(claim)
-        claims["dependent_claims"] = dependent_claims
-        repaired["claims"] = claims
-
-        if self._section_needs_repair(description.get("technical_field")):
-            description["technical_field"] = (
-                "本发明涉及沉浸式显示、可调显示面控制和多屏内容映射技术领域，"
-                "尤其涉及一种沉浸式展示空间的显示姿态自适应控制与画面连续性补偿方法。"
-                "该方法适用于 Cave 折幕、环幕、投影融合空间、LED 多屏展示空间以及包含固定显示面和姿态可调显示面的沉浸式交互展示系统，"
-                "用于在显示面姿态发生转动、平移或升降变化时保持显示内容映射、边界补偿和多屏同步输出的一致性。"
-            )
-        if self._section_needs_repair(description.get("background_art")):
-            description["background_art"] = (
-                "现有沉浸式展示空间通常采用固定环幕、折幕、LED显示面或投影显示面形成包围式视觉环境。"
-                "为适配不同身高、观看距离、观看主题或沉浸强度，一些展示空间会设置可转动、可升降或可平移的姿态可调显示面。"
-                "然而，显示面姿态变化后，相邻显示面之间可能出现显示间隙、空白区域、重叠区域或遮挡区域；"
-                "若仍按固定姿态输出原始画面，容易产生接缝错位、画面拉伸、内容缺失或遮挡重复。"
-                "传统多屏几何校正、边缘融合和投影映射方案多针对固定屏幕位置，难以同时处理用户驱动的姿态变化、实时姿态反馈、补偿区域生成和多显示面同步输出。"
-                "因此，需要一种能够将观看参考点、显示姿态、内容映射和画面补偿联动处理的技术方案。"
-            )
-        if self._section_needs_repair(description.get("summary_of_invention")):
-            description["summary_of_invention"] = (
-                "本发明的目的在于提供一种沉浸式展示空间的显示姿态自适应控制与画面连续性补偿方法，"
-                "以解决姿态可调显示面运动后多显示面画面不连续、局部空白、遮挡重复和内容映射不准确的问题。"
-                "该方法先基于体验者的人体信息、观看位置或定制输入确定观看参考点，并通过姿态-内容-补偿联合映射关系生成目标姿态参数和显示内容映射参数；"
-                "再建立固定显示面和姿态可调显示面的统一三维坐标系，利用实际姿态反馈修正显示面边界坐标；"
-                "当显示面外转或远离相邻显示面形成未覆盖区域时，根据相邻边界线投影计算空白多边形区域，生成补充显示区域、补偿视口和边缘融合权重；"
-                "当显示面内转形成遮挡或重叠时，根据深度顺序和投影重叠区域生成可见区域掩膜，对原始显示内容进行裁剪、缩放、重排或几何重映射。"
-                "通过统一时间戳同步输出各显示面的重构内容和补偿内容，能够在显示姿态动态变化时降低接缝错位并保持画面连续。"
-            )
-        description["drawings_description"] = self._build_consistent_drawings_description(repaired)
-        if self._section_needs_repair(description.get("detailed_description")):
-            description["detailed_description"] = (
-                "以下结合附图对本发明进行说明。控制器接收人体信息采集模块输出的身高、视线高度、站立位置、观看距离以及入口交互终端输入的展示主题或沉浸强度，"
-                "计算观看参考点，并在姿态-内容-补偿联合映射表中查询目标姿态参数。所述映射表可包括人体信息范围、观看参考点坐标、姿态可调显示面的转动角度、俯仰角、升降高度、"
-                "纹理坐标映射矩阵、视口裁剪边界、补偿类型和边缘融合权重。驱动机构根据目标姿态参数带动姿态可调显示面运动，编码器、角度传感器或视觉检测单元反馈实际姿态参数。"
-                "控制器在统一三维坐标系中记录固定显示面和姿态可调显示面的顶点坐标，根据实际姿态参数构建姿态变换矩阵，并得到变换后的显示面边界。"
-                "当相邻边界之间形成未覆盖区域时，控制器根据观看参考点对相邻边界进行投影，计算空白多边形区域，并从同一三维场景或原始视频帧中生成补偿视口，将补偿显示数据输出至补充显示设备或相邻显示面的扩展显示区。"
-                "当姿态可调显示面内转导致画面重叠或遮挡时，控制器依据显示面的深度顺序和投影重叠区域生成可见区域掩膜，保留未被遮挡的内容区域，并对被遮挡区域执行裁剪、缩放、重排或几何重映射。"
-                "对于位于两个离散姿态之间的目标姿态，控制器对相邻离散姿态对应的显示内容映射矩阵、补偿区域边界坐标和边缘融合权重进行线性插值，得到当前姿态下的映射参数。"
-                "最终，控制器按照统一时间戳将固定显示面、姿态可调显示面和补充显示区域的内容同步输出，以保证沉浸式展示空间中的画面连续性和姿态适配效果。"
-            )
-        repaired["description"] = description
         repaired["drawings"] = self._normalize_drawing_metadata(
             repaired.get("drawings", []),
             planned_specs=self._planned_drawing_specs(repaired),
         )
-        repaired["_remediation_applied"] = {
+        repaired["_remediation_required"] = {
             "round": context.iteration_count,
             "source": "quality_review_suggestions",
             "issues": review_issues[:12],
+            "required_action": (
+                "CEO must dispatch the responsible Hermes Agent to revise patent substance; "
+                "the workflow engine only normalizes objective formatting."
+            ),
         }
+        repaired["_needs_agent_rewrite"] = True
 
         if event_callback:
             event_callback(
-                "专利撰写 Agent",
+                "CEO Agent",
                 "agent.content",
-                "✅ 已根据审查意见补强标题、摘要、权利要求、说明书和附图说明",
+                "🧭 已汇总审查问题，继续调度对应 Agent 修复",
                 {
-                    "agent_name": "专利撰写 Agent",
+                    "agent_name": "CEO Agent",
                     "phase": "patent_writing",
-                    "content": json.dumps(repaired.get("_remediation_applied"), ensure_ascii=False),
+                    "content": json.dumps(repaired.get("_remediation_required"), ensure_ascii=False),
                 },
             )
         return repaired
@@ -2609,19 +2530,19 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
     def _build_consistent_drawings_description(self, draft: Dict[str, Any]) -> str:
         specs = self._planned_drawing_specs(draft)
         if not specs:
-            specs = [
-                {
-                    "figure_number": "图1",
-                    "title": "系统结构示意图",
-                    "description": "沉浸式Cave折幕空间中固定显示面、姿态可调显示面和处理控制单元的连接关系。",
-                },
-                {
-                    "figure_number": "图2",
-                    "title": "方法流程示意图",
-                    "description": "根据显示面姿态变化生成补偿、裁剪和重映射视频画面的处理流程。",
-                },
-            ]
-        lines = [f"{spec['figure_number']}为本发明{spec['title']}。" for spec in specs]
+            description = draft.get("description", {}) if isinstance(draft, dict) else {}
+            if isinstance(description, dict):
+                return str(
+                    description.get("drawings_description")
+                    or description.get("description_of_drawings")
+                    or ""
+                ).strip()
+            return ""
+        lines = []
+        for spec in specs:
+            desc = str(spec.get("description") or "").strip()
+            if desc:
+                lines.append(desc if desc.endswith("。") else f"{desc}。")
         return "\n".join(lines)
 
     def _normalize_drawing_metadata(
@@ -2632,12 +2553,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         if not isinstance(drawings, list):
             return []
         if planned_specs is None:
-            planned_specs = [
-                {"figure_number": "图1", "title": "系统结构示意图", "description": ""},
-                {"figure_number": "图2", "title": "方法流程示意图", "description": ""},
-                {"figure_number": "图3", "title": "姿态变化与空间边界示意图", "description": ""},
-                {"figure_number": "图4", "title": "画面补偿与重映射示意图", "description": ""},
-            ]
+            planned_specs = []
         title_map = {spec["figure_number"]: spec["title"] for spec in planned_specs}
         description_map = {spec["figure_number"]: spec.get("description", "") for spec in planned_specs}
         allowed_numbers = set(title_map)
@@ -2664,7 +2580,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             raw_title = str(drawing.get("title") or "").strip()
             raw_title = re.sub(rf"^{re.escape(figure_number)}\s*[:：、.．-]?\s*", "", raw_title).strip()
             drawing["title"] = title_map.get(figure_number, raw_title or "专利附图")
-            drawing["description"] = description_map.get(figure_number) or f"{figure_number}为{drawing['title']}。"
+            drawing["description"] = description_map.get(figure_number) or str(drawing.get("description") or "").strip()
             normalized.append(drawing)
         return normalized
 
@@ -2689,10 +2605,16 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             build_patent_text_from_draft(normalized),
             drawings=normalized.get("drawings", []) if isinstance(normalized.get("drawings"), list) else [],
         )
+        manual_draft_report = validate_patent_manual_draft(normalized)
         normalized["manual_compliance"] = {
             "claim_rules": claim_report,
             "document_rules": document_report,
-            "high_priority_issues": collect_high_priority_issues(claim_report, document_report),
+            "manual_draft_rules": manual_draft_report,
+            "high_priority_issues": collect_high_priority_issues(
+                claim_report,
+                document_report,
+                manual_draft_report,
+            ),
         }
         return normalized
 
@@ -3511,20 +3433,20 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
  3. 对涉及结构、装置、系统、流程或空间关系的发明，调用 patent_drawing_generator 工具生成对应附图
     - tech_description: 依据权利要求、说明书附图说明和原始技术方案整理的绘图说明
     - task_id: 当前工作流任务ID {context.task_id}
-    - title: 附图标题，例如“系统结构示意图”或“方法流程示意图”
-    - description: 附图说明文本，例如“图1为……示意图”
+    - title: 当前草稿中该图的真实附图标题
+    - description: 当前草稿中该图必须表达的具体对象、结构、步骤、连接关系或状态变化
 
  4. 调用 support_checker 检查你生成的权利要求与说明书的支持关系
 
 注意：本阶段仅生成专利内容和必要附图，不生成最终文档文件。请确保所有内容完整、规范。
 【专利规范硬性要求】
-- 不得把交底逐字稿中的时间戳、说话人、会议口语或格式性内容写入正文，例如“任(00:00:00)”。
+- 不得把交底逐字稿中的时间戳、说话人、会议口语或格式性内容写入正文。
 - 说明书摘要必须包含：专利名称、技术领域、简化技术方案、技术效果，且不超过300字。
 - 技术领域必须具体，不能写成发明本身，也不能混入方案细节。
 - 背景技术必须基于检索报告中的真实现有技术，并避免泄露本发明的具体方案。
 - 发明内容必须包含技术问题、技术方案、有益效果，三者一一对应。
 - 附图至少按需要规划4幅；每幅图必须表达不同主题，不能只换标题或重复图片内容。
-- 附图说明不得重复图号，例如不能出现“图1 图1”。
+- 附图说明不得重复图号或重复标题。
 - 具体实施方式必须与权利要求和附图对应，不能使用 Markdown 标题。
 最终只输出严格 JSON，不要输出 Markdown、代码块或解释文字：
 {{
@@ -3894,7 +3816,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 
         Subjective drafting is intentionally kept inside the Hermes Agent LLM. The
         workflow engine may pass existing content and missing sections, but must not
-        synthesize patent text or directly call writer tools as a fallback.
+        synthesize patent text or directly call writer tools outside the Agent loop.
         """
         if event_callback:
             event_callback(
@@ -4388,87 +4310,11 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             self._logger.warning(
                 f"Agent failure detected in {context_field}: {error_preview}"
             )
-            if context_field == "review_report":
-                # 审查 Agent 失败 — 直接当作"严重问题，要求重审"
-                return {
-                    "_agent_failed": True,
-                    "_agent_error": error_preview,
-                    "recommendation": "reject",
-                    "revision_priority": "critical",
-                    "review_summary": {
-                        "overall_score": 0.0,
-                        "overall_rating": "poor",
-                        "recommendation": "reject",
-                        "reviewer_notes": (
-                            f"审查 Agent 执行失败，无法完成审查。错误：{error_preview}。"
-                            "将触发重新审查流程。"
-                        ),
-                    },
-                    "formal_compliance_review": {
-                        "score": 0.0,
-                        "passed": False,
-                        "issues": [
-                            {
-                                "severity": "critical",
-                                "location": "agent_execution",
-                                "description": f"审查 Agent 执行失败：{error_preview}",
-                                "suggestion": "请重试任务，或检查 LLM API 配置（API Key、配额、模型可用性）。",
-                            }
-                        ],
-                    },
-                    "claims_review": {"issues": []},
-                    "description_review": {"issues": []},
-                    "consistency_review": {"issues": []},
-                    "examination_risks": [
-                        {
-                            "risk_type": "agent_execution_failure",
-                            "likelihood": "critical",
-                            "description": f"审查 Agent 未成功执行：{error_preview}",
-                            "mitigation_suggestion": "重试任务；如持续失败，检查 LLM API 凭据与配额。",
-                        }
-                    ],
-                    "detailed_revision_suggestions": [],
-                }
-            elif context_field == "patent_draft":
-                # 撰写 Agent 失败 — 返回空白结构 + 失败标记，绝对不输出"待生成"
-                return {
-                    "_agent_failed": True,
-                    "_agent_error": error_preview,
-                    "claims": {
-                        "independent_claim": "",
-                        "dependent_claims": [],
-                    },
-                    "description": {
-                        "technical_field": "",
-                        "background_art": "",
-                        "summary_of_invention": "",
-                        "drawings_description": "",
-                        "detailed_description": "",
-                    },
-                    "abstract": "",
-                    "docx_path": "",
-                }
-            elif context_field == "retrieval_report":
-                return {
-                    "_agent_failed": True,
-                    "_agent_error": error_preview,
-                    "novelty_assessment": {"rating": "unknown", "rationale": ""},
-                    "inventive_step_assessment": {"rating": "unknown", "rationale": ""},
-                    "utility_assessment": {"rating": "unknown", "rationale": ""},
-                    "prior_art_references": [],
-                    "retrieval_keywords": [],
-                    "retrieval_databases": [],
-                    "risk_factors": [],
-                    "writing_recommendations": [],
-                    "claim_strategy_recommendations": [],
-                    "overall_patentability": "unknown",
-                    "confidence": 0,
-                }
-            else:
-                # 其他阶段也加失败标记
-                data = dict(data)
-                data["_agent_failed"] = True
-                data["_agent_error"] = error_preview
+            return self._build_agent_output_error(
+                context_field=context_field,
+                output_text=json.dumps(data, ensure_ascii=False),
+                reason=error_preview,
+            )
 
         # ═══ 处理 {agent, output, summary} 格式 ═══
         # 当 JSON 解析失败时，数据会被包装成这种格式
@@ -4481,24 +4327,15 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             if "raw_output" not in parsed and parsed:
                 # 成功解析出结构化数据，使用解析结果
                 data = parsed
-            # 如果解析失败，后面会提供兜底结构
 
-        # ═══ 为无法解析的数据提供兜底默认结构 ═══
+        # ═══ 无法解析时只返回失败信息，不生成阶段内容 ═══
         if "raw_output" in data or ("agent" in data and "output" in data):
             output_text = raw_output_text or data.get("output", "") or data.get("raw_output", "")
-
-            if context_field == "retrieval_report":
-                # 为检索报告提供兜底结构
-                data = self._build_fallback_retrieval_report(output_text)
-            elif context_field == "patent_draft":
-                # 为专利草稿提供兜底结构
-                data = self._build_fallback_patent_draft(output_text)
-            elif context_field == "review_report":
-                # 为审查报告提供兜底结构
-                data = self._build_fallback_review_report(output_text)
-            else:
-                # 其他类型保留原格式
-                return data
+            return self._build_agent_output_error(
+                context_field=context_field,
+                output_text=output_text,
+                reason=f"{context_field} Agent 输出无法解析为当前要求的结构化数据",
+            )
 
         if context_field == "requirement_analysis":
             # tech_field: 如果是嵌套对象，提取 primary_domain 作为字符串
@@ -4631,7 +4468,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     })
                 if refs:
                     data["prior_art_references"] = refs
-                    data["similar_patents"] = refs  # 兼容旧字段名
+                    data["similar_patents"] = refs  # 保留给既有前端字段读取
 
             # ═══ risk_assessment.risk_factors → risk_factors ═══
             risk_assess = data.get("risk_assessment", {})
@@ -4647,7 +4484,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 if "retrieval_databases" not in data and strategy.get("databases_used"):
                     data["retrieval_databases"] = strategy["databases_used"]
 
-            # similar_patents → prior_art_references (前端期望格式) - 旧格式兼容
+            # similar_patents → prior_art_references (front-end normalized format)
             if "similar_patents" in data and "prior_art_references" not in data:
                 patents = data.get("similar_patents", [])
                 if isinstance(patents, list):
@@ -4706,9 +4543,9 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     "rationale": data.get("utility_rationale", ""),
                 }
 
-            # ===== 兜底提取：当 Agent 只输出了代码块片段（如 keywords_cn/risks 等）时的回退映射 =====
+            # ===== 结构化字段归一化：兼容 Agent 输出中的等价字段名 =====
 
-            # 1. 关键词兜底: keywords_cn/keywords_en → retrieval_keywords
+            # 1. 关键词字段: keywords_cn/keywords_en → retrieval_keywords
             if not data.get("retrieval_keywords"):
                 keywords_fb = data.get("keywords_cn") or data.get("keywords_en") or data.get("query")
                 if isinstance(keywords_fb, list):
@@ -4716,7 +4553,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 elif isinstance(keywords_fb, str) and keywords_fb.strip():
                     data["retrieval_keywords"] = [keywords_fb.strip()]
 
-            # 2. 风险因素兜底: risks → risk_factors
+            # 2. 风险因素字段: risks → risk_factors
             if "risk_factors" not in data and "risks" in data:
                 risks = data["risks"]
                 if isinstance(risks, list):
@@ -4731,7 +4568,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                             })
                     data["risk_factors"] = normalized
 
-            # 3. 新颖性兜底: novelty_score + novelty_rationale → novelty_assessment
+            # 3. 新颖性字段: novelty_score + novelty_rationale → novelty_assessment
             if "novelty_assessment" not in data:
                 score = data.get("novelty_score")
                 rationale = data.get("novelty_rationale")
@@ -4749,7 +4586,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                         "rationale": str(rationale) if rationale else "",
                     }
 
-            # 4. 创造性兜底: inventive_step_score + inventive_step_rationale → inventive_step_assessment
+            # 4. 创造性字段: inventive_step_score + inventive_step_rationale → inventive_step_assessment
             if "inventive_step_assessment" not in data:
                 score = data.get("inventive_step_score")
                 rationale = data.get("inventive_step_rationale")
@@ -4767,7 +4604,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                         "rationale": str(rationale) if rationale else "",
                     }
 
-            # 5. 实用性兜底: utility_score + utility_rationale → utility_assessment
+            # 5. 实用性字段: utility_score + utility_rationale → utility_assessment
             if "utility_assessment" not in data:
                 score = data.get("utility_score")
                 rationale = data.get("utility_rationale")
@@ -4785,7 +4622,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                         "rationale": str(rationale) if rationale else "",
                     }
 
-            # 6. 专利列表兜底: similar_patents（字符串列表）→ prior_art_references
+            # 6. 专利列表字段: similar_patents（字符串列表）→ prior_art_references
             if not data.get("prior_art_references"):
                 pat_ids = data.get("similar_patents") or data.get("prior_art_list")
                 if isinstance(pat_ids, list) and pat_ids:
@@ -4807,7 +4644,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     if refs:
                         data["prior_art_references"] = refs
 
-            # 7. 数据源兜底: databases（顶层）→ retrieval_databases
+            # 7. 数据源字段: databases（顶层）→ retrieval_databases
             if "retrieval_databases" not in data:
                 dbs = data.get("databases")
                 if isinstance(dbs, list) and dbs:
@@ -4846,25 +4683,18 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             if parsed_candidate:
                 parsed = parsed_candidate
             else:
-                parsed = self._build_fallback_review_report(raw_text)
+                parsed = self._build_agent_output_error(
+                    context_field="review_report",
+                    output_text=raw_text,
+                    reason="审查 Agent 最终回复无法解析为当前要求的结构化审查意见",
+                )
 
         if not parsed:
-            parsed = {
-                "recommendation": "reject",
-                "revision_priority": "critical",
-                "review_summary": {
-                    "overall_score": 0.0,
-                    "overall_rating": "poor",
-                    "recommendation": "reject",
-                    "reviewer_notes": "审查 Agent 未返回可解析的最终审查意见。",
-                },
-                "formal_compliance_review": {"issues": []},
-                "claims_review": {"issues": []},
-                "description_review": {"issues": []},
-                "consistency_review": {"issues": []},
-                "examination_risks": [],
-                "detailed_revision_suggestions": [],
-            }
+            parsed = self._build_agent_output_error(
+                context_field="review_report",
+                output_text=raw_text,
+                reason="审查 Agent 未返回当前要求的结构化审查意见",
+            )
 
         parsed.setdefault("formal_compliance_review", {"issues": []})
         parsed.setdefault("claims_review", {"issues": []})
@@ -4907,262 +4737,26 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
-    def _build_fallback_retrieval_report(self, output_text: str) -> Dict[str, Any]:
-        """Build a failed retrieval report when real retrieval output cannot be parsed."""
+    def _build_agent_output_error(
+        self,
+        context_field: str,
+        output_text: str,
+        reason: str,
+    ) -> Dict[str, Any]:
+        """Return explicit Agent failure metadata without synthesizing stage content."""
+        error_msg = str(reason or "Agent 输出不符合当前结构化要求")[:500]
+        raw_output = str(output_text or "")
+        self._logger.warning(
+            "Agent output rejected for %s: %s",
+            context_field,
+            error_msg[:200],
+        )
         return {
             "_agent_failed": True,
             "_incomplete_output": True,
-            "_agent_error": "检索报告无法解析，未使用本地抽取或模拟兜底",
-            "novelty_assessment": {"rating": "unknown", "rationale": "真实检索报告不可用"},
-            "inventive_step_assessment": {"rating": "unknown", "rationale": "真实检索报告不可用"},
-            "utility_assessment": {"rating": "unknown", "rationale": "真实检索报告不可用"},
-            "prior_art_references": [],
-            "retrieval_keywords": [],
-            "retrieval_databases": [],
-            "risk_factors": [],
-            "writing_recommendations": [],
-            "claim_strategy_recommendations": [],
-            "overall_patentability": "unknown",
-            "confidence": 0,
-            "_raw_output": output_text[:2000] if output_text else "",
-        }
-
-    def _build_fallback_patent_draft(self, output_text: str) -> Dict[str, Any]:
-        """为专利草稿构建兜底的默认结构
-
-        关键修复 (Bug #2): 严禁在兜底结构中插入"待生成"占位符。
-        之前的实现会在所有缺失字段写入"待生成",导致后续 .docx 生成
-        时将这些占位符作为正式内容写入专利文件。
-
-        新行为: 兜底结构显式标记 _agent_failed=True 与 _incomplete_output=True,
-        实际字段保持空白字符串或空列表。下游 .docx 生成逻辑必须先检查
-        _agent_failed / _incomplete_output,发现 True 时拒绝生成文档并标记
-        任务为 FAILED 状态。
-        """
-        import re
-
-        # 尝试从文本中提取权利要求 (仅在文本看起来是真实专利内容时)
-        # 关键：必须先检查 output_text 是否是真实的专利内容
-        # 之前用 regex 匹配 error/prompt 文本时,会把 prompt 的 section_type 标签
-        # 当作章节内容,导致 description 字段保存"section_type=..."这样的垃圾。
-        is_garbage_text = bool(
-            output_text and (
-                output_text.startswith("{") and "failed" in output_text
-                or "Error code:" in output_text
-                or '"failed": true' in output_text.lower()
-                or '"failed":true' in output_text.lower()
-            )
-        )
-
-        if is_garbage_text or not output_text:
-            # 输入是 API 错误或空 — 不做正则提取,直接返回空结构 + 失败标记
-            self._logger.warning(
-                "Patent draft fallback triggered with garbage input; "
-                "returning empty structure with _agent_failed=True"
-            )
-            return {
-                "_agent_failed": True,
-                "_incomplete_output": True,
-                "_raw_output": output_text[:3000] if output_text else "",
-                "claims": {
-                    "independent_claim": "",
-                    "dependent_claims": [],
-                },
-                "description": {
-                    "technical_field": "",
-                    "background_art": "",
-                    "summary_of_invention": "",
-                    "drawings_description": "",
-                    "detailed_description": "",
-                },
-                "abstract": "",
-                "docx_path": "",
-            }
-
-        # 真实文本 — 尝试正则提取
-        claims_match = re.search(r'权利要求\s*1[.．、:：]\s*(.{50,500})', output_text, re.DOTALL)
-        independent_claim = claims_match.group(1).strip() if claims_match else ""
-
-        # 防御：如果提取出的"权利要求1"内容里包含 section_type 标签,
-        # 说明这是 prompt 文本泄漏,丢弃
-        if "section_type" in independent_claim or "调用" in independent_claim:
-            independent_claim = ""
-
-        dependent_claims = []
-        dep_matches = re.findall(r'权利要求\s*(\d+)[.．、:：]\s*(.{30,300})', output_text, re.DOTALL)
-        for num, content in dep_matches:
-            if num != "1":
-                clean = content.strip()
-                if "section_type" not in clean and "调用" not in clean:
-                    dependent_claims.append(f"权利要求{num}. {clean}")
-
-        tech_field_match = re.search(r'技术领域[：:]\s*(.{10,200})', output_text)
-        tech_field = tech_field_match.group(1).strip() if tech_field_match else ""
-        if "section_type" in tech_field:
-            tech_field = ""
-
-        background_match = re.search(r'背景技术[：:]\s*(.{50,1000}?)(?=发明内容|技术方案|$)', output_text, re.DOTALL)
-        background = background_match.group(1).strip() if background_match else ""
-        if "section_type" in background:
-            background = ""
-
-        abstract_match = re.search(r'摘要[：:]\s*(.{50,500})', output_text)
-        abstract = abstract_match.group(1).strip() if abstract_match else ""
-        if "section_type" in abstract:
-            abstract = ""
-
-        # 检查是否真的提取到了任何内容
-        has_content = bool(independent_claim or dependent_claims or tech_field or background or abstract)
-        if not has_content:
-            self._logger.warning(
-                "Patent draft fallback: no real content extracted from output text"
-            )
-            return {
-                "_agent_failed": True,
-                "_incomplete_output": True,
-                "_raw_output": output_text[:3000] if output_text else "",
-                "claims": {"independent_claim": "", "dependent_claims": []},
-                "description": {
-                    "technical_field": "",
-                    "background_art": "",
-                    "summary_of_invention": "",
-                    "drawings_description": "",
-                    "detailed_description": "",
-                },
-                "abstract": "",
-                "docx_path": "",
-            }
-
-        return {
-            "claims": {
-                "independent_claim": independent_claim,
-                "dependent_claims": dependent_claims,
-            },
-            "description": {
-                "technical_field": tech_field,
-                "background_art": background,
-                "summary_of_invention": "",
-                "drawings_description": "",
-                "detailed_description": "",
-            },
-            "abstract": abstract,
-            "docx_path": "",
-            "_raw_output": output_text[:3000] if output_text else "",
-        }
-
-    def _build_fallback_review_report(self, output_text: str) -> Dict[str, Any]:
-        """为审查报告构建兜底的默认结构
-
-        关键修复 (Bug #1 根因): 之前的实现当 review 输出无法解析时
-        设置 recommendation='unknown' / revision_priority='medium' / issues=[],
-        导致 _check_review_needs_revision 全部检查都失败,workflow 误判为
-        "无问题"并直接完成,从来不回退到 writer。
-
-        新行为: 兜底结构必须明确包含一个 critical 级别 issue,
-        保证 _check_review_needs_revision 返回 True,触发 iteration loop。
-        """
-        import re
-
-        # 检测输入是否是 API 错误或空响应
-        is_garbage_text = bool(
-            output_text and (
-                "Error code:" in output_text
-                or '"failed": true' in output_text.lower()
-                or '"failed":true' in output_text.lower()
-                or output_text.startswith("{")
-                and "error" in output_text[:200].lower()
-            )
-        )
-
-        if is_garbage_text or not output_text:
-            # 输入是 API 错误或空 — 必须显式标记失败,让 iteration loop 触发
-            error_msg = (output_text or "审查 Agent 输出为空")[:500]
-            self._logger.warning(
-                f"Review report fallback triggered with garbage input: {error_msg[:200]}"
-            )
-            return {
-                "_agent_failed": True,
-                "_incomplete_output": True,
-                "_raw_output": output_text[:2000] if output_text else "",
-                "recommendation": "reject",
-                "revision_priority": "critical",
-                "review_summary": {
-                    "overall_score": 0.0,
-                    "overall_rating": "poor",
-                    "recommendation": "reject",
-                    "reviewer_notes": (
-                        f"审查 Agent 输出无法解析或为错误响应：{error_msg}。"
-                        "将触发重新审查。"
-                    ),
-                },
-                "formal_compliance_review": {
-                    "score": 0.0,
-                    "passed": False,
-                    "issues": [
-                        {
-                            "severity": "critical",
-                            "location": "agent_execution",
-                            "description": f"审查 Agent 未成功完成审查: {error_msg}",
-                            "suggestion": "请重试任务，或检查 LLM API 配置。",
-                        }
-                    ],
-                },
-                "claims_review": {"issues": []},
-                "description_review": {"issues": []},
-                "consistency_review": {"issues": []},
-                "examination_risks": [
-                    {
-                        "risk_type": "agent_execution_failure",
-                        "likelihood": "critical",
-                        "description": f"审查 Agent 未成功执行: {error_msg}",
-                        "mitigation_suggestion": "重试任务;如持续失败,检查 LLM API 凭据与配额。",
-                    }
-                ],
-                "detailed_revision_suggestions": [],
-            }
-
-        # 真实文本 — 尝试正则提取评分和建议
-        score_match = re.search(r'(?:overall_score|总分|评分)["\s:：]*([0-9.]+)', output_text)
-        score = float(score_match.group(1)) if score_match else 0.5
-
-        # 尝试提取建议
-        recommendation = "unknown"
-        if re.search(r'(?:reject|驳回|不通过)', output_text, re.IGNORECASE):
-            recommendation = "reject"
-        elif re.search(r'(?:revise|修改|修正)', output_text, re.IGNORECASE):
-            recommendation = "revise"
-        elif re.search(r'(?:approve|通过|accept)', output_text, re.IGNORECASE):
-            recommendation = "approve"
-
-        # 关键修复：如果 recommendation 解析不出 ("unknown")，
-        # 默认按"需重审"处理，revision_priority=critical，
-        # 这样 _check_review_needs_revision 一定返回 True
-        if recommendation == "unknown":
-            recommendation = "reject"
-            priority = "critical"
-        else:
-            priority = "high" if recommendation in ("reject", "revise") else "medium"
-
-        return {
-            "recommendation": recommendation,
-            "review_summary": {
-                "overall_score": score,
-                "overall_rating": "needs_revision" if score < 0.7 else "good",
-                "recommendation": recommendation,
-                "reviewer_notes": "数据解析中，请参考原始输出",
-            },
-            "formal_compliance_review": {
-                "score": score,
-                "passed": recommendation == "approve",
-                "issues": [],
-            },
-            "claims_review": {"issues": []},
-            "description_review": {"issues": []},
-            "consistency_review": {"issues": []},
-            "examination_risks": [],
-            "detailed_revision_suggestions": [],
-            "revision_priority": priority,
-            "_raw_output": output_text[:2000] if output_text else "",
+            "_context_field": context_field,
+            "_agent_error": error_msg,
+            "_raw_output": raw_output[:3000],
         }
 
     def _build_patent_url(self, patent_id: str, source: str) -> str:

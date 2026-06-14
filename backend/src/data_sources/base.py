@@ -70,7 +70,7 @@ class CNIPASource(DataSource):
         # TODO: 实现真实的CNIPA API调用
         # 注意: CNIPA有反爬机制，需要使用浏览器自动化
         # 参考: playwright 实现
-        logger.warning("CNIPA真实检索尚未接入，跳过该数据源，不返回模拟结果")
+        logger.warning("CNIPA真实检索尚未接入，跳过该数据源，不返回结果")
         return []
 
     async def get_details(self, reference_id: str) -> Optional[PriorArtReference]:

@@ -9,18 +9,20 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-DISTINGUISHING_RULES = {
-    "姿态变化触发的视频连续化处理": ["姿态", "变化", "视频", "连续"],
-    "外转空白补偿": ["外转", "空白", "补偿"],
-    "内转遮挡裁剪/重排": ["内转", "遮挡", "裁剪", "重排"],
-    "显示面边界投影关系计算": ["边界", "投影", "关系"],
-    "多显示面同步输出": ["多屏", "显示面", "同步", "输出"],
-}
+STOP_TERMS = {"一种", "根据", "所述", "包括", "其特征在于", "方法", "系统", "装置", "设备", "介质", "步骤"}
 
 
-def _contains_all(text: str, keywords: list[str]) -> bool:
-    lowered = (text or "").lower()
-    return all(keyword.lower() in lowered for keyword in keywords)
+def _ordered_terms(text: str, limit: int = 40) -> list[str]:
+    terms = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fa5]{2,}", text or "")
+    ordered = []
+    for term in terms:
+        clean = term.strip()
+        if len(clean) < 2 or clean in STOP_TERMS or clean in ordered:
+            continue
+        ordered.append(clean)
+        if len(ordered) >= limit:
+            break
+    return ordered
 
 
 class PatentabilityScorerTool(HermesTool):
@@ -56,13 +58,10 @@ class PatentabilityScorerTool(HermesTool):
         try:
             invention_text = invention or ""
             prior_text = prior_art or ""
-            invention_terms = set(re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fa5]{2,}", invention_text))
-            prior_terms = set(re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fa5]{2,}", prior_text))
+            invention_terms = set(_ordered_terms(invention_text))
+            prior_terms = set(_ordered_terms(prior_text))
             overlap_ratio = len(invention_terms & prior_terms) / max(len(invention_terms), 1)
-            distinguishing = [
-                name for name, keywords in DISTINGUISHING_RULES.items()
-                if _contains_all(invention_text, keywords) and not _contains_all(prior_text, keywords)
-            ]
+            distinguishing = [term for term in _ordered_terms(invention_text, limit=20) if term not in prior_terms]
             data = {
                 "objective_signals": {
                     "term_overlap_ratio": round(overlap_ratio, 3),

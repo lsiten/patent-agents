@@ -263,7 +263,6 @@ export default function SystemConfigPage() {
     title: string,
     Icon: React.ElementType,
     data: SystemConfigResponse['text_llm'],
-    fallback?: boolean,
   ) => {
     const activeKey = `${sectionKey}_active`;
     const activeProvider = editing ? draft[activeKey] || data.active_provider : data.active_provider;
@@ -283,25 +282,6 @@ export default function SystemConfigPage() {
               editing={editing}
             />
           </div>
-          {fallback !== undefined && (
-            <div className="flex items-center gap-2 mt-sm">
-              {fallback ? (
-                <>
-                  <AlertTriangle className="w-4 h-4 text-accent-orange" />
-                  <span className="text-body-sm text-accent-orange">
-                    未配置独立生图供应商，将回退使用文字 LLM 的 API
-                  </span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4 text-brand-green" />
-                  <span className="text-body-sm text-brand-green-dark">
-                    已配置独立生图供应商
-                  </span>
-                </>
-              )}
-            </div>
-          )}
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -453,7 +433,7 @@ export default function SystemConfigPage() {
         {/* Config Sections */}
         <div className="grid gap-lg">
           {renderSection('text_llm', '文字 LLM 配置', Cpu, config.text_llm)}
-          {renderSection('image_gen', '图片生成配置', Image, config.image_gen, config.image_gen_fallback_to_llm)}
+          {renderSection('image_gen', '图片生成配置', Image, config.image_gen)}
         </div>
 
         {/* Env Hint */}

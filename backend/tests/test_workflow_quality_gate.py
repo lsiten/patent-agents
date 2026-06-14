@@ -314,46 +314,40 @@ class TestLowScoreRemediationContracts:
         assert engine._has_unresolved_critical_issues(ctx) is True
 
 
-# ── Bug #2: Writer fallback must never inject "待生成" placeholders ───────────
+# ── Bug #2: Writer parse errors must never inject "待生成" placeholders ────────
 
 
-class TestWriterFallbackNoPlaceholders:
-    """Bug #2: When the writer agent's output can't be parsed, the fallback
-    function must NOT inject '待生成' placeholders. It should mark the data
-    as incomplete and let the iteration loop retry."""
+class TestWriterOutputErrorNoPlaceholders:
+    """When the writer agent's output can't be parsed, the workflow must NOT
+    inject placeholders. It should mark the data as incomplete and let the
+    iteration loop retry."""
 
-    def test_fallback_patent_draft_marks_failure(self):
+    def test_patent_draft_output_error_marks_failure(self):
         engine = PatentWorkflowEngine()
-        # Simulate writer output that is just a 403 error message
         error_text = "Error code: 403 - Gemini API has not been used in project"
-        result = engine._build_fallback_patent_draft(error_text)
+        result = engine._build_agent_output_error("patent_draft", error_text, error_text)
 
-        # The fallback MUST mark this as a failed agent execution
         assert result.get("_agent_failed") is True, (
-            "Fallback must mark the patent_draft as agent-failed so downstream "
+            "Output error must mark the patent_draft as agent-failed so downstream "
             "logic knows to retry instead of generating a .docx with placeholders"
         )
 
-    def test_fallback_patent_draft_has_no_dai_sheng_cheng_placeholder(self):
+    def test_patent_draft_output_error_has_no_dai_sheng_cheng_placeholder(self):
         """
-        BUG #2 (CORE): The current _build_fallback_patent_draft returns literal
-        "待生成" strings. The fix must ensure those strings never appear in the
+        Malformed writer output must never produce literal "待生成" strings in the
         final patent_draft structure.
         """
         engine = PatentWorkflowEngine()
         error_text = "Error code: 403 - Gemini API has not been used in project"
-        result = engine._build_fallback_patent_draft(error_text)
+        result = engine._build_agent_output_error("patent_draft", error_text, error_text)
         result_str = str(result)
         assert "待生成" not in result_str, (
-            f"Fallback patent_draft contains '待生成' placeholder. Result: {result_str[:500]}"
+            f"Patent draft error output contains '待生成' placeholder. Result: {result_str[:500]}"
         )
 
-    def test_fallback_patent_draft_does_not_inject_prompt_text_as_content(self):
+    def test_patent_draft_output_error_does_not_inject_prompt_text_as_content(self):
         """
-        The current fallback uses regex to extract content from the (huge)
-        error/prompt text and ends up storing the prompt's own section_type
-        labels (e.g. 'section_type=\"background\":') as the "content" of those
-        sections. This is a bug.
+        Error/prompt text must not be parsed into patent sections.
         """
         engine = PatentWorkflowEngine()
         error_text = """
@@ -362,44 +356,29 @@ class TestWriterFallbackNoPlaceholders:
         section_type="summary": ...
         section_type="detailed": ...
         """
-        result = engine._build_fallback_patent_draft(error_text)
+        result = engine._build_agent_output_error("patent_draft", error_text, error_text)
         desc = result.get("description", {})
-        # None of the description sections should contain the literal prompt labels
         for section_name, content in desc.items():
             if isinstance(content, str):
                 assert "section_type=" not in content, (
                     f"description.{section_name} contains raw prompt text: {content[:200]}"
                 )
 
-    def test_fallback_review_report_marks_failure(self):
-        """When review agent output can't be parsed, fallback must also
-        mark the report as failed so the iteration loop triggers."""
+    def test_review_report_output_error_marks_failure(self):
+        """When review agent output can't be parsed, mark the report as failed."""
         engine = PatentWorkflowEngine()
         error_text = "Error code: 403 - some LLM error"
-        result = engine._build_fallback_review_report(error_text)
+        result = engine._build_agent_output_error("review_report", error_text, error_text)
         assert result.get("_agent_failed") is True
-        # The synthetic fallback should NOT set recommendation="approve" or
-        # revision_priority="low" (which would skip the iteration)
         assert result.get("recommendation") != "approve"
         assert result.get("revision_priority") not in ("low", "medium")
 
-    def test_fallback_review_report_no_unknown_recommendation(self):
-        """The current fallback sets recommendation='unknown' which falls through
-        every check in _check_review_needs_revision. This must be fixed."""
+    def test_review_report_output_error_triggers_revision(self):
+        """Agent output errors must trigger the review iteration."""
         engine = PatentWorkflowEngine()
         error_text = "Error code: 500 - server error"
-        result = engine._build_fallback_review_report(error_text)
-        # An "unknown" recommendation causes the workflow to silently skip
-        # the iteration loop. The fix must make the recommendation either
-        # "reject" (triggers iteration) or include a critical issue.
-        rec = result.get("recommendation", "")
-        if rec != "reject":
-            # Must at least have a critical issue
-            issues = result.get("formal_compliance_review", {}).get("issues", [])
-            assert any(i.get("severity") in ("critical", "high") for i in issues), (
-                f"Fallback review_report has no critical issues and recommendation={rec!r}, "
-                f"which would cause _check_review_needs_revision to return False"
-            )
+        result = engine._build_agent_output_error("review_report", error_text, error_text)
+        assert engine._check_review_needs_revision(result) is True
 
 
 # ── Integration: normalized output preserves failure status ──────────────────
@@ -437,7 +416,7 @@ class TestNormalizePhaseOutput:
 
 
     @pytest.mark.asyncio
-    async def test_run_agent_stream_fallback_preserves_dict_result(self, monkeypatch):
+    async def test_run_agent_stream_error_preserves_dict_result(self, monkeypatch):
         import src.core.workflow_engine as workflow_module
 
         engine = PatentWorkflowEngine()

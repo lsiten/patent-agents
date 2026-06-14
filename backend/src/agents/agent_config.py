@@ -108,13 +108,13 @@ class AgentConfig:
             with open(soul_path, "r", encoding="utf-8") as f:
                 self._soul_md = f.read()
 
-    def _get(self, key: str, fallback: Any = None) -> Any:
-        """获取配置值，优先使用本地配置，否则回退到 system-config"""
+    def _get(self, key: str, default_value: Any = None) -> Any:
+        """获取配置值，优先使用本地配置，其次使用 system-config 默认值"""
         if key in self._config:
             return self._config[key]
         if key in self._defaults:
             return self._defaults[key]
-        return fallback
+        return default_value
 
     @property
     def profile_id(self) -> str:

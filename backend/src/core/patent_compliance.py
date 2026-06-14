@@ -127,6 +127,14 @@ def validate_claim_rules(claims: Any) -> Dict[str, Any]:
             "suggestion": "由专利撰写 Agent 重写权利要求1。",
             "target_agent": "patent_writer",
         })
+    if not dependent:
+        issues.append({
+            "severity": "critical",
+            "location": "权利要求书",
+            "issue": "缺少从属权利要求",
+            "suggestion": "权利要求书必须由独立权利要求和从属权利要求组成。",
+            "target_agent": "patent_writer",
+        })
     else:
         step_count = len(_find_claim_steps(independent))
         if step_count not in (3, 4):
@@ -187,6 +195,140 @@ def validate_claim_rules(claims: Any) -> Dict[str, Any]:
             "dependent_claim_count": len(dependent),
             "independent_step_count": len(_find_claim_steps(independent)) if independent else 0,
             "independent_length": len(independent),
+        },
+    }
+
+
+def _issue(
+    issues: List[Dict[str, Any]],
+    severity: str,
+    location: str,
+    issue: str,
+    suggestion: str,
+    target_agent: str = "patent_writer",
+) -> None:
+    issues.append({
+        "severity": severity,
+        "location": location,
+        "issue": issue,
+        "suggestion": suggestion,
+        "target_agent": target_agent,
+    })
+
+
+def _contains_any(text: str, terms: Iterable[str]) -> bool:
+    return any(term in text for term in terms)
+
+
+def validate_patent_manual_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate structured patent draft rules from the latest manual/report.
+
+    This remains deterministic: it only detects rules that can be mechanically
+    checked. Professional drafting quality is still decided by the Hermes reviewer.
+    """
+    draft = draft if isinstance(draft, dict) else {}
+    description = draft.get("description") or {}
+    description = description if isinstance(description, dict) else {}
+    title = str(draft.get("title") or draft.get("patent_title") or "").strip()
+    abstract = str(draft.get("abstract") or "").strip()
+    technical_field = str(description.get("technical_field") or "").strip()
+    background = str(description.get("background_art") or "").strip()
+    summary = str(description.get("summary_of_invention") or "").strip()
+    drawings_description = str(
+        description.get("description_of_drawings")
+        or description.get("drawings_description")
+        or ""
+    ).strip()
+    detailed = str(description.get("detailed_description") or "").strip()
+    full_text = build_patent_text_from_draft(draft)
+    issues: List[Dict[str, Any]] = []
+
+    if not title:
+        _issue(issues, "critical", "发明名称", "缺少发明名称", "补充清楚、简要且与技术主题一致的发明名称。")
+    elif len(title) > 60:
+        _issue(issues, "high", "发明名称", f"发明名称超过60字，当前约{len(title)}字", "压缩为能反映主题和类型的名称。")
+    elif len(title) > 25:
+        _issue(issues, "medium", "发明名称", f"发明名称超过25字，当前约{len(title)}字", "一般应控制在25字以内，必要时不超过60字。")
+
+    if not abstract:
+        _issue(issues, "critical", "说明书摘要", "缺少说明书摘要", "摘要必须包含专利名称、技术领域、简化技术方案和技术效果。")
+    else:
+        if len(abstract) > 300:
+            _issue(issues, "high", "说明书摘要", f"摘要超过300字，当前约{len(abstract)}字", "压缩摘要，保留名称、领域、方案和效果。")
+        abstract_required_signals = {
+            "专利名称": bool(title and title.replace("一种", "", 1)[:8] in abstract),
+            "技术领域": "技术领域" in abstract or "涉及" in abstract,
+            "简化技术方案": any(word in abstract for word in ("包括", "首先", "确定", "获取", "处理", "生成")),
+            "技术效果": any(word in abstract for word in ("实现", "避免", "提高", "减少", "保证", "保持", "提升")),
+        }
+        missing = [name for name, passed in abstract_required_signals.items() if not passed]
+        if missing:
+            _issue(issues, "high", "说明书摘要", f"摘要缺少要素：{'、'.join(missing)}", "按专利名称+技术领域+简化技术方案+技术效果重写摘要。")
+
+    if not technical_field:
+        _issue(issues, "critical", "技术领域", "缺少技术领域", "补充具体技术领域。")
+    else:
+        if len(technical_field) > 120 or "具体地" in technical_field:
+            _issue(issues, "high", "技术领域", "技术领域过长或混入具体方案", "技术领域应简明，不写入发明内容或实施方式。")
+        if _contains_any(technical_field, ("本发明涉及一种", "尤其涉及一种")) and len(technical_field) > 80:
+            _issue(issues, "medium", "技术领域", "技术领域疑似写成发明本身或过度展开", "改为直接所属或直接应用的具体技术领域。")
+
+    if not background:
+        _issue(issues, "critical", "背景技术", "缺少背景技术", "背景技术应包含现有技术状况、公开文献或可核验来源及其技术缺陷。")
+    else:
+        if len(background) > 900:
+            _issue(issues, "high", "背景技术", f"背景技术过长，当前约{len(background)}字", "背景技术应精简，避免把实施方式写入背景。")
+        if _contains_any(background, ("本发明", "本申请", "本方案")):
+            _issue(issues, "high", "背景技术", "背景技术疑似泄露本发明方案或核心发明点", "背景技术只描述现有技术和其缺陷。")
+        if not re.search(r"(CN|中国专利|公开号|申请号|公开[日号]|专利)", background):
+            _issue(issues, "medium", "背景技术", "背景技术缺少可核验现有技术引用信号", "检索 Agent 应提供公开文献，撰写 Agent 据此客观评述。", "retrieval_analyst")
+
+    if not summary:
+        _issue(issues, "critical", "发明内容", "缺少发明内容", "发明内容必须包含技术问题、技术方案、有益效果。")
+    else:
+        missing_summary_parts = []
+        if "技术问题" not in summary and "解决" not in summary:
+            missing_summary_parts.append("技术问题")
+        if "技术方案" not in summary and "包括" not in summary:
+            missing_summary_parts.append("技术方案")
+        if "有益效果" not in summary and not any(word in summary for word in ("实现", "避免", "提高", "减少", "保证")):
+            missing_summary_parts.append("有益效果")
+        if missing_summary_parts:
+            _issue(issues, "high", "发明内容", f"发明内容缺少：{'、'.join(missing_summary_parts)}", "按技术问题、技术方案、有益效果三段式重写。")
+        if len(summary) > 1800 or summary.count("具体地") > 2:
+            _issue(issues, "medium", "发明内容", "发明内容过度展开", "将实施细节移入具体实施方式，发明内容保持与权利要求对应的概述。")
+
+    if drawings_description:
+        figure_numbers = re.findall(r"图\s*([0-9]+)", drawings_description)
+        if len(figure_numbers) != len(set(figure_numbers)):
+            _issue(issues, "high", "附图说明", "附图说明存在重复图号", "每个图号只能对应一幅图。")
+        verbose_lines = [
+            line for line in re.split(r"[\n；;。]", drawings_description)
+            if len(line.strip()) > 60 and re.search(r"图\s*\d+", line)
+        ]
+        if verbose_lines:
+            _issue(issues, "medium", "附图说明", "附图说明过于冗长", "附图说明应简明写成“图X为……示意图/流程图”。")
+
+    if not detailed:
+        _issue(issues, "critical", "具体实施方式", "缺少具体实施方式", "按权利要求步骤和附图充分公开具体实施方式。")
+    else:
+        if MARKDOWN_HEADING_RE.search(detailed):
+            _issue(issues, "high", "具体实施方式", "具体实施方式含 Markdown 标题", "删除 Markdown 标记，改为标准段落。")
+        if not re.search(r"S[1-4]", detailed):
+            _issue(issues, "high", "具体实施方式", "具体实施方式缺少与独权对应的步骤编号", "按S1-S3或S1-S4逐步展开实施方式。")
+        if "可以理解的是" not in detailed or "需要说明的是" not in detailed:
+            _issue(issues, "medium", "具体实施方式", "缺少常用解释引导语", "在步骤后加入“可以理解的是”“需要说明的是”解释实现逻辑。")
+
+    return {
+        "passed": not any(item["severity"] in {"critical", "high"} for item in issues),
+        "issues": issues,
+        "metrics": {
+            "title_length": len(title),
+            "abstract_length": len(abstract),
+            "technical_field_length": len(technical_field),
+            "background_length": len(background),
+            "summary_length": len(summary),
+            "detailed_length": len(detailed),
         },
     }
 

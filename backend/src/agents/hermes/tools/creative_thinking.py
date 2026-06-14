@@ -1,5 +1,6 @@
 """Creative Thinking Tool - 创意思维工具."""
 import json
+import re
 from datetime import datetime
 from typing import Any, Dict
 
@@ -32,19 +33,26 @@ class CreativeThinkingTool(HermesTool):
         start_time = datetime.now()
         logger.info("Generating creative patent ideas")
         text = tech_description or ""
+        terms = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fa5]{2,}", text)
+        key_terms = list(dict.fromkeys(term for term in terms if len(term) >= 2))[:8]
+        subject = "、".join(key_terms[:3]) or "核心技术对象"
         data = {
             "alternative_embodiments": [
-                {"idea": "基于显示面姿态参数的边界投影关系计算", "technical_approach": "用目标角度/位置/开合程度建立相邻显示面几何关系", "patentability": "high"},
-                {"idea": "基于用户视点或身高的目标空间姿态自适应", "technical_approach": "引入交互终端或传感器获得目标观看位置", "patentability": "medium"},
-                {"idea": "投影、LED 或混合显示面的通用化实现", "technical_approach": "上位化为显示面，不限定具体硬件", "patentability": "medium"},
+                {"idea": f"围绕{subject}的输入参数获取方式扩展", "technical_approach": "梳理可由传感器、用户输入、业务数据或系统状态提供的输入来源", "patentability": "medium"},
+                {"idea": f"围绕{subject}的核心处理规则或模型扩展", "technical_approach": "将核心处理拆分为可验证的规则、模型、映射关系或控制策略", "patentability": "high"},
+                {"idea": f"围绕{subject}的系统模块化实现", "technical_approach": "把方法步骤对应到采集、处理、执行、反馈或输出模块", "patentability": "medium"},
             ],
-            "cross_domain_applications": ["数字展厅", "Cave 沉浸空间", "多屏互动影院", "文旅沉浸展示"],
+            "cross_domain_applications": [
+                "与当前输入术语相关的设备端实现",
+                "与当前输入术语相关的软件系统实现",
+                "与当前输入术语相关的端云协同实现",
+            ],
             "improvement_directions": [
-                {"direction": "帧级同步输出", "potential_benefit": "减少多屏错位和割裂感", "feasibility": "high"},
-                {"direction": "补偿区域内容生成", "potential_benefit": "提升外转空白区域的连续观感", "feasibility": "medium"},
+                {"direction": "输入数据质量控制", "potential_benefit": "提高处理结果稳定性和可重复性", "feasibility": "medium"},
+                {"direction": "异常状态处理与反馈闭环", "potential_benefit": "提高系统鲁棒性并形成从属保护点", "feasibility": "medium"},
             ],
-            "combination_innovations": ["姿态控制+边界判定+视频裁剪/补偿/重映射闭环"],
-            "strategic_insights": "Agent 应围绕可调姿态引起的显示内容连续化处理构建保护核心。",
+            "combination_innovations": [f"{subject}+输入获取+核心处理+结果输出闭环"],
+            "strategic_insights": "Agent 应基于当前技术事实判断保护核心，不得套用历史案例的技术主题。",
             "source_preview": text[:300],
         }
         return make_tool_output(

@@ -68,7 +68,7 @@ async function request<T>(
         }
       }
     } catch {
-      // Keep the HTTP status fallback when the response body is not JSON.
+      // Keep the HTTP status message when the response body is not JSON.
     }
     throw new Error(message);
   }

@@ -69,7 +69,7 @@ const config: Config = {
       },
       boxShadow: {
         'card': '0 4px 12px 0 rgba(0, 30, 43, 0.08)',
-        'mockup': '0 12px 24px -4px rgba(0, 30, 43, 0.12)',
+        'preview': '0 12px 24px -4px rgba(0, 30, 43, 0.12)',
         'modal': '0 16px 48px -8px rgba(0, 30, 43, 0.16)',
       },
       fontSize: {

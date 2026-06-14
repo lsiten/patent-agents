@@ -93,8 +93,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function stringValue(value: unknown, fallback = ''): string {
-  return typeof value === 'string' ? value : fallback;
+function stringValue(value: unknown, defaultValue = ''): string {
+  return typeof value === 'string' ? value : defaultValue;
 }
 
 function arrayValue(value: unknown): unknown[] {

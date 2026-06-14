@@ -231,8 +231,8 @@ function stringField(record: Record<string, unknown>, key: string): string | nul
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
-function resolveAgentName(data: unknown, fallback = 'patent.ceo.v1'): string {
-  if (!isRecord(data)) return fallback;
+function resolveAgentName(data: unknown, defaultAgent = 'patent.ceo.v1'): string {
+  if (!isRecord(data)) return defaultAgent;
 
   const direct = stringField(data, 'agent_name')
     ?? stringField(data, 'agent')
@@ -255,7 +255,7 @@ function resolveAgentName(data: unknown, fallback = 'patent.ceo.v1'): string {
     if (parameterAgent) return parameterAgent;
   }
 
-  return fallback;
+  return defaultAgent;
 }
 
 function shouldAutoStartWorkflowFromPrompt(content: string): boolean {

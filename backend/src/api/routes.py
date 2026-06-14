@@ -358,7 +358,7 @@ subscribe_event(EventType.AGENT_TOOL_CALL_END, _on_agent_event)
 subscribe_event(EventType.AGENT_DISPATCH, _on_agent_event)
 subscribe_event(EventType.AGENT_CONTENT, _on_agent_event)
 subscribe_event(EventType.WORKFLOW_LOG, _on_agent_event)
-# NOTE: 上述订阅作为备份路径（无event_callback时的fallback）
+# NOTE: 上述订阅作为无 event_callback 时的事件写入路径
 # 当workflow传入event_callback时，事件会通过callback直接写入task_events
 # 为避免重复，_on_agent_event只在task_events中无该task的最近同类事件时才写入
 
@@ -2713,7 +2713,6 @@ def _read_config_from_env_file(env_path: str) -> SystemConfigResponse:
             active_provider=img_active,
             providers=img_providers,
         ),
-        image_gen_fallback_to_llm=False,
     )
 
 
@@ -5912,7 +5911,7 @@ async def read_agent_file(agent_id: str, path: str = Query(...)):
             except (UnicodeDecodeError, UnicodeError):
                 continue
 
-        # Binary fallback — read as base64
+        # Binary file path: read as base64
         with open(clean_path, "rb") as f:
             import base64
 

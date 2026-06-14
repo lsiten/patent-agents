@@ -25,15 +25,16 @@ metadata:
 
 ```json
 patent_drawing_generator(
-  tech_description="用于绘图的技术方案、模块关系、流程步骤和附图标号说明",
+  tech_description="专利整体技术方案背景，仅用于辅助理解",
   task_id="任务ID",
-  title="系统结构示意图/方法流程示意图/显示补偿流程示意图",
-  description="图1为……示意图",
+  title="该图在说明书中的附图标题",
+  description="该图必须绘制的具体内容：包括图中对象、模块/步骤/结构、连接关系、箭头方向、编号和本图与其他图的区别",
   figure_number="图1"
 )
 ```
 
 每张图必须单独调用一次 `patent_drawing_generator`。如果附图说明引用图1、图2、图3，就必须生成三张图，不能用一张图替代多张图。
+`description` 是必填的具体绘图输入，必须由当前专利真实内容决定；工具不会提供内置技术内容模板。
 
 ## 附图风格
 
@@ -41,11 +42,12 @@ patent_drawing_generator(
 - 图中包含必要模块框、流程箭头、连接线和编号标记。
 - 避免照片质感、装饰性背景、复杂颜色、营销式插画和无关元素。
 - 每张图的内容必须对应其标题，不允许只是替换标题但图内结构重复。
+- 不得把某个历史案例、示例主题或默认模板当成通用附图内容。
 
 ## 图号和正文一致性
 
 - `drawings_data.figure_number`、附图说明、具体实施方式中的图号必须一致。
-- 附图标题不能重复拼接，例如不能出现“图1 图1 系统结构示意图”。
+- 附图标题不能重复拼接图号或标题。
 - 说明书中引用的每一个图号都必须有可访问的图片文件。
 - 如果工具生成失败，不能把专利文档视为合格；应在最终 JSON 中返回可被质量审查识别的问题，等待 CEO 调度补图或修正。
 
@@ -57,8 +59,8 @@ patent_drawing_generator(
 [
   {
     "figure_number": "图1",
-    "title": "系统结构示意图",
-    "description": "图1为本发明系统结构示意图。",
+    "title": "当前专利真实附图标题",
+    "description": "当前专利中本图需要表达的具体技术对象、关系、步骤或结构，不得只写泛化示意图名称。",
     "file_path": "/absolute/path/to/fig1.png",
     "artifact_url": "/api/v1/workflows/{task_id}/artifacts/draft/drawings/fig1.png",
     "mime_type": "image/png"

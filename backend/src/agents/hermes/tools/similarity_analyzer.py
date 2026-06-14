@@ -12,27 +12,22 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-FEATURE_KEYWORDS = {
-    "显示面姿态获取": ["姿态", "角度", "位置", "开合", "显示面"],
-    "边界投影关系": ["边界", "投影", "重叠", "空白", "区域"],
-    "视频裁剪": ["裁剪", "遮挡", "删除"],
-    "内容补偿": ["补偿", "填补", "生成"],
-    "重映射/重排": ["重映射", "重排", "映射", "分配"],
-    "多屏同步输出": ["多屏", "同步", "输出", "连续"],
-}
-
-
 def _tokens(text: str) -> Set[str]:
     words = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fa5]{2,}", text or "")
     return {word.lower() for word in words if len(word.strip()) >= 2}
 
 
-def _feature_hits(text: str) -> Dict[str, bool]:
-    lowered = text.lower()
-    return {
-        feature: any(keyword.lower() in lowered for keyword in keywords)
-        for feature, keywords in FEATURE_KEYWORDS.items()
-    }
+def _candidate_terms(text: str, limit: int = 12) -> List[str]:
+    tokens = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fa5]{2,}", text or "")
+    ordered: List[str] = []
+    for token in tokens:
+        clean = token.strip().lower()
+        if len(clean) < 2 or clean in ordered:
+            continue
+        ordered.append(clean)
+        if len(ordered) >= limit:
+            break
+    return ordered
 
 
 class SimilarityAnalyzerTool(HermesTool):
@@ -70,13 +65,12 @@ class SimilarityAnalyzerTool(HermesTool):
             prior_tokens = _tokens(prior_art)
             overlap = invention_tokens & prior_tokens
             token_similarity = len(overlap) / max(len(invention_tokens), 1)
-            invention_features = _feature_hits(invention)
-            prior_features = _feature_hits(prior_art)
+            candidate_features = _candidate_terms(invention)
             feature_comparison: List[Dict[str, Any]] = []
             common_features = 0
-            for feature in FEATURE_KEYWORDS:
-                in_invention = invention_features[feature]
-                in_prior = prior_features[feature]
+            for feature in candidate_features:
+                in_invention = feature in invention_tokens
+                in_prior = feature in prior_tokens
                 common_features += int(in_invention and in_prior)
                 feature_comparison.append(
                     {
@@ -86,7 +80,7 @@ class SimilarityAnalyzerTool(HermesTool):
                         "difference": "现有技术已涉及" if in_invention and in_prior else ("本方案区别特征" if in_invention else "未体现"),
                     }
                 )
-            feature_similarity = common_features / max(sum(invention_features.values()), 1)
+            feature_similarity = common_features / max(len(candidate_features), 1)
             overall = round(min(0.95, max(0.05, token_similarity * 0.35 + feature_similarity * 0.65)), 2)
             key_differences = [
                 item["feature"] for item in feature_comparison

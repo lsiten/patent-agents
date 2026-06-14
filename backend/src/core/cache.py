@@ -1,6 +1,6 @@
 """
 缓存系统
-支持 Redis 和内存两级缓存，自动降级
+支持 Redis 或内存缓存后端
 """
 import asyncio
 import json
@@ -86,7 +86,6 @@ class RedisCacheBackend(CacheBackend):
         self._redis = redis_client
         self._default_ttl = default_ttl
         self._prefix = prefix
-        self._fallback = MemoryCacheBackend(default_ttl)
         self._enabled = redis_client is not None
 
     def _make_key(self, key: str) -> str:
@@ -94,51 +93,49 @@ class RedisCacheBackend(CacheBackend):
 
     async def get(self, key: str, default: Any = None) -> Any:
         if not self._enabled:
-            return await self._fallback.get(key, default)
+            raise RuntimeError("Redis cache backend is not configured")
         try:
             data = await self._redis.get(self._make_key(key))
             if data is None:
                 return default
             return json.loads(data)
         except Exception as e:
-            logger.warning("Redis get failed, falling back to memory", key=key, error=str(e))
-            return await self._fallback.get(key, default)
+            logger.warning("Redis get failed", key=key, error=str(e))
+            raise
 
     async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         resolved_ttl = ttl if ttl is not None else self._default_ttl
         if not self._enabled:
-            await self._fallback.set(key, value, resolved_ttl)
-            return
+            raise RuntimeError("Redis cache backend is not configured")
         try:
             serialized = json.dumps(value, ensure_ascii=False, default=str)
             await self._redis.setex(self._make_key(key), resolved_ttl, serialized)
         except Exception as e:
-            logger.warning("Redis set failed, falling back to memory", key=key, error=str(e))
-            await self._fallback.set(key, value, resolved_ttl)
+            logger.warning("Redis set failed", key=key, error=str(e))
+            raise
 
     async def delete(self, key: str) -> bool:
         if not self._enabled:
-            return await self._fallback.delete(key)
+            raise RuntimeError("Redis cache backend is not configured")
         try:
             result = await self._redis.delete(self._make_key(key))
             return result > 0
         except Exception as e:
             logger.warning("Redis delete failed", key=key, error=str(e))
-            return await self._fallback.delete(key)
+            raise
 
     async def exists(self, key: str) -> bool:
         if not self._enabled:
-            return await self._fallback.exists(key)
+            raise RuntimeError("Redis cache backend is not configured")
         try:
             return bool(await self._redis.exists(self._make_key(key)))
         except Exception as e:
             logger.warning("Redis exists failed", key=key, error=str(e))
-            return await self._fallback.exists(key)
+            raise
 
     async def clear(self) -> None:
         if not self._enabled:
-            await self._fallback.clear()
-            return
+            raise RuntimeError("Redis cache backend is not configured")
         try:
             import redis.asyncio as redis_async
             cursor = 0
@@ -151,11 +148,11 @@ class RedisCacheBackend(CacheBackend):
                     break
         except Exception as e:
             logger.warning("Redis clear failed", error=str(e))
-            await self._fallback.clear()
+            raise
 
 
 class CacheService:
-    """缓存服务 - 带装饰器、命名空间、自动降级"""
+    """缓存服务 - 带装饰器、命名空间"""
 
     def __init__(self, backend: CacheBackend):
         self._backend = backend

@@ -12,12 +12,23 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-TECH_TERMS = ["姿态", "显示面", "边界", "投影", "重叠", "空白", "补偿", "裁剪", "重映射", "同步输出"]
-
-
 def _claim_numbers(claims: str) -> list[int]:
     found = [int(item) for item in re.findall(r"(?:^|\n)\s*(\d+)[\.、]", claims or "")]
     return found or [1]
+
+
+def _claim_terms(claims: str) -> list[str]:
+    terms = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fa5]{2,}", claims or "")
+    stop_words = {"一种", "根据", "所述", "包括", "其特征在于", "方法", "系统", "装置", "设备", "介质", "步骤"}
+    ordered = []
+    for term in terms:
+        clean = term.strip()
+        if len(clean) < 2 or clean in stop_words or clean in ordered:
+            continue
+        ordered.append(clean)
+        if len(ordered) >= 24:
+            break
+    return ordered
 
 
 class SupportCheckerTool(HermesTool):
@@ -49,7 +60,7 @@ class SupportCheckerTool(HermesTool):
         logger.info("Checking claim-description support")
         desc = description or ""
         claim_text = claims or ""
-        missing_terms = [term for term in TECH_TERMS if term in claim_text and term not in desc]
+        missing_terms = [term for term in _claim_terms(claim_text) if term not in desc]
         results = []
         for number in _claim_numbers(claim_text):
             results.append(

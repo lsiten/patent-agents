@@ -12,35 +12,12 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-SCENARIO_RULES = [
-    {
-        "name": "沉浸式 Cave 展示空间",
-        "keywords": ["Cave", "折幕", "沉浸", "多屏"],
-        "description": "用于由多个显示面构成的沉浸式展示、体验、展厅或训练空间。",
-        "domain": "沉浸式显示",
-        "target_users": ["展厅运营方", "沉浸式体验系统集成商", "文旅/培训机构"],
-    },
-    {
-        "name": "可调屏幕互动体验空间",
-        "keywords": ["可调", "身高", "用户", "个性化", "入口"],
-        "description": "根据用户身高、位置或体验入口对屏幕姿态和显示画面进行自适应调整。",
-        "domain": "人机交互",
-        "target_users": ["体验空间用户", "交互装置厂商", "智能展陈平台"],
-    },
-    {
-        "name": "多显示面视频连续播放",
-        "keywords": ["视频", "同步", "连续", "补偿", "裁剪", "重映射"],
-        "description": "在多显示面之间进行视频内容重映射、补偿和同步输出，保持连续观看效果。",
-        "domain": "视频显示控制",
-        "target_users": ["多屏控制系统厂商", "数字内容制作方", "显示控制平台"],
-    },
-    {
-        "name": "投影/LED 混合显示系统",
-        "keywords": ["投影", "LED", "屏幕", "显示装置"],
-        "description": "适用于投影幕、LED屏、拼接屏或混合显示装置构成的可变空间显示系统。",
-        "domain": "显示硬件控制",
-        "target_users": ["显示设备厂商", "系统集成商", "工程实施方"],
-    },
+DOMAIN_RULES = [
+    (["算法", "模型", "训练", "识别", "预测", "数据"], "数据处理/人工智能"),
+    (["控制", "传感", "执行", "驱动", "设备", "装置"], "自动化控制/设备系统"),
+    (["通信", "网络", "终端", "服务器", "同步", "传输"], "通信与网络系统"),
+    (["材料", "结构", "组件", "连接", "安装", "机械"], "机械结构/材料工程"),
+    (["显示", "视频", "图像", "屏幕", "投影", "LED"], "显示与图像处理"),
 ]
 
 
@@ -68,6 +45,13 @@ def _normalize_text(text: str) -> str:
 def _matches(text: str, keywords: list[str]) -> bool:
     lower = text.lower()
     return any(keyword.lower() in lower for keyword in keywords)
+
+
+def _domain_from_text(text: str) -> str:
+    for keywords, domain in DOMAIN_RULES:
+        if _matches(text, keywords):
+            return domain
+    return "通用技术系统"
 
 
 class ScenarioMinerTool(HermesTool):
@@ -105,44 +89,34 @@ class ScenarioMinerTool(HermesTool):
         logger.info("Mining application scenarios")
 
         text = _normalize_text(tech_description + " " + " ".join(_parse_features(features)))
-        scenarios = []
-        for rule in SCENARIO_RULES:
-            if _matches(text, rule["keywords"]):
-                scenarios.append(
-                    {
-                        "name": rule["name"],
-                        "description": rule["description"],
-                        "domain": rule["domain"],
-                        "potential_value": "可作为方法、系统、设备和介质多维保护的实施场景",
-                        "confidence": 0.82,
-                        "target_users": rule["target_users"],
-                        "evidence_keywords": [
-                            keyword for keyword in rule["keywords"] if keyword.lower() in text.lower()
-                        ],
-                    }
-                )
-
-        if not scenarios:
-            scenarios.append(
-                {
-                    "name": "通用技术处理系统",
-                    "description": "用于需要根据输入参数执行数据处理、控制或输出的系统。",
-                    "domain": "通用数据处理",
-                    "potential_value": "可作为方法和系统权利要求的基础实施场景",
-                    "confidence": 0.55,
-                    "target_users": ["系统开发者", "设备厂商"],
-                    "evidence_keywords": [],
-                }
-            )
+        domain = _domain_from_text(text)
+        matched_keywords = [
+            keyword
+            for keywords, _domain in DOMAIN_RULES
+            if _domain == domain
+            for keyword in keywords
+            if keyword.lower() in text.lower()
+        ]
+        scenarios = [
+            {
+                "name": f"{domain}应用场景",
+                "description": "基于当前技术描述和特征抽取的候选应用场景，具体场景名称由 Agent 结合发明事实判断。",
+                "domain": domain,
+                "potential_value": "可作为方法、系统、设备和介质多维保护的实施场景",
+                "confidence": 0.62 if matched_keywords else 0.45,
+                "target_users": ["当前技术领域的系统开发者", "设备或平台提供方", "终端使用方"],
+                "evidence_keywords": matched_keywords,
+            }
+        ]
 
         data = {
             "scenarios": scenarios,
             "extension_directions": [
-                "显示装置类型上位化，覆盖投影幕、LED屏、拼接屏和混合显示设备",
-                "姿态输入来源扩展为用户参数、内容参数、空间边界参数和传感器检测参数",
-                "画面处理策略扩展为补充、裁剪、删除、重映射、过渡生成和同步输出",
+                "输入来源上位化，覆盖用户输入、传感器数据、业务数据或系统状态数据",
+                "核心处理步骤模块化，形成方法、系统和设备的一一对应关系",
+                "异常处理、反馈校正和效果验证作为从属保护方向",
             ],
-            "market_assessment": "该方案面向沉浸式显示、多屏交互和空间内容自适应控制，适合布局显示控制和视频处理交叉领域专利。",
+            "market_assessment": "该评估仅为基于关键词的客观场景线索，最终应用场景和保护布局由 Agent 判断。",
         }
 
         return make_tool_output(

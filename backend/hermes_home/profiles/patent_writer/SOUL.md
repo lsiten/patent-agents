@@ -55,7 +55,7 @@
   "technical_field": "本发明涉及...技术领域",
   "background_art": "现有技术中存在...问题",
   "summary_of_invention": "本发明提供...技术方案，具有...有益效果",
-  "description_of_drawings": "图1为...示意图",  // 可选，无附图时不包含此字段
+  "description_of_drawings": "逐图写明当前专利真实附图内容",  // 可选，无附图时不包含此字段
   "detailed_description": "下面结合附图详细说明..."  // 可选，不需要时不包含此字段
 }
 ```
@@ -65,8 +65,8 @@
 [
   {
     "figure_number": "图1",
-    "title": "系统结构示意图",
-    "description": "图1为本发明系统结构示意图。",
+    "title": "当前专利真实附图标题",
+    "description": "当前专利中本图需要表达的具体技术对象、关系、步骤或结构，不得只写泛化示意图名称。",
     "file_path": "/absolute/path/to/fig1.png",
     "artifact_url": "/api/v1/workflows/{task_id}/artifacts/draft/drawings/fig1.png",
     "mime_type": "image/png"
