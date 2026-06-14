@@ -267,20 +267,22 @@ export default function PatentsPage() {
           <div className="flex items-start justify-between">
             <div>
               <h1 className="text-2xl font-semibold text-ink">专利管理</h1>
-              <p className="text-sm text-slate mt-1">
-                管理您的所有专利申请，查看进度，进入对话修改，下载专利文件
-              </p>
+              <p className="text-sm text-slate mt-1">管理您的所有专利申请，查看进度，进入对话修改，下载专利文件</p>
             </div>
             <div className="flex items-center gap-3">
-              <Button variant="secondary" onClick={() => {
+              <Button
+                variant="secondary"
+                onClick={() => {
                   loadPatents(false).catch((requestError) => {
                     setError(requestError instanceof Error ? requestError.message : '获取专利列表失败');
                   });
-                }} disabled={isRefreshing}>
+                }}
+                disabled={isRefreshing}
+              >
                 <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                 刷新
               </Button>
-              <Button onClick={() => router.push('/')}>
+              <Button className="text-white" onClick={() => router.push('/')}>
                 <Plus className="w-4 h-4 mr-2" />
                 新建专利申请
               </Button>
@@ -316,11 +318,16 @@ export default function PatentsPage() {
                 <AlertCircle className="w-5 h-5" />
                 <span className="text-sm font-medium">{error}</span>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => {
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
                   loadPatents(false).catch((requestError) => {
                     setError(requestError instanceof Error ? requestError.message : '获取专利列表失败');
                   });
-                }} disabled={isRefreshing}>
+                }}
+                disabled={isRefreshing}
+              >
                 重试
               </Button>
             </div>
@@ -365,11 +372,11 @@ export default function PatentsPage() {
                         ].map((type) => (
                           <button
                             key={type.id}
-                            onClick={() => { setPatentTypeFilter(type.id); }}
+                            onClick={() => {
+                              setPatentTypeFilter(type.id);
+                            }}
                             className={`block w-full text-left px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                              patentTypeFilter === type.id
-                                ? 'bg-brand-green/10 text-brand-green-dark font-medium'
-                                : 'text-slate hover:bg-slate-50'
+                              patentTypeFilter === type.id ? 'bg-brand-cyan/10 text-brand-cyan-dark font-medium' : 'text-slate hover:bg-slate-50'
                             }`}
                           >
                             {type.label}
@@ -386,11 +393,11 @@ export default function PatentsPage() {
                         ].map((order) => (
                           <button
                             key={order.id}
-                            onClick={() => { setSortOrder(order.id); }}
+                            onClick={() => {
+                              setSortOrder(order.id);
+                            }}
                             className={`block w-full text-left px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                              sortOrder === order.id
-                                ? 'bg-brand-green/10 text-brand-green-dark font-medium'
-                                : 'text-slate hover:bg-slate-50'
+                              sortOrder === order.id ? 'bg-brand-cyan/10 text-brand-cyan-dark font-medium' : 'text-slate hover:bg-slate-50'
                             }`}
                           >
                             {order.label}
@@ -408,81 +415,66 @@ export default function PatentsPage() {
         <div className="space-y-4">
           {isLoading ? (
             <PatentListSkeleton count={4} />
-          ) : filteredPatents.length > 0 ? filteredPatents.map((patent) => (
-            <Card
-              key={patent.task_id}
-              className={clsx(
-                'p-5 transition-all duration-200 hover:shadow-md cursor-pointer',
-                selectedPatent === patent.task_id && 'ring-2 ring-brand-green'
-              )}
-              onClick={() => setSelectedPatent((selected) => selected === patent.task_id ? null : patent.task_id)}
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="text-lg font-semibold text-ink">{patent.title}</h3>
-                    <Badge variant="soft" className={clsx(stateColors[patent.current_state])}>
-                      <span className="flex items-center gap-1.5">
-                        {stateIcons[patent.current_state]}
-                        {stateLabels[patent.current_state]}
-                      </span>
-                    </Badge>
-                    <Badge variant="soft" color="blue">
-                      {patent.patent_type === 'invention'
-                        ? '发明专利'
-                        : patent.patent_type === 'utility'
-                        ? '实用新型'
-                        : '外观设计'}
-                    </Badge>
-                  </div>
-
-                  <p className="text-sm text-slate mb-3">{patent.tech_field}</p>
-
-                  <div className="mb-4">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-slate">完成进度</span>
-                      <span className="text-xs font-medium text-ink">{patent.progress}%</span>
+          ) : filteredPatents.length > 0 ? (
+            filteredPatents.map((patent) => (
+              <Card
+                key={patent.task_id}
+                className={clsx(
+                  'p-5 transition-all duration-200 hover:shadow-md cursor-pointer',
+                  selectedPatent === patent.task_id && 'ring-2 ring-brand-cyan',
+                )}
+                onClick={() => setSelectedPatent((selected) => (selected === patent.task_id ? null : patent.task_id))}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="text-lg font-semibold text-ink">{patent.title}</h3>
+                      <Badge variant="soft" className={clsx(stateColors[patent.current_state])}>
+                        <span className="flex items-center gap-1.5">
+                          {stateIcons[patent.current_state]}
+                          {stateLabels[patent.current_state]}
+                        </span>
+                      </Badge>
+                      <Badge variant="soft" color="blue">
+                        {patent.patent_type === 'invention' ? '发明专利' : patent.patent_type === 'utility' ? '实用新型' : '外观设计'}
+                      </Badge>
                     </div>
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className={clsx('h-full rounded-full transition-all duration-500', getProgressColor(patent.progress))}
-                        style={{ width: `${patent.progress}%` }}
-                      />
+
+                    <p className="text-sm text-slate mb-3">{patent.tech_field}</p>
+
+                    <div className="mb-4">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-slate">完成进度</span>
+                        <span className="text-xs font-medium text-ink">{patent.progress}%</span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className={clsx('h-full rounded-full transition-all duration-500', getProgressColor(patent.progress))}
+                          style={{ width: `${patent.progress}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-6 text-xs text-slate">
+                      <span>编号：{patent.task_id}</span>
+                      {patent.application_number && <span>申请号：{patent.application_number}</span>}
+                      <span>创建时间：{new Date(patent.created_at).toLocaleDateString('zh-CN')}</span>
+                      <span>更新时间：{new Date(patent.updated_at).toLocaleDateString('zh-CN')}</span>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-6 text-xs text-slate">
-                    <span>编号：{patent.task_id}</span>
-                    {patent.application_number && <span>申请号：{patent.application_number}</span>}
-                    <span>创建时间：{new Date(patent.created_at).toLocaleDateString('zh-CN')}</span>
-                    <span>更新时间：{new Date(patent.updated_at).toLocaleDateString('zh-CN')}</span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2 ml-6">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      router.push(`/chat?task_id=${patent.task_id}`);
-                    }}
-                  >
-                    <MessageSquare className="w-4 h-4 mr-1.5" />
-                    继续对话
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      router.push(`/workflow/${patent.task_id}`);
-                    }}
-                  >
-                    <Sparkles className="w-4 h-4 mr-1.5" />
-                    查看进度
-                  </Button>
-                  {patent.current_state === 'completed' && (
+                  <div className="flex flex-col gap-2 ml-6">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        router.push(`/chat?task_id=${patent.task_id}`);
+                      }}
+                    >
+                      <MessageSquare className="w-4 h-4 mr-1.5" />
+                      继续对话
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -491,67 +483,80 @@ export default function PatentsPage() {
                         router.push(`/workflow/${patent.task_id}`);
                       }}
                     >
-                      <Download className="w-4 h-4 mr-1.5" />
+                      <Sparkles className="w-4 h-4 mr-1.5" />
+                      查看进度
+                    </Button>
+                    {patent.current_state === 'completed' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          router.push(`/workflow/${patent.task_id}`);
+                        }}
+                      >
+                        <Download className="w-4 h-4 mr-1.5" />
+                        查看流程
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        router.push(`/workflow/${patent.task_id}`);
+                      }}
+                    >
+                      <Eye className="w-4 h-4 mr-1.5" />
                       查看流程
                     </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      router.push(`/workflow/${patent.task_id}`);
-                    }}
-                  >
-                    <Eye className="w-4 h-4 mr-1.5" />
-                    查看流程
-                  </Button>
-                </div>
-              </div>
-
-              {selectedPatent === patent.task_id && (
-                <div className="mt-5 pt-5 border-t border-hairline">
-                  <div className="grid grid-cols-3 gap-6">
-                    <div>
-                      <h4 className="text-sm font-medium text-ink mb-3">发明人信息</h4>
-                      <p className="text-sm text-slate">{patent.inventors ? patent.inventors.join('、') : '待定'}</p>
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-medium text-ink mb-3">申请人</h4>
-                      <p className="text-sm text-slate">{patent.assignee || '待定'}</p>
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-medium text-ink mb-3">申请日期</h4>
-                      <p className="text-sm text-slate">{patent.filing_date || '暂未提交'}</p>
-                    </div>
                   </div>
+                </div>
 
-                  <div className="mt-5 flex items-center gap-3">
-                    <span className="text-sm text-slate mr-2">快捷操作：</span>
-                    <Button variant="ghost" size="sm" onClick={() => router.push(`/workflow/${patent.task_id}`)}>
-                      <FileText className="w-4 h-4 mr-1.5" />
-                      查看阶段输出
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => router.push(`/workflow/${patent.task_id}`)}>
-                      <Search className="w-4 h-4 mr-1.5" />
-                      查看阶段输出
-                    </Button>
-                    {patent.progress >= 60 && (
+                {selectedPatent === patent.task_id && (
+                  <div className="mt-5 pt-5 border-t border-hairline">
+                    <div className="grid grid-cols-3 gap-6">
+                      <div>
+                        <h4 className="text-sm font-medium text-ink mb-3">发明人信息</h4>
+                        <p className="text-sm text-slate">{patent.inventors ? patent.inventors.join('、') : '待定'}</p>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-medium text-ink mb-3">申请人</h4>
+                        <p className="text-sm text-slate">{patent.assignee || '待定'}</p>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-medium text-ink mb-3">申请日期</h4>
+                        <p className="text-sm text-slate">{patent.filing_date || '暂未提交'}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 flex items-center gap-3">
+                      <span className="text-sm text-slate mr-2">快捷操作：</span>
                       <Button variant="ghost" size="sm" onClick={() => router.push(`/workflow/${patent.task_id}`)}>
                         <FileText className="w-4 h-4 mr-1.5" />
                         查看阶段输出
                       </Button>
-                    )}
+                      <Button variant="ghost" size="sm" onClick={() => router.push(`/workflow/${patent.task_id}`)}>
+                        <Search className="w-4 h-4 mr-1.5" />
+                        查看阶段输出
+                      </Button>
+                      {patent.progress >= 60 && (
+                        <Button variant="ghost" size="sm" onClick={() => router.push(`/workflow/${patent.task_id}`)}>
+                          <FileText className="w-4 h-4 mr-1.5" />
+                          查看阶段输出
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-            </Card>
-          )) : (
+                )}
+              </Card>
+            ))
+          ) : (
             <Card className="p-12 text-center">
               <FileText className="w-12 h-12 text-slate mx-auto mb-4" />
               <h3 className="text-lg font-medium text-ink mb-2">暂无专利申请</h3>
               <p className="text-sm text-slate mb-4">开始您的第一个专利申请吧</p>
-              <Button onClick={() => router.push('/')}>
+              <Button className="text-white" onClick={() => router.push('/')}>
                 <Plus className="w-4 h-4 mr-2" />
                 新建专利申请
               </Button>

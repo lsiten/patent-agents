@@ -858,9 +858,9 @@ export default function WorkflowPage() {
                       <div
                         className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
                           isCompleted
-                            ? 'bg-brand-green text-ink'
+                            ? 'bg-brand-cyan text-white'
                             : isCurrent
-                            ? 'bg-brand-green-soft text-brand-green-dark ring-4 ring-brand-green/20'
+                            ? 'bg-brand-cyan-soft text-brand-cyan-dark ring-4 ring-brand-cyan/20'
                             : 'bg-hairline-soft text-muted'
                         }`}
                       >
@@ -877,7 +877,7 @@ export default function WorkflowPage() {
                     {index < workflowSteps.length - 1 && (
                       <ChevronRight
                         className={`w-5 h-5 mx-sm ${
-                          isCompleted ? 'text-brand-green' : 'text-hairline-strong'
+                          isCompleted ? 'text-brand-cyan' : 'text-hairline-strong'
                         }`}
                       />
                     )}

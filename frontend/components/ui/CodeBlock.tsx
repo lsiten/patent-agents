@@ -38,7 +38,7 @@ export const CodeBlock = ({
           title="复制代码"
         >
           {copied ? (
-            <Check className="w-4 h-4 text-brand-green" />
+            <Check className="w-4 h-4 text-brand-cyan" />
           ) : (
             <Copy className="w-4 h-4" />
           )}

@@ -108,8 +108,8 @@ export default function RelatedDetailModal({
 
         {/* Header */}
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-brand-green/10 flex items-center justify-center">
-            <FolderOpen className="w-5 h-5 text-brand-green" />
+          <div className="w-10 h-10 rounded-xl bg-brand-cyan/10 flex items-center justify-center">
+            <FolderOpen className="w-5 h-5 text-brand-cyan" />
           </div>
           <div>
             <h3 className="text-lg font-semibold text-ink">
@@ -136,7 +136,7 @@ export default function RelatedDetailModal({
           <button
             className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${
               activeView === 'structure'
-                ? 'bg-brand-green/10 text-brand-green-dark'
+                ? 'bg-brand-cyan/10 text-brand-cyan-dark'
                 : 'text-slate hover:bg-slate-50'
             }`}
             onClick={() => setActiveView('structure')}
@@ -147,7 +147,7 @@ export default function RelatedDetailModal({
           <button
             className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${
               activeView === 'files'
-                ? 'bg-brand-green/10 text-brand-green-dark'
+                ? 'bg-brand-cyan/10 text-brand-cyan-dark'
                 : 'text-slate hover:bg-slate-50'
             }`}
             onClick={() => setActiveView('files')}
@@ -329,7 +329,7 @@ export default function RelatedDetailModal({
                   <button
                     className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
                       !selectedFile || selectedFile.path === '__source__'
-                        ? 'bg-brand-green/10 text-brand-green-dark font-medium'
+                        ? 'bg-brand-cyan/10 text-brand-cyan-dark font-medium'
                         : 'hover:bg-slate-50 text-ink'
                     }`}
                     onClick={() =>
@@ -358,7 +358,7 @@ export default function RelatedDetailModal({
                     key={i}
                     className={`w-full text-left px-3 py-2 rounded text-sm transition-colors truncate ${
                       selectedFile?.path === file.path
-                        ? 'bg-brand-green/10 text-brand-green-dark font-medium'
+                        ? 'bg-brand-cyan/10 text-brand-cyan-dark font-medium'
                         : 'hover:bg-slate-50 text-ink'
                     }`}
                     onClick={() => setSelectedFile(file)}

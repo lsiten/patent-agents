@@ -227,7 +227,7 @@ export function RequirementAnalysisView({ data }: RequirementAnalysisViewProps) 
       {/* 技术领域 */}
       <section>
         <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
-          <Search className="w-4 h-4 text-brand-green-dark" />
+          <Search className="w-4 h-4 text-brand-cyan-dark" />
           技术领域
         </h4>
         <p className="text-body-md text-steel bg-surface-feature rounded-lg p-md">{techField || '待分析'}</p>
@@ -242,7 +242,7 @@ export function RequirementAnalysisView({ data }: RequirementAnalysisViewProps) 
           <ul className="mt-sm space-y-xs">
             {ipcSuggestions.map((item, i) => (
               <li key={i} className="text-body-sm text-steel flex items-start gap-2">
-                <span className="text-brand-green-dark">•</span>
+                <span className="text-brand-cyan-dark">•</span>
                 {item}
               </li>
             ))}
@@ -254,7 +254,7 @@ export function RequirementAnalysisView({ data }: RequirementAnalysisViewProps) 
       {corePrinciple && (
         <section>
           <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
-            <Lightbulb className="w-4 h-4 text-brand-green-dark" />
+            <Lightbulb className="w-4 h-4 text-brand-cyan-dark" />
             核心原理
           </h4>
           <p className="text-body-md text-steel bg-surface-feature rounded-lg p-md">{corePrinciple}</p>
@@ -276,14 +276,14 @@ export function RequirementAnalysisView({ data }: RequirementAnalysisViewProps) 
       {features.length > 0 && (
         <section>
           <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
-            <Star className="w-4 h-4 text-brand-green-dark" />
+            <Star className="w-4 h-4 text-brand-cyan-dark" />
             关键创新特征
           </h4>
           <div className="space-y-sm">
             {features.map((f, i) => (
               <div key={i} className="border border-hairline rounded-lg p-md">
                 <div className="flex items-start gap-2">
-                  <span className="w-6 h-6 rounded-full bg-brand-green text-ink text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <span className="w-6 h-6 rounded-full bg-brand-cyan text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
                     {i + 1}
                   </span>
                   <div>
@@ -321,7 +321,7 @@ export function RequirementAnalysisView({ data }: RequirementAnalysisViewProps) 
           <ul className="space-y-xs">
             {beneficialEffects.map((e, i) => (
               <li key={i} className="text-body-sm text-steel flex items-start gap-2">
-                <CheckCircle className="w-4 h-4 text-brand-green-dark flex-shrink-0 mt-0.5" />
+                <CheckCircle className="w-4 h-4 text-brand-cyan-dark flex-shrink-0 mt-0.5" />
                 {e}
               </li>
             ))}
@@ -421,7 +421,7 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
       {retrievalKeywords.length > 0 && (
         <section>
           <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
-            <Search className="w-4 h-4 text-brand-green-dark" />
+            <Search className="w-4 h-4 text-brand-cyan-dark" />
             检索关键词
           </h4>
           <div className="flex flex-wrap gap-sm">
@@ -436,13 +436,13 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
       {retrievalDatabases.length > 0 && (
         <section>
           <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
-            <Shield className="w-4 h-4 text-brand-green-dark" />
+            <Shield className="w-4 h-4 text-brand-cyan-dark" />
             检索数据源
           </h4>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-sm">
             {retrievalDatabases.map((db, i) => (
               <div key={i} className="flex items-center gap-2 p-sm border border-hairline rounded-lg bg-surface-feature">
-                <CheckCircle className="w-4 h-4 text-brand-green-dark flex-shrink-0" />
+                <CheckCircle className="w-4 h-4 text-brand-cyan-dark flex-shrink-0" />
                 <span className="text-body-sm text-ink">{dbDisplayName[db] || db}</span>
               </div>
             ))}
@@ -454,7 +454,7 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
       {priorArtReferences.length > 0 && (
         <section>
           <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
-            <FileText className="w-4 h-4 text-brand-green-dark" />
+            <FileText className="w-4 h-4 text-brand-cyan-dark" />
             对比文献 ({priorArtReferences.length})
           </h4>
           <div className="space-y-sm">
@@ -518,7 +518,7 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
                             href={ref.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 text-body-sm font-medium text-brand-green-dark hover:underline"
+                            className="inline-flex items-center gap-1.5 text-body-sm font-medium text-brand-cyan-dark hover:underline"
                           >
                             <FileText className="w-3.5 h-3.5" />
                             查看原文
@@ -545,12 +545,12 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
             { icon: Shield, name: '实用性', assessment: utility },
           ].map(({ icon: Icon, name, assessment }) => (
             <div key={name} className="border border-hairline rounded-lg p-md text-center">
-              <Icon className="w-6 h-6 mx-auto mb-sm text-brand-green-dark" />
+              <Icon className="w-6 h-6 mx-auto mb-sm text-brand-cyan-dark" />
               <p className="text-body-sm-medium font-medium text-ink mb-xs">{name}</p>
               <div className="mb-sm">{ratingBadge(assessment.rating)}</div>
               <div className="w-full bg-hairline-soft rounded-full h-2">
                 <div
-                  className="bg-brand-green h-2 rounded-full transition-all"
+                  className="bg-brand-cyan h-2 rounded-full transition-all"
                   style={{ width: `${ratingScore(assessment.rating)}%` }}
                 />
               </div>
@@ -618,7 +618,7 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
           <ul className="space-y-xs">
             {recommendations.map((r, i) => (
               <li key={i} className="text-body-sm text-steel flex items-start gap-2">
-                <Lightbulb className="w-4 h-4 text-brand-green-dark flex-shrink-0 mt-0.5" />
+                <Lightbulb className="w-4 h-4 text-brand-cyan-dark flex-shrink-0 mt-0.5" />
                 {r}
               </li>
             ))}
@@ -708,7 +708,7 @@ export function PatentDraftView({ data, taskId, title }: PatentDraftViewProps) {
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-surface-feature flex items-center justify-center">
-                      <Icon className="w-4 h-4 text-brand-green-dark" />
+                      <Icon className="w-4 h-4 text-brand-cyan-dark" />
                     </div>
                     <div className="text-left">
                       <p className="text-body-sm-medium font-medium text-ink">{section.name}</p>
@@ -778,7 +778,7 @@ export function PatentDraftView({ data, taskId, title }: PatentDraftViewProps) {
                         target="_blank"
                         rel="noopener noreferrer"
                         download
-                        className="inline-flex items-center gap-1 text-body-sm-medium font-medium text-brand-green-dark hover:underline"
+                        className="inline-flex items-center gap-1 text-body-sm-medium font-medium text-brand-cyan-dark hover:underline"
                       >
                         <Download className="w-3 h-3" />
                         打开 / 下载附图
@@ -835,14 +835,14 @@ export function QualityReviewView({ data, roundIndex }: QualityReviewViewProps) 
   const allIssues = [...formalIssues, ...claimsIssues, ...descriptionIssues, ...examinationRisks];
 
   const recommendationConfig: Record<string, { label: string; color: string }> = {
-    approve: { label: '通过', color: 'text-brand-green-dark bg-green-50' },
+    approve: { label: '通过', color: 'text-brand-cyan-dark bg-green-50' },
     revise: { label: '需修改', color: 'text-accent-orange bg-orange-50' },
     needs_revision: { label: '需修改', color: 'text-accent-orange bg-orange-50' },
     reject: { label: '不通过', color: 'text-red-500 bg-red-50' },
   };
   const recConfig = recommendationConfig[recommendation] || { label: recommendation, color: 'text-muted bg-hairline-soft' };
 
-  const scoreColor = (overallScore ?? 0) >= 80 ? 'text-brand-green-dark' :
+  const scoreColor = (overallScore ?? 0) >= 80 ? 'text-brand-cyan-dark' :
     (overallScore ?? 0) >= 60 ? 'text-accent-orange' : 'text-red-500';
 
   return (
@@ -915,7 +915,7 @@ export function QualityReviewView({ data, roundIndex }: QualityReviewViewProps) 
       {revisionSuggestions.length > 0 && (
         <section>
           <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
-            <Lightbulb className="w-4 h-4 text-brand-green-dark" />
+            <Lightbulb className="w-4 h-4 text-brand-cyan-dark" />
             修改建议
           </h4>
           <ol className="space-y-sm list-decimal list-inside">

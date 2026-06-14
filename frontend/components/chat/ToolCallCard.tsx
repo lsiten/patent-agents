@@ -67,7 +67,7 @@ function SingleToolCall({ tool }: { tool: ToolCallInfo }) {
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-cyan/40"
         aria-expanded={expanded}
       >
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-canvas text-sm ring-1 ring-hairline" aria-hidden="true">{display.icon}</span>

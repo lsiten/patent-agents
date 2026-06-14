@@ -23,13 +23,13 @@ interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
 }
 
 const variantStyles: Record<BadgeVariant, string> = {
-  green: 'bg-brand-green text-ink rounded-sm px-2 py-0.5',
-  'green-soft': 'bg-brand-green-soft text-brand-green-dark rounded-full px-2.5 py-1',
+  green: 'bg-brand-cyan text-white rounded-sm px-2 py-0.5',
+  'green-soft': 'bg-brand-cyan-soft text-brand-cyan-dark rounded-full px-2.5 py-1',
   purple: 'bg-accent-purple text-on-dark rounded-sm px-2 py-0.5',
   orange: 'bg-accent-orange text-on-dark rounded-sm px-2 py-0.5',
   red: 'bg-red-500 text-white rounded-sm px-2 py-0.5',
   'red-soft': 'bg-red-100 text-red-700 rounded-full px-2.5 py-1',
-  popular: 'bg-brand-teal-deep text-brand-green rounded-full px-2.5 py-1',
+  popular: 'bg-brand-teal-deep text-brand-cyan rounded-full px-2.5 py-1',
   gray: 'bg-hairline-soft text-steel rounded-sm px-2 py-0.5',
   soft: 'rounded-full px-2.5 py-1',
 };

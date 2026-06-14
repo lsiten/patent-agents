@@ -31,8 +31,8 @@ export function Footer() {
           {/* Brand Column */}
           <div className="col-span-2 md:col-span-1">
             <Link href="/" className="flex items-center gap-2 mb-lg">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-green">
-                <BrainCircuit className="h-5 w-5 text-ink" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand-cyan to-accent-purple">
+                <BrainCircuit className="h-5 w-5 text-white" />
               </div>
               <span className="font-euclid text-heading-5 font-semibold text-on-dark">
                 专利智脑

@@ -226,7 +226,7 @@ export default function SkillUploadModal({
                 ZIP 技能包
               </label>
               <div
-                className="border-2 border-dashed border-hairline rounded-lg p-6 text-center cursor-pointer hover:border-brand-green transition-colors"
+                className="border-2 border-dashed border-hairline rounded-lg p-6 text-center cursor-pointer hover:border-brand-cyan transition-colors"
                 onClick={() => fileInputRef.current?.click()}
               >
                 <input
@@ -238,7 +238,7 @@ export default function SkillUploadModal({
                 />
                 {zipFile ? (
                   <div>
-                    <FileArchive className="w-8 h-8 mx-auto mb-2 text-brand-green" />
+                    <FileArchive className="w-8 h-8 mx-auto mb-2 text-brand-cyan" />
                     <p className="text-sm font-medium text-ink">{zipFile.name}</p>
                     <p className="text-xs text-slate">
                       {(zipFile.size / 1024).toFixed(1)} KB

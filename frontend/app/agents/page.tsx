@@ -806,7 +806,7 @@ export default function AgentsPage() {
                     onClick={() => setSelectedAgent(agent.id)}
                     className={`p-4 rounded-lg cursor-pointer transition-all ${
                       selectedAgent === agent.id
-                        ? 'bg-brand-green/10 ring-2 ring-brand-green'
+                        ? 'bg-brand-cyan/10 ring-2 ring-brand-cyan'
                         : 'bg-white hover:bg-slate-50'
                     }`}
                   >
@@ -853,8 +853,8 @@ export default function AgentsPage() {
               <div className="flex items-start justify-between">
                 <div>
                   <div className="flex items-center gap-3 mb-2">
-                    <div className="w-12 h-12 rounded-xl bg-brand-green/20 flex items-center justify-center">
-                      <Bot className="w-6 h-6 text-brand-green-dark" />
+                    <div className="w-12 h-12 rounded-xl bg-brand-cyan/20 flex items-center justify-center">
+                      <Bot className="w-6 h-6 text-brand-cyan-dark" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
@@ -1325,7 +1325,7 @@ export default function AgentsPage() {
                             <div className="mt-3">
                               <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                                 <div
-                                  className="h-full bg-brand-green rounded-full transition-all"
+                                  className="h-full bg-brand-cyan rounded-full transition-all"
                                   style={{
                                     width: `${Math.min((memory.size / 10485760) * 100, 100)}%`,
                                   }}
@@ -1370,8 +1370,8 @@ export default function AgentsPage() {
                         <X className="w-5 h-5 text-slate" />
                       </button>
                       <div className="flex items-center gap-3 mb-6">
-                        <div className="w-10 h-10 rounded-xl bg-brand-green/10 flex items-center justify-center">
-                          <Database className="w-5 h-5 text-brand-green" />
+                        <div className="w-10 h-10 rounded-xl bg-brand-cyan/10 flex items-center justify-center">
+                          <Database className="w-5 h-5 text-brand-cyan" />
                         </div>
                         <div>
                           <h3 className="text-lg font-semibold text-ink">{viewMemory.name}</h3>
@@ -1402,7 +1402,7 @@ export default function AgentsPage() {
                           </div>
                           <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                             <div
-                              className="h-full bg-brand-green rounded-full transition-all"
+                              className="h-full bg-brand-cyan rounded-full transition-all"
                               style={{ width: `${Math.min((viewMemory.size / 10485760) * 100, 100)}%` }}
                             />
                           </div>
@@ -1718,8 +1718,8 @@ export default function AgentsPage() {
               <X className="w-5 h-5 text-slate" />
             </button>
             <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-xl bg-brand-green/10 flex items-center justify-center">
-                <Code className="w-5 h-5 text-brand-green" />
+              <div className="w-10 h-10 rounded-xl bg-brand-cyan/10 flex items-center justify-center">
+                <Code className="w-5 h-5 text-brand-cyan" />
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-ink">{viewToolSource.name}</h3>
@@ -1751,8 +1751,8 @@ export default function AgentsPage() {
               <X className="w-5 h-5 text-slate" />
             </button>
             <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-xl bg-brand-green/10 flex items-center justify-center">
-                <FileText className="w-5 h-5 text-brand-green" />
+              <div className="w-10 h-10 rounded-xl bg-brand-cyan/10 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-brand-cyan" />
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-ink">System Prompt</h3>

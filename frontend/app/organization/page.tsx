@@ -56,7 +56,7 @@ const typeIcons: Record<string, React.ReactNode> = {
 };
 
 const typeColors: Record<string, string> = {
-  team: 'bg-brand-green text-white',
+  team: 'bg-brand-cyan text-white',
   group: 'bg-blue-500 text-white',
   agent: 'bg-purple-500 text-white',
 };
@@ -106,9 +106,9 @@ function TreeNode({
     <div className="select-none">
       <div
         className={`group flex items-center gap-2 py-2 px-3 rounded-lg cursor-pointer transition-all ${
-          isSelected ? 'bg-brand-green/10 ring-2 ring-brand-green' : 'hover:bg-slate-50'
+          isSelected ? 'bg-brand-cyan/10 ring-2 ring-brand-cyan' : 'hover:bg-slate-50'
         } ${isDragging ? 'opacity-50' : ''} ${
-          isDropTarget ? 'border-2 border-dashed border-brand-green bg-green-50' : ''
+          isDropTarget ? 'border-2 border-dashed border-brand-cyan bg-green-50' : ''
         }`}
         style={{ marginLeft: `${level * 24}px` }}
         draggable

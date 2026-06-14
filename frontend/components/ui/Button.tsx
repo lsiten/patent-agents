@@ -24,13 +24,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles: Record<ButtonVariant, string> = {
-  default: 'bg-brand-green text-ink hover:opacity-90 focus:ring-2 focus:ring-brand-green/50',
-  primary: 'bg-brand-green text-ink hover:opacity-90 focus:ring-2 focus:ring-brand-green/50',
+  default: 'bg-gradient-to-r from-brand-cyan to-accent-purple text-white hover:opacity-90 focus:ring-2 focus:ring-brand-cyan/50 shadow-lg shadow-brand-cyan/25',
+  primary: 'bg-gradient-to-r from-brand-cyan to-accent-purple text-white hover:opacity-90 focus:ring-2 focus:ring-brand-cyan/50 shadow-lg shadow-brand-cyan/25',
   secondary: 'bg-transparent text-ink border border-hairline-strong hover:bg-surface',
   ghost: 'bg-transparent text-ink hover:bg-surface rounded-md',
-  'on-dark': 'bg-brand-green text-ink hover:opacity-90',
-  'secondary-on-dark': 'bg-transparent text-on-dark border border-hairline-dark hover:bg-white/5',
-  link: 'bg-transparent text-brand-green-dark hover:underline p-0 h-auto',
+  'on-dark': 'bg-gradient-to-r from-brand-cyan to-accent-purple text-white hover:opacity-90 shadow-lg shadow-brand-cyan/30',
+  'secondary-on-dark': 'bg-transparent text-on-dark border border-white/20 hover:bg-white/10',
+  link: 'bg-transparent text-brand-cyan hover:text-brand-cyan-dark hover:underline p-0 h-auto',
 };
 
 const sizeStyles: Record<ButtonSize, string> = {

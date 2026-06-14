@@ -326,7 +326,7 @@ function InteractionPanel({ interaction }: InteractionPanelProps) {
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
+        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-cyan/40"
         aria-expanded={expanded}
       >
         {expanded ? (
@@ -1305,7 +1305,7 @@ function ChatPageContent() {
           <Button
             variant="default"
             size="sm"
-            className="w-full"
+            className="w-full text-white"
             onClick={handleNewConversation}
           >
             <Plus className="w-4 h-4 mr-1" />
@@ -1338,9 +1338,9 @@ function ChatPageContent() {
                 role="button"
                 tabIndex={0}
                 className={clsx(
-                  'w-full text-left p-3 rounded-xl border transition-all group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40',
+                  'w-full text-left p-3 rounded-xl border transition-all group cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-cyan/40',
                   activeConvId === conv.id
-                    ? 'border-brand-green/30 bg-brand-green/10 text-ink shadow-sm'
+                    ? 'border-brand-cyan/30 bg-brand-cyan/10 text-ink shadow-sm'
                     : 'border-transparent hover:border-hairline-strong hover:bg-canvas text-slate hover:text-ink'
                 )}
               >
@@ -1364,7 +1364,7 @@ function ChatPageContent() {
                               e.stopPropagation();
                               router.push(`/workflow/${encodeURIComponent((conv.linked_workflow_id || conv.workflow_task_id)! )}`);
                             }}
-                            className="rounded-full px-2 py-0.5 text-[11px] font-medium text-brand-green-dark transition-colors hover:bg-brand-green/10 hover:text-brand-green focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
+                            className="rounded-full px-2 py-0.5 text-[11px] font-medium text-brand-cyan-dark transition-colors hover:bg-brand-cyan/10 hover:text-brand-cyan focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-cyan/40"
                             aria-label={`查看 ${conv.title || '当前对话'} 的工作流`}
                           >
                             查看工作流
@@ -1390,7 +1390,7 @@ function ChatPageContent() {
       </aside>
 
       {/* Main Chat Area */}
-      <div className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
+      <div className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden" style={{height: 'calc(100vh - 64px)'}}>
         {/* Header */}
         <div className="flex-shrink-0 border-b border-hairline bg-canvas/95 px-6 py-3 backdrop-blur">
           <div className="flex min-w-0 items-center justify-between gap-3">
@@ -1525,7 +1525,7 @@ function ChatPageContent() {
 
             {isLoadingConv && messages.length === 0 ? (
               <div className="flex justify-center py-12">
-                <Loader2 className="w-6 h-6 animate-spin text-brand-green-dark" />
+                <Loader2 className="w-6 h-6 animate-spin text-brand-cyan-dark" />
               </div>
             ) : !activeConvId && messages.length === 1 && messages[0]?.id === 'welcome' ? (
               <div className="flex-1" aria-hidden="true" />
@@ -1598,8 +1598,8 @@ function ChatPageContent() {
                           className="flex w-full min-w-0 gap-3 justify-start overflow-hidden"
                         >
                           <div className="flex-shrink-0 mt-1">
-                            <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
-                              <Bot className="w-4.5 h-4.5 text-ink" />
+                            <div className="w-9 h-9 rounded-full bg-brand-cyan flex items-center justify-center">
+                              <Bot className="w-4.5 h-4.5 text-white" />
                             </div>
                           </div>
                           <div className="order-1 w-full min-w-0 max-w-[min(760px,calc(100%-3rem))]">
@@ -1626,8 +1626,8 @@ function ChatPageContent() {
                         className="flex w-full min-w-0 gap-3 justify-start overflow-hidden"
                       >
                         <div className="flex-shrink-0 mt-1">
-                          <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
-                            <Bot className="w-4.5 h-4.5 text-ink" />
+                          <div className="w-9 h-9 rounded-full bg-brand-cyan flex items-center justify-center">
+                            <Bot className="w-4.5 h-4.5 text-white" />
                           </div>
                         </div>
                         <div className="order-1 w-full min-w-0 max-w-[min(760px,calc(100%-3rem))]">
@@ -1659,8 +1659,8 @@ function ChatPageContent() {
                     >
                       {(msg.role === 'assistant' || msg.role === 'agent') && (
                         <div className="flex-shrink-0 mt-1">
-                          <div className="w-9 h-9 rounded-full bg-brand-green flex items-center justify-center">
-                            <Bot className="w-4.5 h-4.5 text-ink" />
+                          <div className="w-9 h-9 rounded-full bg-brand-cyan flex items-center justify-center">
+                            <Bot className="w-4.5 h-4.5 text-white" />
                           </div>
                         </div>
                       )}
@@ -1691,7 +1691,7 @@ function ChatPageContent() {
                               className={clsx(
                                 'w-full max-w-full min-w-0 overflow-hidden rounded-2xl text-sm leading-relaxed shadow-sm',
                                 msg.role === 'user'
-                                  ? 'bg-brand-green text-ink rounded-br-md'
+                                  ? 'bg-brand-cyan text-white rounded-br-md'
                                   : 'border border-hairline bg-canvas rounded-bl-md'
                               )}
                             >
@@ -1901,7 +1901,7 @@ function ChatPageContent() {
                   type="button"
                   onClick={() => setPendingFile(null)}
                   disabled={isUploadingFile}
-                  className="ml-auto p-1.5 rounded-md hover:bg-slate-100 text-slate-500 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
+                  className="ml-auto p-1.5 rounded-md hover:bg-slate-100 text-slate-500 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-cyan/40"
                   title="移除文件"
                   aria-label="移除待上传文件"
                 >
@@ -1946,7 +1946,7 @@ function ChatPageContent() {
                   }
                 }}
                 placeholder={activeConvId ? '继续补充技术细节...（可点击 📎 选择交底书 .txt / .docx / .pdf）' : '描述您的发明创造...（可点击 📎 选择交底书 .txt / .docx / .pdf）'}
-                className="min-h-[42px] min-w-0 flex-1 max-h-[28dvh] overflow-y-auto rounded-lg border border-hairline bg-white px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-green focus:border-brand-green placeholder:text-slate/60"
+                className="min-h-[42px] min-w-0 flex-1 max-h-[28dvh] overflow-y-auto rounded-lg border border-hairline bg-white px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-cyan focus:border-brand-cyan placeholder:text-slate/60"
                 rows={1}
                 autoFocus
                 disabled={isLoading || isLoadingConv || isStartingWorkflow || isUploadingFile}

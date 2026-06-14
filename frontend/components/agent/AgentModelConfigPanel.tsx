@@ -324,17 +324,17 @@ export default function AgentModelConfigPanel(props: Props) {
           <div
             className={`mt-md p-sm border rounded-md flex items-start gap-2 ${
               testResult.success
-                ? 'bg-brand-green-light/10 border-brand-green/30'
+                ? 'bg-brand-cyan-light/10 border-brand-cyan/30'
                 : 'bg-accent-orange/10 border-accent-orange/30'
             }`}
           >
             {testResult.success ? (
-              <CheckCircle2 className="w-4 h-4 text-brand-green mt-0.5 shrink-0" />
+              <CheckCircle2 className="w-4 h-4 text-brand-cyan mt-0.5 shrink-0" />
             ) : (
               <AlertTriangle className="w-4 h-4 text-accent-orange mt-0.5 shrink-0" />
             )}
             <div className="flex-1 text-body-sm">
-              <div className={testResult.success ? 'text-brand-green-dark' : 'text-accent-orange'}>
+              <div className={testResult.success ? 'text-brand-cyan-dark' : 'text-accent-orange'}>
                 {testResult.success ? '连通性正常' : '连通性失败'}
                 {testResult.latency_ms > 0 && ` · ${testResult.latency_ms}ms`}
               </div>

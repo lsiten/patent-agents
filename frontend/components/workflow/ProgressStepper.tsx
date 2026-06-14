@@ -18,8 +18,8 @@ interface ProgressStepperProps {
 
 const stateStyles: Record<StepState, string> = {
   pending: 'bg-slate-200 text-slate-500',
-  active: 'bg-brand-green text-ink animate-pulse',
-  completed: 'bg-brand-green text-ink',
+  active: 'bg-brand-cyan text-white animate-pulse',
+  completed: 'bg-brand-cyan text-white',
   error: 'bg-red-500 text-white',
 };
 
@@ -53,7 +53,7 @@ export function ProgressStepper({ steps }: ProgressStepperProps) {
                     <div
                       className={clsx(
                         'absolute inset-y-0 left-0 transition-all duration-500',
-                        step.state === 'completed' ? 'w-full bg-brand-green' : 'w-1/2 bg-brand-green'
+                        step.state === 'completed' ? 'w-full bg-brand-cyan' : 'w-1/2 bg-brand-cyan'
                       )}
                     />
                   )}

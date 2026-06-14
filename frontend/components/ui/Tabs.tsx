@@ -102,7 +102,7 @@ export function TabsTrigger({
       : clsx(
           'border-b-2 border-transparent pb-2 mb-[-2px]',
           isActive
-            ? 'text-brand-green-dark border-brand-green-dark'
+            ? 'text-brand-cyan-dark border-brand-cyan-dark'
             : 'text-steel hover:text-slate',
           disabled && 'opacity-50 cursor-not-allowed hover:text-steel'
         );
@@ -116,7 +116,7 @@ export function TabsTrigger({
       className={twMerge(
         clsx(
           'font-euclid text-body-sm-medium transition-all duration-150',
-          'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30 focus-visible:rounded-md',
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-cyan/30 focus-visible:rounded-md',
           variantStyles,
           className
         )

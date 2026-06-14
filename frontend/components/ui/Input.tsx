@@ -39,7 +39,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
                 'w-full px-md py-sm text-body-md bg-canvas text-ink rounded-md border',
                 icon && 'pl-10',
                 'transition-all duration-150 placeholder:text-muted',
-                'focus:outline-none focus:ring-2 focus:ring-brand-green/30 focus:border-brand-green-dark',
+                'focus:outline-none focus:ring-2 focus:ring-brand-cyan/30 focus:border-brand-cyan-dark',
                 error
                   ? 'border-red-500 focus:border-red-500 focus:ring-red-500/30'
                   : 'border-hairline-strong hover:border-stone',
