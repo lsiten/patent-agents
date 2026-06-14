@@ -47,7 +47,7 @@ export function ConfirmDialog({
   const confirmStyles = {
     danger: 'bg-red-600 hover:bg-red-700 text-white',
     warning: 'bg-yellow-600 hover:bg-yellow-700 text-white',
-    info: 'bg-brand-green hover:bg-brand-green-dark text-white',
+    info: 'bg-brand-cyan hover:bg-brand-cyan-dark text-white',
   };
 
   return (

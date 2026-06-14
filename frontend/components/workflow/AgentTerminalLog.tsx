@@ -27,7 +27,7 @@ function ExpandableText({
       {expanded ? text : `${text.slice(0, maxLength)}...`}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="ml-1 text-brand-green hover:text-brand-green-dark text-xs underline"
+        className="ml-1 text-brand-cyan hover:text-brand-cyan-dark text-xs underline"
       >
         {expanded ? '收起' : '展开'}
       </button>
@@ -61,8 +61,8 @@ function formatTime(timestamp: string): string {
 
 function DispatchEntry({ entry }: { entry: AgentLogEntry }) {
   return (
-    <div className="min-w-0 break-words border-l-2 border-brand-green/40 pl-6">
-      <span className="font-medium text-brand-green">🎯 调度 → {entry.dispatch_to}</span>
+    <div className="min-w-0 break-words border-l-2 border-brand-cyan/40 pl-6">
+      <span className="font-medium text-brand-cyan">🎯 调度 → {entry.dispatch_to}</span>
       {entry.dispatch_task && (
         <p className="text-on-dark-muted text-xs mt-0.5">
           <ExpandableText text={`"${entry.dispatch_task}"`} maxLength={100} />
@@ -181,8 +181,8 @@ function ContentEntry({ entry }: { entry: AgentLogEntry }) {
 
 function ProgressEntry({ entry }: { entry: AgentLogEntry }) {
   return (
-    <div className="pl-6 border-l-2 border-brand-green/40">
-      <span className="text-brand-green text-xs">
+    <div className="pl-6 border-l-2 border-brand-cyan/40">
+      <span className="text-brand-cyan text-xs">
         ⏱️ {entry.message}
       </span>
     </div>
@@ -275,7 +275,7 @@ export function AgentTerminalLog({ entries, className }: AgentTerminalLogProps) 
             className={clsx(
               'px-2.5 py-1 rounded-full text-xs font-medium transition-colors',
               activeFilter === 'all'
-                ? 'bg-brand-green text-ink'
+                ? 'bg-brand-cyan text-white'
                 : 'bg-surface-soft text-slate hover:bg-hairline'
             )}
           >
@@ -288,7 +288,7 @@ export function AgentTerminalLog({ entries, className }: AgentTerminalLogProps) 
               className={clsx(
                 'inline-flex min-w-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors',
                 activeFilter === name
-                  ? 'bg-brand-green text-ink'
+                  ? 'bg-brand-cyan text-white'
                   : 'bg-surface-soft text-slate hover:bg-hairline'
               )}
             >

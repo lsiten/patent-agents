@@ -24,12 +24,10 @@ export function Navbar() {
       <div className="container mx-auto px-md">
         <div className="flex h-16 items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-green">
-              <BrainCircuit className="h-5 w-5 text-ink" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-brand-cyan to-accent-purple">
+              <BrainCircuit className="h-5 w-5 text-white" />
             </div>
-            <span className="font-euclid text-heading-5 font-semibold text-ink">
-              专利智脑
-            </span>
+            <span className="font-euclid text-heading-5 font-semibold text-ink">专利智脑</span>
           </Link>
 
           {/* Desktop Nav */}
@@ -43,9 +41,7 @@ export function Navbar() {
                   href={link.href}
                   className={clsx(
                     'flex items-center gap-1.5 font-euclid text-body-sm-medium transition-colors',
-                    isActive
-                      ? 'text-brand-green-dark'
-                      : 'text-slate hover:text-ink'
+                    isActive ? 'text-brand-cyan-dark' : 'text-slate hover:text-ink',
                   )}
                 >
                   <Icon className="w-4 h-4" />
@@ -55,22 +51,15 @@ export function Navbar() {
             })}
           </nav>
 
-          <div className="hidden md:flex items-center gap-3">
-            <Button size="sm" onClick={() => window.location.href = '/'}>
+          <div className="hidden md:flex items-center gap-3 text-white">
+            <Button size="sm" onClick={() => (window.location.href = '/')}>
               开始申请
             </Button>
           </div>
 
           {/* Mobile Menu Button */}
-          <button
-            className="md:hidden p-2 rounded-md hover:bg-surface"
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-          >
-            {isMenuOpen ? (
-              <X className="h-5 w-5 text-slate" />
-            ) : (
-              <Menu className="h-5 w-5 text-slate" />
-            )}
+          <button className="md:hidden p-2 rounded-md hover:bg-surface" onClick={() => setIsMenuOpen(!isMenuOpen)}>
+            {isMenuOpen ? <X className="h-5 w-5 text-slate" /> : <Menu className="h-5 w-5 text-slate" />}
           </button>
         </div>
 
@@ -88,9 +77,7 @@ export function Navbar() {
                     onClick={() => setIsMenuOpen(false)}
                     className={clsx(
                       'flex items-center gap-2 px-md py-sm rounded-md font-euclid text-body-sm-medium transition-colors',
-                      isActive
-                        ? 'bg-surface-feature text-brand-green-dark'
-                        : 'text-slate hover:bg-surface hover:text-ink'
+                      isActive ? 'bg-brand-cyan/10 text-brand-cyan-dark' : 'text-slate hover:bg-surface hover:text-ink',
                     )}
                   >
                     <Icon className="w-4 h-4" />
@@ -98,8 +85,14 @@ export function Navbar() {
                   </Link>
                 );
               })}
-              <div className="pt-md mt-md border-t border-hairline flex flex-col gap-2">
-                <Button fullWidth onClick={() => { setIsMenuOpen(false); window.location.href = '/'; }}>
+              <div className="pt-md text-white mt-md border-t border-hairline flex flex-col gap-2">
+                <Button
+                  fullWidth
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    window.location.href = '/';
+                  }}
+                >
                   开始申请
                 </Button>
               </div>

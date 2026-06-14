@@ -89,7 +89,7 @@ export function DispatchPanel({ activities, workflowTaskId, isActive }: Dispatch
             {workflowTaskId && (
               <button
                 onClick={() => router.push(`/workflow/${encodeURIComponent(workflowTaskId)}`)}
-                className="inline-flex items-center gap-1 text-[11px] text-brand-green-dark hover:underline"
+                className="inline-flex items-center gap-1 text-[11px] text-brand-cyan-dark hover:underline"
               >
                 <ExternalLink className="w-3 h-3" />
                 详情

@@ -336,7 +336,7 @@ export function WorkflowProgressStrip({
                     onClick={handleStart}
                     disabled={starting}
                     className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium
-                      text-white bg-brand-green hover:bg-brand-green-dark rounded-md
+                      text-white bg-brand-cyan hover:bg-brand-cyan-dark rounded-md
                       disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {starting ? (
@@ -350,7 +350,7 @@ export function WorkflowProgressStrip({
                 {taskId && (
                   <button
                     onClick={() => router.push(`/workflow/${encodeURIComponent(taskId)}`)}
-                    className="inline-flex items-center gap-1 text-[11px] text-brand-green-dark hover:underline"
+                    className="inline-flex items-center gap-1 text-[11px] text-brand-cyan-dark hover:underline"
                   >
                     <ExternalLink className="w-3 h-3" />
                     详情

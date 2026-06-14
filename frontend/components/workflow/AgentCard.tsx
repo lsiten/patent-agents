@@ -26,8 +26,8 @@ const iconMap: Record<string, React.ReactNode> = {
 
 const statusColors: Record<AgentStatus, string> = {
   idle: 'bg-slate-100 text-slate-500',
-  working: 'bg-brand-green-soft text-brand-green-dark',
-  completed: 'bg-green-100 text-green-700',
+  working: 'bg-brand-cyan-soft text-brand-cyan-dark',
+  completed: 'bg-brand-cyan-soft text-brand-cyan-dark',
   error: 'bg-red-100 text-red-700',
 };
 
@@ -50,13 +50,13 @@ export function AgentCard({ agent, className }: AgentCardProps) {
         {/* Icon */}
         <div
           className={clsx(
-            'w-12 h-12 rounded-xl flex items-center justify-center',
-            agent.status === 'working'
-              ? 'bg-brand-green text-ink animate-pulse'
-              : agent.status === 'completed'
-                ? 'bg-green-100 text-green-700'
-                : 'bg-slate-100 text-slate-400'
-          )}
+              'w-12 h-12 rounded-xl flex items-center justify-center',
+              agent.status === 'working'
+                ? 'bg-brand-cyan text-white animate-pulse'
+                : agent.status === 'completed'
+                  ? 'bg-brand-cyan text-white'
+                  : 'bg-slate-100 text-slate-400'
+            )}
         >
           {iconMap[agent.id] || <Brain className="w-5 h-5" />}
         </div>
@@ -75,8 +75,8 @@ export function AgentCard({ agent, className }: AgentCardProps) {
           <p className="text-xs text-muted">{agent.description}</p>
 
           {agent.status === 'working' && agent.currentTask && (
-            <div className="mt-3 p-2 rounded-md bg-brand-green-soft/50">
-              <p className="text-xs text-brand-green-dark">
+            <div className="mt-3 p-2 rounded-md bg-brand-cyan-soft/50">
+              <p className="text-xs text-brand-cyan-dark">
                 🚀 {agent.currentTask}
               </p>
             </div>

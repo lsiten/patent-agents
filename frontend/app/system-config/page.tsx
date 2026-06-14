@@ -38,7 +38,7 @@ function ProviderSelect({
   }
   return (
     <select
-      className="text-body-sm rounded-md border border-hairline bg-canvas px-2 py-1 text-ink font-euclid focus:outline-none focus:ring-2 focus:ring-brand-green"
+      className="text-body-sm rounded-md border border-hairline bg-canvas px-2 py-1 text-ink font-euclid focus:outline-none focus:ring-2 focus:ring-brand-cyan"
       value={value}
       onChange={(e) => onChange(e.target.value)}
     >
@@ -381,7 +381,7 @@ export default function SystemConfigPage() {
               </Badge>
             )}
             {saveSuccess && (
-              <span className="flex items-center gap-1 text-body-sm text-brand-green-dark">
+              <span className="flex items-center gap-1 text-body-sm text-brand-cyan-dark">
                 <CheckCircle2 className="w-4 h-4" /> 已保存
               </span>
             )}

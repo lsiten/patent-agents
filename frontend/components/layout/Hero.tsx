@@ -35,12 +35,12 @@ export function Hero() {
         <div className="container mx-auto px-md">
           <div className="max-w-4xl mx-auto text-center">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 text-body-sm mb-lg">
-              <Sparkles className="w-4 h-4 text-brand-green" />
+              <Sparkles className="w-4 h-4 text-brand-cyan" />
               <span>多智能体协同工作，让专利申请更简单</span>
             </div>
             <h1 className="text-hero-display font-euclid font-medium leading-[1.1] tracking-tighter mb-lg">
               专利申请
-              <span className="text-brand-green">智能助手</span>
+              <span className="text-brand-cyan">智能助手</span>
             </h1>
             <p className="text-subtitle text-on-dark-muted max-w-2xl mx-auto mb-xl">
               CEO Agent 统筹全流程，4 个专业 Agent 协同工作，
@@ -68,7 +68,7 @@ export function Hero() {
               { value: '1000+', label: '专利申请' },
             ].map((stat) => (
               <div key={stat.label} className="text-center p-lg rounded-xl bg-white/5">
-                <div className="text-display-lg font-euclid font-medium text-brand-green mb-xs">
+                <div className="text-display-lg font-euclid font-medium text-brand-cyan mb-xs">
                   {stat.value}
                 </div>
                 <div className="text-body-sm text-on-dark-muted">
@@ -100,8 +100,8 @@ export function Hero() {
                   key={index}
                   className="p-xxl rounded-xl border border-hairline bg-canvas hover:shadow-card transition-all duration-300"
                 >
-                  <div className="w-12 h-12 rounded-lg bg-surface-feature flex items-center justify-center mb-lg">
-                    <Icon className="w-6 h-6 text-brand-green-dark" />
+                  <div className="w-12 h-12 rounded-lg bg-brand-cyan/10 flex items-center justify-center mb-lg">
+                    <Icon className="w-6 h-6 text-brand-cyan-dark" />
                   </div>
                   <h3 className="text-heading-4 font-euclid font-medium text-ink mb-md">
                     {feature.title}
@@ -157,7 +157,7 @@ export function Hero() {
                   },
                 ].map((item, index) => (
                   <div key={index} className="relative">
-                    <div className="relative z-10 w-12 h-12 rounded-full bg-brand-green text-ink font-euclid font-semibold flex items-center justify-center mb-md mx-auto">
+                    <div className="relative z-10 w-12 h-12 rounded-full bg-brand-cyan text-white font-euclid font-semibold flex items-center justify-center mb-md mx-auto">
                       {item.step}
                     </div>
                     <div className="text-center">

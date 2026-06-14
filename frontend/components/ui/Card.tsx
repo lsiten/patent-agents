@@ -23,7 +23,7 @@ const variantStyles: Record<CardVariant, string> = {
   feature: 'bg-canvas border border-hairline rounded-lg p-xxl',
   'feature-dark': 'bg-brand-teal-deep text-on-dark rounded-lg p-xxl',
   pricing: 'bg-canvas border border-hairline rounded-lg p-xxl',
-  'pricing-featured': 'bg-surface-feature border-2 border-brand-green rounded-lg p-xxl',
+  'pricing-featured': 'bg-surface-feature border-2 border-brand-cyan rounded-lg p-xxl',
   course: 'bg-canvas border border-hairline rounded-lg p-xl',
   cert: 'bg-canvas border border-hairline rounded-lg p-xl',
 };
