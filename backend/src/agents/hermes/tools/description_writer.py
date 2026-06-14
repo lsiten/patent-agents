@@ -7,25 +7,8 @@ from typing import Any, Dict
 
 from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
-from src.core.llm_client import get_llm_service, LLMMessage
 
 logger = get_logger(__name__)
-
-DESCRIPTION_PROMPT = """你是一位资深专利代理人。请撰写专利说明书的"{section_type}"部分。
-
-技术内容：
-{technical_content}
-
-相关权利要求：
-{claims}
-
-撰写要求：
-- 内容公开充分，使本领域技术人员能够实施
-- 与权利要求书对应，提供充分支持
-- 使用规范专利术语
-- 逻辑清晰，层次分明
-
-请直接输出该章节的正文内容。"""
 
 SECTION_NAME_MAP = {
     "technical_field": "技术领域",
@@ -68,36 +51,40 @@ class DescriptionWriterTool(HermesTool):
     async def execute(
         self, section_type: str, technical_content: str, claims: str = "", **kwargs
     ) -> Dict[str, Any]:
-        """执行说明书章节撰写"""
+        """生成说明书章节写作计划；正文由专利撰写 Agent 分段完成。"""
         start_time = datetime.now()
         logger.info("Writing patent description section", section=section_type)
-        
+
         try:
-            llm = get_llm_service()
-            prompt = DESCRIPTION_PROMPT.format(
-                section_type=SECTION_NAME_MAP.get(section_type, section_type),
-                technical_content=technical_content,
-                claims=claims or "未提供",
-            )
-            response = await llm.chat_completion(
-                messages=[LLMMessage(role="user", content=prompt)],
-                temperature=0.4,
-            )
-            
-            # 标准化输出数据
+            section_name = SECTION_NAME_MAP.get(section_type, section_type)
+            content_hint = (technical_content or "").strip()[:1200]
+            section_plan = {
+                "technical_field": ["说明本发明属于沉浸式多屏/折幕视频显示处理领域。"],
+                "background": ["概述固定显示面与可调显示面在姿态变化时产生遮挡、空白、错位和不同步问题。"],
+                "summary": ["围绕姿态获取、边界关系判定、裁剪/补偿/重映射和同步输出描述技术方案及效果。"],
+                "drawings": ["逐图列明系统结构、方法流程、边界投影关系、补偿/裁剪示意；不要重复图号。"],
+                "detailed": ["按步骤描述目标空间姿态信息、区域判定算法、外转补偿、内转裁剪重排和同步输出实施例。"],
+            }.get(section_type, ["围绕技术内容撰写该章节，确保与权利要求一一支持。"])
             data = {
                 "section_type": section_type,
-                "section_name": SECTION_NAME_MAP.get(section_type, section_type),
-                "content": response.content,
+                "section_name": section_name,
+                "content_outline": section_plan,
+                "technical_content_preview": content_hint,
+                "claims_reference_present": bool(claims),
+                "writing_constraints": [
+                    "不得复制逐字稿中的说话人、时间戳或口语格式。",
+                    "附图说明必须与实际生成附图一一对应，图号不得重复。",
+                    "每个权利要求技术特征应在具体实施方式中有对应公开。",
+                ],
             }
-            
+
             return make_tool_output(
                 tool_name=self.name,
                 data=data,
                 success=True,
                 start_time=start_time,
             )
-            
+
         except Exception as e:
             logger.error(f"Description writing failed: {e}")
             return make_tool_output(

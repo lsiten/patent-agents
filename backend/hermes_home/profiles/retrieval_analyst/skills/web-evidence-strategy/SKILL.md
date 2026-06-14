@@ -24,3 +24,5 @@ metadata:
 - 不知道入口时，先用 `web_access_find_url` 定位站点
 - 页面需要脚本、点击、登录时，再改用 `web_access_browser`
 - 记录 URL、标题、发布日期或版本号、关键摘录
+- 网页证据只补充专利工具链路，不替代 `patent_search`、`similarity_analyzer`、`patentability_scorer` 和 `risk_analyzer`。
+- 网页事实不能直接写成专利性结论；最终新颖性、创造性和风险结论仍由检索分析 Agent 判断。

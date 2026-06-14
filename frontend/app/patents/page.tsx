@@ -261,7 +261,7 @@ export default function PatentsPage() {
   }).length;
 
   return (
-    <div className="min-h-screen bg-surface">
+    <div className="min-h-full bg-surface">
       <div className="border-b border-hairline bg-canvas px-6 py-5">
         <div className="max-w-7xl mx-auto">
           <div className="flex items-start justify-between">

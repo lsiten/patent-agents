@@ -23,7 +23,7 @@ export default function RootLayout({
         <ToastProvider>
           <div className="flex h-dvh min-h-0 flex-col overflow-hidden">
             <Navbar />
-            <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+            <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">{children}</main>
           </div>
         </ToastProvider>
       </body>

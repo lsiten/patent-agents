@@ -11,6 +11,10 @@ from typing import Any, Dict, Optional
 
 from src.agents.hermes.base import make_tool_output
 from src.core.config import settings
+from src.core.logging import get_logger
+
+
+logger = get_logger(__name__)
 
 
 def _generate_image_file(prompt: str, output_path: Path, image_config: Dict[str, Any]) -> None:

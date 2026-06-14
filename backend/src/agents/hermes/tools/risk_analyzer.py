@@ -1,6 +1,8 @@
 """
-RiskAnalyzerTool - 风险分析工具
-识别专利申请过程中的各种风险
+RiskAnalyzerTool - 确定性风险信号工具
+
+该工具只返回可代码化触发的风险信号，不在工具层判断风险等级或最终处理策略。
+风险严重程度、是否阻断流程以及修复优先级必须由调用该工具的 Hermes Agent LLM 决定。
 """
 import json
 import re
@@ -14,12 +16,10 @@ logger = get_logger(__name__)
 
 
 class RiskAnalyzerTool(HermesTool):
-    """
-    风险分析工具
-    识别专利申请过程中的各种风险
-    """
+    """提取专利申请过程中的确定性风险信号。"""
+
     name = "risk_analyzer"
-    description = "分析专利申请过程中的各种风险，提供评估和缓解建议"
+    description = "提取新颖性、创造性、现有技术和支持性相关的客观风险信号；风险判断由Agent完成"
 
     def _build_definition(self) -> HermesToolDefinition:
         return HermesToolDefinition(
@@ -63,162 +63,114 @@ class RiskAnalyzerTool(HermesTool):
         prior_art_references: Optional[str] = None,
         risk_type: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """执行风险分析"""
-        # 兼容 adapter schema 和 LLM 可能使用的不同参数名
+        """提取风险信号。"""
         resolved_type = analysis_type or risk_type or "overall"
         resolved_tech_data = tech_data or patent_document or document or ""
         if not resolved_tech_data:
             return {
                 "analysis_type": resolved_type,
-                "overall_risk_level": "unknown",
-                "risk_count": 0,
-                "risks": [],
-                "risk_matrix": {"critical": 0, "high": 0, "medium": 0, "low": 0},
-                "mitigation_priorities": [],
+                "signal_count": 0,
+                "objective_risk_signals": [],
+                "requires_agent_judgment": ["缺少输入时是否暂停流程或要求补充信息"],
                 "analysis_timestamp": datetime.now().isoformat(),
                 "error": "缺少技术数据或专利文件内容",
             }
-        logger.info("Analyzing risks", type=resolved_type)
 
-        risks = []
-        overall_risk_level = "low"
+        logger.info("Collecting objective risk signals", type=resolved_type)
 
-        # 基于分析类型识别风险（使用 resolved 值兼容 adapter 传入的不同参数名）
-        if resolved_type in ["novelty", "overall"]:
-            novelty_risks = self._analyze_novelty_risks(resolved_tech_data)
-            risks.extend(novelty_risks)
-
-        if resolved_type in ["inventive_step", "overall"]:
-            inventive_risks = self._analyze_inventive_step_risks(resolved_tech_data)
-            risks.extend(inventive_risks)
-
-        if resolved_type in ["prior_art", "overall"] and prior_art_references:
-            prior_art_risks = self._analyze_prior_art_risks(prior_art_references)
-            risks.extend(prior_art_risks)
-
-        if resolved_type in ["support", "overall"]:
-            support_risks = self._analyze_support_risks(resolved_tech_data)
-            risks.extend(support_risks)
-
-        # 计算整体风险等级
-        if any(r["severity"] == "critical" for r in risks):
-            overall_risk_level = "critical"
-        elif any(r["severity"] == "high" for r in risks):
-            overall_risk_level = "high"
-        elif any(r["severity"] == "medium" for r in risks):
-            overall_risk_level = "medium"
+        signals: List[Dict[str, Any]] = []
+        if resolved_type in {"novelty", "overall"}:
+            signals.extend(self._collect_novelty_signals(resolved_tech_data))
+        if resolved_type in {"inventive_step", "overall"}:
+            signals.extend(self._collect_inventive_step_signals(resolved_tech_data))
+        if resolved_type in {"prior_art", "overall"} and prior_art_references:
+            signals.extend(self._collect_prior_art_signals(prior_art_references))
+        if resolved_type in {"support", "overall"}:
+            signals.extend(self._collect_support_signals(resolved_tech_data))
 
         return {
             "analysis_type": resolved_type,
-            "overall_risk_level": overall_risk_level,
-            "risk_count": len(risks),
-            "risks": risks,
-            "risk_matrix": self._generate_risk_matrix(risks),
-            "mitigation_priorities": self._generate_mitigation_priorities(risks),
+            "signal_count": len(signals),
+            "objective_risk_signals": signals,
+            "requires_agent_judgment": [
+                "信号是否构成实质风险",
+                "风险严重程度",
+                "是否阻断当前流程",
+                "是否调度对应Agent修复以及修复优先级",
+            ],
             "analysis_timestamp": datetime.now().isoformat(),
         }
 
-    def _analyze_novelty_risks(self, tech_data: str) -> List[Dict]:
-        """分析新颖性风险"""
-        risks = []
+    def _collect_novelty_signals(self, tech_data: str) -> List[Dict[str, Any]]:
+        signals: List[Dict[str, Any]] = []
         data_lower = tech_data.lower()
 
-        # 检查是否有过于宽泛的技术描述
         if len(data_lower) < 200:
-            risks.append({
-                "type": "novelty_insufficient_description",
-                "severity": "medium",
-                "description": "技术描述不够详细，可能影响新颖性判断的准确性",
+            signals.append({
+                "type": "short_technical_description",
                 "category": "information",
-                "mitigation": "补充更多的技术细节和具体实现方案",
+                "signal": "技术描述长度小于200字符",
+                "candidate_action": "补充更多技术细节和具体实现方案",
+                "rule_triggered": True,
             })
 
-        # 检查是否提到了常见的通用技术
         common_terms = ["人工智能", "机器学习", "深度学习", "神经网络", "区块链", "云计算"]
-        if any(term in data_lower for term in common_terms):
-            risks.append({
-                "type": "novelty_common_tech",
-                "severity": "medium",
-                "description": "技术方案包含通用技术术语，需要明确具体的创新实现细节",
+        matched_common_terms = [term for term in common_terms if term in data_lower]
+        if matched_common_terms:
+            signals.append({
+                "type": "common_technology_terms_present",
                 "category": "technical",
-                "mitigation": "重点描述与通用技术结合的具体创新点和技术效果",
+                "signal": "出现通用技术术语",
+                "matched_terms": matched_common_terms,
+                "candidate_action": "要求Agent明确与通用技术结合的具体创新实现和技术效果",
+                "rule_triggered": True,
             })
 
-        return risks
+        return signals
 
-    def _analyze_inventive_step_risks(self, tech_data: str) -> List[Dict]:
-        """分析创造性风险"""
-        risks = []
+    def _collect_inventive_step_signals(self, tech_data: str) -> List[Dict[str, Any]]:
         data_lower = tech_data.lower()
+        if "效果" in data_lower or "advantage" in data_lower or "有益" in data_lower:
+            return []
+        return [{
+            "type": "technical_effect_terms_absent",
+            "category": "technical",
+            "signal": "未发现技术效果相关关键词",
+            "candidate_action": "要求Agent补充具体技术效果和有益效果",
+            "rule_triggered": True,
+        }]
 
-        # 检查技术效果描述
-        if "效果" not in data_lower and "advantage" not in data_lower and "有益" not in data_lower:
-            risks.append({
-                "type": "inventive_step_no_effects",
-                "severity": "high",
-                "description": "缺少技术效果的描述，可能影响创造性评估",
-                "category": "technical",
-                "mitigation": "详细描述技术方案带来的具体技术效果和有益效果",
-            })
-
-        return risks
-
-    def _analyze_prior_art_risks(self, prior_art_refs: str) -> List[Dict]:
-        """分析现有技术风险"""
-        risks = []
-
+    def _collect_prior_art_signals(self, prior_art_refs: str) -> List[Dict[str, Any]]:
         try:
             refs = json.loads(prior_art_refs) if isinstance(prior_art_refs, str) else prior_art_refs
-            if isinstance(refs, list) and len(refs) > 5:
-                risks.append({
-                    "type": "prior_art_high_volume",
-                    "severity": "medium",
-                    "description": f"发现 {len(refs)} 篇相关现有技术，需要仔细甄别最接近的对比文件",
-                    "category": "search",
-                    "mitigation": "筛选最相关的3-5篇对比文件进行深度比对分析",
-                })
         except (json.JSONDecodeError, TypeError):
-            pass
+            return [{
+                "type": "prior_art_reference_parse_failed",
+                "category": "search",
+                "signal": "现有技术参考无法解析为JSON",
+                "candidate_action": "要求Agent确认检索输出格式",
+                "rule_triggered": True,
+            }]
 
-        return risks
+        if isinstance(refs, list) and len(refs) > 5:
+            return [{
+                "type": "many_prior_art_references",
+                "category": "search",
+                "signal": f"现有技术参考数量为 {len(refs)}",
+                "candidate_action": "要求Agent筛选最相关对比文件并做差异分析",
+                "rule_triggered": True,
+            }]
+        return []
 
-    def _analyze_support_risks(self, tech_data: str) -> List[Dict]:
-        """分析支持性风险（权利要求是否得到说明书支持）"""
-        risks = []
+    def _collect_support_signals(self, tech_data: str) -> List[Dict[str, Any]]:
         data_lower = tech_data.lower()
-
-        # 检查实施例数量
         embodiment_count = len(re.findall(r"实施例|embodiment", data_lower))
-        if embodiment_count < 2:
-            risks.append({
-                "type": "support_insufficient_embodiments",
-                "severity": "medium",
-                "description": "实施例数量可能不足，可能影响权利要求的支持性",
-                "category": "drafting",
-                "mitigation": "增加多个不同角度的实施例，覆盖权利要求的全部技术特征",
-            })
-
-        return risks
-
-    def _generate_risk_matrix(self, risks: List[Dict]) -> Dict[str, int]:
-        """生成风险矩阵统计"""
-        matrix = {
-            "critical": 0,
-            "high": 0,
-            "medium": 0,
-            "low": 0,
-        }
-        for risk in risks:
-            matrix[risk["severity"]] = matrix.get(risk["severity"], 0) + 1
-        return matrix
-
-    def _generate_mitigation_priorities(self, risks: List[Dict]) -> List[str]:
-        """生成缓解优先级建议"""
-        # 按严重程度排序
-        severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-        sorted_risks = sorted(risks, key=lambda r: severity_order.get(r["severity"], 99))
-
-        return [
-            f"[{risk['severity'].upper()}] {risk['description']} -> {risk['mitigation']}"
-            for risk in sorted_risks
-        ]
+        if embodiment_count >= 2:
+            return []
+        return [{
+            "type": "low_embodiment_marker_count",
+            "category": "drafting",
+            "signal": f"实施例关键词出现次数为 {embodiment_count}",
+            "candidate_action": "要求Agent检查是否需要补充不同角度的实施例",
+            "rule_triggered": True,
+        }]

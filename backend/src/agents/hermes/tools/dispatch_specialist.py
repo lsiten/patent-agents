@@ -286,8 +286,15 @@ class DispatchSpecialistTool(HermesTool):
                 }
 
             agent = create_ai_agent(profile_id=profile_id, callbacks=child_callbacks)
-            # AIAgent.run_conversation 是同步的，需要在线程中运行
-            result = await asyncio.to_thread(agent.run_conversation, full_prompt)
+            # AIAgent.run_conversation 是同步的，需要在线程中运行；必须有边界，
+            # 否则子 Agent 内部的 LLM 重试会把 CEO 调度链路长期挂住。
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(agent.run_conversation, full_prompt),
+                    timeout=240,
+                )
+            except asyncio.TimeoutError:
+                raise TimeoutError(f"{specialist['name']} 执行超过 240 秒")
 
             # 归一化结果为字符串
             if isinstance(result, dict):

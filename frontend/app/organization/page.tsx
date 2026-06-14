@@ -451,7 +451,7 @@ export default function OrganizationPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-surface p-6">
+      <div className="min-h-full bg-surface p-6">
         <Card className="p-12 text-center">
           <RefreshCw className="w-10 h-10 text-slate mx-auto mb-4 animate-spin" />
           <h3 className="text-lg font-medium text-ink mb-2">正在加载组织架构</h3>
@@ -462,7 +462,7 @@ export default function OrganizationPage() {
   }
 
   return (
-    <div className="min-h-screen bg-surface">
+    <div className="min-h-full bg-surface">
       <div className="max-w-7xl mx-auto p-6">
         {/* Header */}
         <div className="mb-6">

@@ -73,6 +73,7 @@ from .schemas import WorkflowEventResponse, OrgNodeResponse
 
 
 _EXPORTS_ROOT = Path(__file__).resolve().parents[2] / "exports"
+_HERMES_PROFILES_ROOT = Path(__file__).resolve().parents[2] / "hermes_home" / "profiles"
 
 
 def _get_hermes_agent_version() -> str | None:
@@ -588,6 +589,31 @@ async def restore_stores_from_db() -> None:
 def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
     _recover_context_from_export_artifacts(context)
     _sync_workflow_terminal_state(context)
+    agent_loop = _load_agent_loop_snapshot(context.task_id)
+    if not agent_loop:
+        try:
+            from src.core.agent_loop import build_patent_loop_snapshot
+
+            agent_loop = build_patent_loop_snapshot(
+                context,
+                str(getattr(context.current_phase, "value", context.current_phase)),
+            )
+        except Exception as e:
+            logger.warning(f"构建 Agent Loop 响应快照失败: {e}")
+            agent_loop = {}
+    sedimented_skills = _load_sedimented_skills(context.task_id)
+    if (
+        not sedimented_skills
+        and agent_loop
+        and str(getattr(context.current_phase, "value", context.current_phase)) in {"completed", "failed", "cancelled", "awaiting_user_decision"}
+    ):
+        try:
+            from src.agents.hermes.skill_learning import sediment_workflow_skills
+
+            sediment_workflow_skills(context, agent_loop)
+            sedimented_skills = _load_sedimented_skills(context.task_id)
+        except Exception as e:
+            logger.warning(f"回填 Hermes 技能沉淀失败: {e}")
 
     # 读取时归一化 — 确保旧数据也能适配前端格式
     req_norm = workflow_engine._normalize_phase_output("requirement_analysis", context.requirement_analysis or {})
@@ -643,7 +669,64 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
             if isinstance(context.metadata.get("quality_remediation"), dict)
             else None
         ),
+        agent_loop=agent_loop or None,
+        sedimented_skills=sedimented_skills,
     )
+
+
+def _load_agent_loop_snapshot(task_id: str) -> Dict[str, Any]:
+    path = _EXPORTS_ROOT / task_id / "loop_state.json"
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            data.setdefault("path", str(path))
+            return data
+    except Exception as e:
+        logger.warning(f"读取 Agent Loop 快照失败 {path}: {e}")
+    return {}
+
+
+def _load_sedimented_skills(task_id: str) -> List[Dict[str, Any]]:
+    """Return profile-local auto skills that contain a record for this task."""
+    results: List[Dict[str, Any]] = []
+    if not _HERMES_PROFILES_ROOT.exists():
+        return results
+
+    for profile_dir in _HERMES_PROFILES_ROOT.iterdir():
+        if not profile_dir.is_dir() or profile_dir.name == "system-config":
+            continue
+        skills_dir = profile_dir / "skills"
+        if not skills_dir.is_dir():
+            continue
+        for skill_dir in skills_dir.glob("auto-*"):
+            log_path = skill_dir / "references" / "learning-log.json"
+            skill_path = skill_dir / "SKILL.md"
+            if not log_path.is_file() or not skill_path.is_file():
+                continue
+            try:
+                records = json.loads(log_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(records, list):
+                continue
+            matched = [
+                record for record in records
+                if isinstance(record, dict) and str(record.get("task_id")) == task_id
+            ]
+            if not matched:
+                continue
+            latest = matched[-1]
+            results.append({
+                "agent_profile": profile_dir.name,
+                "skill": skill_dir.name,
+                "skill_path": str(skill_path),
+                "log_path": str(log_path),
+                "record": latest,
+            })
+
+    return sorted(results, key=lambda item: str(item.get("agent_profile", "")))
 
 
 def _load_latest_export_json(task_id: str, phase_dir: str) -> Dict[str, Any]:
@@ -732,6 +815,29 @@ def _phase_is_past(context: WorkflowContext, phase: WorkflowPhase) -> bool:
         return False
 
 
+def _extract_recovered_duration_seconds(output: Dict[str, Any]) -> float:
+    """Read persisted phase duration from exported artifacts when available."""
+    candidates: List[Any] = [
+        output.get("_phase_duration_seconds"),
+        output.get("duration_seconds"),
+    ]
+    metadata = output.get("metadata")
+    if isinstance(metadata, dict):
+        candidates.extend([
+            metadata.get("_phase_duration_seconds"),
+            metadata.get("duration_seconds"),
+        ])
+
+    for candidate in candidates:
+        try:
+            duration = float(candidate)
+        except (TypeError, ValueError):
+            continue
+        if duration >= 0:
+            return duration
+    return 0.0
+
+
 def _append_recovered_phase(
     context: WorkflowContext,
     phase: WorkflowPhase,
@@ -743,7 +849,7 @@ def _append_recovered_phase(
         PhaseResult(
             phase=phase,
             success=True,
-            duration_seconds=0,
+            duration_seconds=_extract_recovered_duration_seconds(output),
             output=output,
             warnings=["Recovered from exported artifacts"],
         )
@@ -1325,6 +1431,22 @@ def _agent_activity_from_workflow_event(event: Dict[str, Any]) -> Dict[str, Any]
         activity_type = "thinking"
         message = message or thought
         data = {"message": thought}
+    elif raw_type == "agent.content":
+        content = str(event.get("content") or message or "")
+        activity_type = "content"
+        message = message or content
+        data = {"message": content, "phase": event.get("phase")}
+    elif raw_type == "agent.skill_sedimented":
+        payload = event.get("data") if isinstance(event.get("data"), dict) else {}
+        skill = str(event.get("skill") or payload.get("skill") or "")
+        activity_type = "content"
+        message = message or f"已沉淀技能：{skill}"
+        data = {
+            "message": message,
+            "skill": skill,
+            "skill_path": event.get("skill_path") or payload.get("skill_path"),
+            "log_path": event.get("log_path") or payload.get("log_path"),
+        }
     elif raw_type.startswith("workflow."):
         activity_type = "status"
         message = message or raw_type
@@ -1865,6 +1987,32 @@ async def get_workflow(task_id: str):
         if not context:
             raise HTTPException(status_code=404, detail="工作流不存在")
         return _workflow_context_to_response(context)
+
+
+@router.get("/workflows/{task_id}/loop")
+async def get_workflow_loop(task_id: str):
+    """获取 Agent Loop 快照和本任务触发的 Hermes 技能沉淀。"""
+    async with workflow_lock:
+        context = workflow_engine.get_workflow(task_id)
+        if not context:
+            raise HTTPException(status_code=404, detail="工作流不存在")
+        snapshot = _load_agent_loop_snapshot(task_id)
+        if not snapshot:
+            try:
+                from src.core.agent_loop import build_patent_loop_snapshot
+
+                snapshot = build_patent_loop_snapshot(
+                    context,
+                    str(getattr(context.current_phase, "value", context.current_phase)),
+                )
+            except Exception as exc:
+                logger.warning(f"构建 Agent Loop 快照失败: {exc}")
+                snapshot = {}
+        return {
+            "task_id": task_id,
+            "agent_loop": snapshot,
+            "sedimented_skills": _load_sedimented_skills(task_id),
+        }
 
 
 @router.get("/workflows/{task_id}/messages")

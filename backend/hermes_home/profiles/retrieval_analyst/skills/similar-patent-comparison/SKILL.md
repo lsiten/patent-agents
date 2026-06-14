@@ -40,3 +40,9 @@ metadata:
 ## 工具使用
 
 - `similarity_analyzer` - 分析技术方案与现有专利的相似度
+
+## Agent 与工具边界
+
+- `similarity_analyzer` 返回的相似度只是候选排序依据。
+- `key_similarities`、`key_differences` 和 `risk_level` 必须由检索分析 Agent 对照权利要求/摘要/说明书公开内容后判断。
+- `similar_patents` 中每条记录必须来自真实检索结果，包含专利号、来源、申请人和公开日；缺失关键元数据时应降级为证据缺口而不是补造。

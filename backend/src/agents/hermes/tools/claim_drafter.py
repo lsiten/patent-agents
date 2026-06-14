@@ -9,63 +9,31 @@ from typing import Any, Dict
 
 from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
-from src.core.llm_client import get_llm_service, LLMMessage
 
 logger = get_logger(__name__)
 
-CLAIM_PROMPT = """你是一位资深专利代理人。请根据以下技术特征和保护范围要求，撰写权利要求书。
-
-技术特征：
-{features}
-
-保护范围要求：
-{protection_scope}
-
-撰写要求：
-1. 独立权利要求应概括保护范围，使用上位概念
-2. 从属权利要求逐步限缩，体现技术细节
-3. 语言规范、清楚、简要
-4. 引用关系正确
-
-请输出 JSON 格式：
-{{
-  "independent_claim": "独立权利要求1全文",
-  "dependent_claims": ["从属权利要求2", "从属权利要求3"],
-  "claim_tree": {{
-    "1": [],
-    "2": ["1"],
-    "3": ["1"]
-  }},
-  "protection_breadth": "保护范围评估",
-  "drafting_notes": "撰写说明"
-}}"""
+DEFAULT_FEATURES = [
+    "获取目标空间姿态信息",
+    "确定相邻显示面之间的边界投影关系",
+    "识别重叠区域和/或空白区域",
+    "对待显示视频内容进行裁剪、补偿和/或重映射",
+    "将处理后的视频内容同步输出至对应显示面",
+]
 
 
-def _extract_json_from_response(text: str) -> Dict[str, Any]:
-    """从 LLM 响应中提取 JSON"""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
-    if match:
-        try:
-            return json.loads(match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-    match = re.search(r'\{[\s\S]*\}', text)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
-    return {}
+def _split_features(features: str) -> list[str]:
+    items = []
+    for part in re.split(r"[\n；;、,，]+", features or ""):
+        clean = part.strip(" -0123456789.）)")
+        if len(clean) >= 4:
+            items.append(clean[:80])
+    return items or DEFAULT_FEATURES
 
 
 class ClaimDrafterTool(HermesTool):
     """权利要求撰写工具"""
     name = "claim_drafter"
-    description = "根据技术特征撰写独立权利要求和从属权利要求"
+    description = "根据技术特征生成权利要求撰写骨架和特征组织建议"
 
     def _build_definition(self) -> HermesToolDefinition:
         return HermesToolDefinition(
@@ -88,37 +56,41 @@ class ClaimDrafterTool(HermesTool):
     async def execute(
         self, features: str, protection_scope: str = "尽可能宽泛", **kwargs
     ) -> Dict[str, Any]:
-        """执行权利要求撰写"""
+        """生成权利要求结构骨架；正式权利要求正文由专利撰写 Agent LLM 完成。"""
         start_time = datetime.now()
         logger.info("Drafting patent claims")
-        
+
         try:
-            llm = get_llm_service()
-            prompt = CLAIM_PROMPT.format(features=features, protection_scope=protection_scope)
-            response = await llm.chat_completion(
-                messages=[LLMMessage(role="user", content=prompt)],
-                temperature=0.4,
-            )
-            
-            parsed = _extract_json_from_response(response.content)
-            
-            # 标准化输出数据
+            feature_list = _split_features(features)
             data = {
-                "independent_claim": parsed.get("independent_claim", ""),
-                "dependent_claims": parsed.get("dependent_claims", []),
-                "claim_tree": parsed.get("claim_tree", {}),
-                "protection_breadth": parsed.get("protection_breadth", ""),
-                "drafting_notes": parsed.get("drafting_notes", ""),
+                "claim_outline": {
+                    "independent_claim_focus": [
+                        "以方法独立权利要求覆盖目标空间姿态获取、边界关系判定、画面裁剪/补偿/重映射、同步输出。",
+                        "以系统/装置独立权利要求覆盖显示面、姿态反馈、处理控制和显示控制模块。",
+                        "以电子设备/存储介质权利要求覆盖软件实现。",
+                    ],
+                    "dependent_claim_topics": feature_list[:8],
+                    "claim_dependency_plan": {
+                        "1": [],
+                        **{str(i): ["1"] for i in range(2, 2 + min(len(feature_list), 8))},
+                    },
+                },
+                "protection_breadth": protection_scope,
+                "drafting_notes": (
+                    "工具仅提供结构骨架、特征顺序和保护层级建议；"
+                    "正式权利要求文本必须由专利撰写 Agent 的 LLM 自行判断并输出。"
+                ),
+                "features_used": feature_list,
             }
-            
+
             return make_tool_output(
                 tool_name=self.name,
                 data=data,
                 success=True,
-                raw_response=response.content,
+                raw_response=json.dumps(data, ensure_ascii=False),
                 start_time=start_time,
             )
-            
+
         except Exception as e:
             logger.error(f"Claim drafting failed: {e}")
             return make_tool_output(

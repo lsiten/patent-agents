@@ -113,6 +113,13 @@ def _handle_scenario_miner(args: Dict[str, Any], **kw) -> str:
     return _json_result(result)
 
 
+def _handle_transcript_sanitizer(args: Dict[str, Any], **kw) -> str:
+    from src.agents.hermes.tools.transcript_sanitizer import TranscriptSanitizerTool
+    tool = TranscriptSanitizerTool()
+    result = _run_async(tool.execute(**args))
+    return _json_result(result)
+
+
 def _handle_patent_search(args: Dict[str, Any], **kw) -> str:
     from src.agents.hermes.tools.patent_search import PatentSearchTool
     tool = PatentSearchTool()
@@ -346,6 +353,22 @@ PATENT_TOOL_DEFINITIONS = [
         },
         "handler": _handle_scenario_miner,
         "emoji": "💡",
+    },
+    {
+        "name": "transcript_sanitizer",
+        "schema": {
+            "name": "transcript_sanitizer",
+            "description": "清洗交底逐字稿中的时间戳、说话人、会议格式和口语噪声，保留技术事实",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "原始技术交底文本或逐字稿内容"},
+                },
+                "required": ["text"],
+            },
+        },
+        "handler": _handle_transcript_sanitizer,
+        "emoji": "🧹",
     },
     {
         "name": "patent_search",

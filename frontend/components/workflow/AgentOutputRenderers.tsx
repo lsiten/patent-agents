@@ -27,6 +27,7 @@ import { useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { workflowApi } from '@/lib/api';
 import { normalizeQualityScoreForDisplay } from '@/lib/quality-review-score';
 import { getRetrievalPatentReferences } from '@/lib/retrieval-report';
@@ -116,6 +117,99 @@ function textListItem(value: unknown, keys: string[]): string {
     return parts.join('：');
   }
   return '';
+}
+
+function stringList(value: unknown, keys: string[] = []): string[] {
+  return arr(value)
+    .map((item) => textListItem(item, keys) || complianceIssueLabel(item) || str(item))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function complianceIssueLabel(issue: unknown): string {
+  if (typeof issue === 'string') return issue;
+  if (!isRecord(issue)) return '';
+  const location = str(issue.location || issue.section);
+  const description = str(issue.issue || issue.description || issue.message);
+  const suggestion = str(issue.suggestion || issue.fix || issue.recommendation);
+  return [
+    location ? `【${location}】` : '',
+    description,
+    suggestion ? `建议：${suggestion}` : '',
+  ].filter(Boolean).join(' ');
+}
+
+function collectComplianceIssues(data: Record<string, unknown>): string[] {
+  const reports = [
+    data.manual_compliance,
+    data.hard_rule_report,
+    data.manual_rule_report,
+    data.claim_rules,
+    data.document_rules,
+  ].filter(isRecord);
+
+  const issues: string[] = [];
+  reports.forEach((report) => {
+    stringList(report.issues).forEach((issue) => issues.push(issue));
+    if (isRecord(report.claim_rules)) {
+      stringList(report.claim_rules.issues).forEach((issue) => issues.push(issue));
+    }
+    if (isRecord(report.document_rules)) {
+      stringList(report.document_rules.issues).forEach((issue) => issues.push(issue));
+    }
+    stringList(report.high_priority_issues).forEach((issue) => issues.push(issue));
+  });
+
+  return Array.from(new Set(issues.map((issue) => issue.trim()).filter(Boolean)));
+}
+
+function CompliancePanel({ data }: { data: Record<string, unknown> }) {
+  const parsed = unwrapAgentOutput(data);
+  const issues = collectComplianceIssues(parsed);
+  const manualCompliance = isRecord(parsed.manual_compliance) ? parsed.manual_compliance : {};
+  const claimRules = isRecord(manualCompliance.claim_rules) ? manualCompliance.claim_rules : {};
+  const documentRules = isRecord(manualCompliance.document_rules) ? manualCompliance.document_rules : {};
+  const claimMetrics = isRecord(claimRules.metrics) ? claimRules.metrics : {};
+  const documentMetrics = isRecord(documentRules.metrics) ? documentRules.metrics : {};
+
+  if (issues.length === 0 && Object.keys(claimMetrics).length === 0 && Object.keys(documentMetrics).length === 0) {
+    return null;
+  }
+
+  return (
+    <section>
+      <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+        <Shield className="w-4 h-4 text-brand-green-dark" />
+        规范硬规则检查
+      </h4>
+      <div className="rounded-lg border border-hairline bg-surface-feature p-md">
+        <div className="mb-sm flex flex-wrap gap-sm">
+          {Object.entries(claimMetrics).map(([key, value]) => (
+            <Badge key={`claim-${key}`} variant="gray">
+              {key}: {String(value)}
+            </Badge>
+          ))}
+          {Object.entries(documentMetrics).map(([key, value]) => (
+            <Badge key={`doc-${key}`} variant="gray">
+              {key}: {Array.isArray(value) ? value.join(', ') : String(value)}
+            </Badge>
+          ))}
+        </div>
+        {issues.length > 0 ? (
+          <ul className="space-y-xs">
+            {issues.map((issue, index) => (
+              <li key={index} className="flex items-start gap-2 text-body-sm text-red-700">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-accent-orange" />
+                <span>{issue}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-body-sm text-brand-green-dark">本轮未发现可机械校验的硬规则问题。</p>
+        )}
+      </div>
+    </section>
+  );
 }
 
 function ratingBadge(rating: unknown) {
@@ -221,6 +315,13 @@ export function RequirementAnalysisView({ data }: RequirementAnalysisViewProps) 
   const gaps = arr(parsedData.information_gaps)
     .map((gap) => textListItem(gap, ['gap', 'suggestion', 'importance']))
     .filter(Boolean);
+  const sanitizedInput = isRecord(parsedData.sanitized_disclosure)
+    ? str(parsedData.sanitized_disclosure.cleaned_text)
+    : str(parsedData.cleaned_text);
+  const approvedTerms = stringList(parsedData.approved_terms);
+  const forbiddenTerms = stringList(parsedData.forbidden_terms);
+  const claimSkeleton = stringList(parsedData.claim_skeleton, ['step', 'action', 'output', 'description']);
+  const drawingPlan = stringList(parsedData.drawing_plan, ['figure_number', 'title', 'purpose', 'description']);
 
   return (
     <div className="space-y-lg">
@@ -361,6 +462,61 @@ export function RequirementAnalysisView({ data }: RequirementAnalysisViewProps) 
           </ul>
         </section>
       )}
+
+      {(sanitizedInput || approvedTerms.length > 0 || forbiddenTerms.length > 0) && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <Shield className="w-4 h-4 text-brand-green-dark" />
+            交底清洗与术语边界
+          </h4>
+          {sanitizedInput && (
+            <p className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg bg-surface-feature p-md text-body-sm text-steel">
+              {sanitizedInput}
+            </p>
+          )}
+          <div className="mt-sm flex flex-wrap gap-sm">
+            {approvedTerms.map((term, i) => (
+              <Badge key={`approved-${i}`} variant="green-soft">推荐：{term}</Badge>
+            ))}
+            {forbiddenTerms.map((term, i) => (
+              <Badge key={`forbidden-${i}`} variant="orange">禁用：{term}</Badge>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {claimSkeleton.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <FileText className="w-4 h-4 text-brand-green-dark" />
+            权利要求骨架
+          </h4>
+          <ol className="space-y-xs list-decimal list-inside">
+            {claimSkeleton.map((step, i) => (
+              <li key={i} className="text-body-sm text-steel">{step}</li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {drawingPlan.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <FileText className="w-4 h-4 text-brand-green-dark" />
+            附图计划
+          </h4>
+          <ul className="space-y-xs">
+            {drawingPlan.map((drawing, i) => (
+              <li key={i} className="text-body-sm text-steel flex items-start gap-2">
+                <CheckCircle className="w-4 h-4 text-brand-green-dark flex-shrink-0 mt-0.5" />
+                {drawing}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <CompliancePanel data={parsedData} />
     </div>
   );
 }
@@ -791,6 +947,8 @@ export function PatentDraftView({ data, taskId, title }: PatentDraftViewProps) {
           </div>
         </section>
       )}
+
+      <CompliancePanel data={parsedData} />
     </div>
   );
 }
@@ -876,6 +1034,8 @@ export function QualityReviewView({ data, roundIndex }: QualityReviewViewProps) 
         </div>
       </section>
 
+      <CompliancePanel data={parsedData} />
+
       {/* 问题列表 */}
       {allIssues.length > 0 && (
         <section>
@@ -943,20 +1103,85 @@ export function MultiRoundView({ rounds, renderRound, label }: MultiRoundViewPro
   }
 
   return (
-    <div className="space-y-xl">
+    <Tabs defaultValue="round-0" className="min-w-0">
+      <TabsList variant="pill" className="mb-md max-w-full overflow-x-auto pb-1">
+        {rounds.map((round, index) => {
+          const meta = isRecord(round.__round_meta) ? round.__round_meta : {};
+          const success = meta.success !== false;
+          return (
+            <TabsTrigger
+              key={`tab-${index}`}
+              value={`round-${index}`}
+              variant="pill"
+              className="flex-shrink-0"
+            >
+              {label}第 {index + 1} 轮
+              <span className={success ? 'ml-2 text-brand-green-dark' : 'ml-2 text-red-500'}>
+                {success ? '已完成' : '有问题'}
+              </span>
+            </TabsTrigger>
+          );
+        })}
+      </TabsList>
+
       {rounds.map((round, index) => (
-        <div key={index} className="relative">
-          {index > 0 && (
-            <div className="absolute -top-4 left-0 right-0 border-t border-dashed border-hairline-strong" />
-          )}
-          <div className="mb-md">
-            <Badge variant="green-soft">
-              {label} 第 {index + 1} 轮
-            </Badge>
-          </div>
+        <TabsContent key={`content-${index}`} value={`round-${index}`} className="pt-0">
+          <RoundMetaHeader round={round} index={index} label={label} />
           {renderRound(round, index)}
-        </div>
+        </TabsContent>
       ))}
+    </Tabs>
+  );
+}
+
+function RoundMetaHeader({
+  round,
+  index,
+  label,
+}: {
+  round: Record<string, unknown>;
+  index: number;
+  label: string;
+}) {
+  const meta = isRecord(round.__round_meta) ? round.__round_meta : {};
+  const success = meta.success !== false;
+  const duration = num(meta.duration_seconds);
+  const issues = arr(meta.issues).map((item) => str(item)).filter(Boolean);
+  const warnings = arr(meta.warnings).map((item) => str(item)).filter(Boolean);
+
+  return (
+    <div className="mb-md rounded-lg border border-hairline bg-surface p-md">
+      <div className="flex flex-wrap items-center gap-sm">
+        <Badge variant={success ? 'green-soft' : 'red-soft'}>
+          {label}第 {index + 1} 轮
+        </Badge>
+        <Badge variant="gray">
+          {success ? '已完成' : '需处理'}
+        </Badge>
+        {duration !== null && (
+          <span className="text-caption text-steel">
+            用时 {duration.toFixed(2)} 秒
+          </span>
+        )}
+      </div>
+      {issues.length > 0 && (
+        <div className="mt-sm space-y-1">
+          {issues.map((issue, issueIndex) => (
+            <p key={issueIndex} className="text-body-sm text-red-700">
+              {issue}
+            </p>
+          ))}
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div className="mt-sm space-y-1">
+          {warnings.map((warning, warningIndex) => (
+            <p key={warningIndex} className="text-body-sm text-orange-700">
+              {warning}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

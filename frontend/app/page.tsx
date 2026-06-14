@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 
 export default function Home() {
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex flex-col">
+    <div className="flex min-h-full flex-col">
       {/* Hero Section */}
       <section className="flex-1 flex items-center justify-center px-6 py-20">
         <div className="max-w-3xl mx-auto text-center space-y-8">

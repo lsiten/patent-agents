@@ -514,6 +514,17 @@ function ChatPageContent() {
     return () => clearTimeout(timer);
   }, [messages.length, activeConvId, isLoading]);
 
+  useLayoutEffect(() => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+    if (!input.trim()) {
+      textarea.style.height = '';
+      return;
+    }
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
+  }, [input, activeConvId]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
@@ -1517,7 +1528,7 @@ function ChatPageContent() {
             </div>
           )}
           <div
-            className="flex min-h-full w-full min-w-0 flex-col space-y-6 px-4 pt-6 sm:px-6 lg:px-8"
+            className="flex min-h-full w-full min-w-0 flex-col justify-end gap-6 px-4 pt-6 sm:px-6 lg:px-8"
             style={{
               paddingBottom: `calc(${composerHeight}px + env(safe-area-inset-bottom) + 1rem)`,
             }}
@@ -1936,8 +1947,12 @@ function ChatPageContent() {
                 value={input}
                 onChange={(e) => {
                   setInput(e.target.value);
+                  if (!e.target.value.trim()) {
+                    e.target.style.height = '';
+                    return;
+                  }
                   e.target.style.height = 'auto';
-                  e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
+                  e.target.style.height = Math.min(e.target.scrollHeight, 128) + 'px';
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {

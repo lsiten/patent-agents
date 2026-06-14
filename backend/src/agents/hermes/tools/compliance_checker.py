@@ -9,57 +9,11 @@ from typing import Any, Dict
 
 from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
-from src.core.llm_client import get_llm_service, LLMMessage
+from src.core.patent_compliance import validate_patent_document_structure
 
 logger = get_logger(__name__)
 
-COMPLIANCE_PROMPT = """你是一位专利形式审查专家。请检查以下专利文件的形式合规性。
-
-专利文件内容：
-{patent_document}
-
-检查项目包括：
-1. 格式规范（编号、标点、段落）
-2. 术语一致性
-3. 引用关系正确性
-4. 必要组成部分完整性
-5. 附图标记对应关系
-
-请输出 JSON 格式：
-{{
-  "compliance_issues": [
-    {{
-      "severity": "critical/high/medium/low",
-      "location": "问题位置",
-      "issue": "问题描述",
-      "suggestion": "修改建议"
-    }}
-  ],
-  "overall_compliance": "pass/conditional_pass/fail",
-  "score": 85,
-  "summary": "形式审查总结"
-}}"""
-
-
-def _extract_json_from_response(text: str) -> Dict[str, Any]:
-    """从 LLM 响应中提取 JSON"""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
-    if match:
-        try:
-            return json.loads(match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-    match = re.search(r'\{[\s\S]*\}', text)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
-    return {}
+REQUIRED_SECTIONS = ["技术领域", "背景技术", "发明内容", "附图说明", "具体实施方式", "权利要求书", "摘要"]
 
 
 class ComplianceCheckerTool(HermesTool):
@@ -81,39 +35,56 @@ class ComplianceCheckerTool(HermesTool):
         )
 
     async def execute(self, patent_document: str, **kwargs) -> Dict[str, Any]:
-        """执行形式合规检查"""
+        """执行形式合规检查：规则化检查，不调用 LLM。"""
         start_time = datetime.now()
         logger.info("Checking formal compliance")
-        
+
         try:
-            llm = get_llm_service()
-            prompt = COMPLIANCE_PROMPT.format(patent_document=patent_document)
-            response = await llm.chat_completion(
-                messages=[LLMMessage(role="user", content=prompt)],
-                temperature=0.2,
+            text = patent_document or ""
+            issues = []
+            for section in REQUIRED_SECTIONS:
+                if section not in text:
+                    issues.append({"severity": "high", "location": "全文", "issue": f"缺少{section}章节", "suggestion": f"补充{section}。"})
+            if re.search(r"[\u4e00-\u9fa5A-Za-z]+?\(\d{2}:\d{2}:\d{2}\)[:：]", text):
+                issues.append({"severity": "critical", "location": "正文", "issue": "存在逐字稿说话人/时间戳格式", "suggestion": "删除对话格式，只保留提炼后的专利技术内容。"})
+            duplicate_figs = re.findall(r"图(\d+)\s*图\1", text)
+            for fig in sorted(set(duplicate_figs)):
+                issues.append({"severity": "high", "location": f"图{fig}", "issue": f"图号重复为“图{fig} 图{fig}”", "suggestion": "图题只保留一次图号。"})
+            figure_refs = set(re.findall(r"图(\d+)", text))
+            if "附图说明" in text and not figure_refs:
+                issues.append({"severity": "medium", "location": "附图说明", "issue": "存在附图说明章节但未发现图号", "suggestion": "补充附图编号和说明。"})
+            manual_report = validate_patent_document_structure(
+                text,
+                drawings=kwargs.get("drawings") if isinstance(kwargs.get("drawings"), list) else None,
             )
-            
-            parsed = _extract_json_from_response(response.content)
-            
-            # 标准化输出数据
+            for issue in manual_report.get("issues", []):
+                issues.append({
+                    "severity": issue.get("severity", "medium"),
+                    "location": issue.get("location", "全文"),
+                    "issue": issue.get("issue") or issue.get("description", ""),
+                    "suggestion": issue.get("suggestion", ""),
+                    "target_agent": issue.get("target_agent", "patent_writer"),
+                })
+            score = max(0, 100 - sum(25 if i["severity"] == "critical" else 15 if i["severity"] == "high" else 8 for i in issues))
+            overall = "pass" if score >= 85 else ("conditional_pass" if score >= 70 else "fail")
             data = {
-                "compliance_issues": parsed.get("compliance_issues", []),
-                "format_issues": [i for i in parsed.get("compliance_issues", []) 
-                                 if i.get("severity") in ["critical", "high"]],
-                "terminology_issues": [],  # 可从 issues 中按类型筛选
-                "overall_compliance": parsed.get("overall_compliance", "unknown"),
-                "score": parsed.get("score", 0),
-                "summary": parsed.get("summary", ""),
+                "compliance_issues": issues,
+                "format_issues": [i for i in issues if i.get("severity") in ["critical", "high"]],
+                "terminology_issues": [],
+                "manual_rule_report": manual_report,
+                "overall_compliance": overall,
+                "score": score,
+                "summary": "规则化形式检查完成；最终结论由质量审查 Agent 综合判定。",
             }
-            
+
             return make_tool_output(
                 tool_name=self.name,
                 data=data,
                 success=True,
-                raw_response=response.content,
+                raw_response=json.dumps(data, ensure_ascii=False),
                 start_time=start_time,
             )
-            
+
         except Exception as e:
             logger.error(f"Compliance check failed: {e}")
             return make_tool_output(
