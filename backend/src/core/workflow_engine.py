@@ -666,7 +666,10 @@ class PatentWorkflowEngine:
                         context_data,
                         event_callback=event_callback,
                     )
-                    context_data = self._apply_patent_manual_normalization(context_data)
+                    context_data = self._apply_patent_manual_normalization(
+                        context_data,
+                        fallback_title=context.title,
+                    )
                     context_data = await self._refresh_working_draft_docx(
                         context,
                         context_data,
@@ -917,15 +920,41 @@ class PatentWorkflowEngine:
                             {"from_agent": "CEO Agent", "to_agent": "专利撰写 Agent", "task_description": revision_prompt[:300]})
 
                     try:
-                        context_data = await self._generate_patent_in_sections(
-                            service,
-                            "patent.writer.v1",
-                            revision_prompt,
-                            context,
-                            event_callback=event_callback,
+                        context_data = await asyncio.wait_for(
+                            self._generate_patent_in_sections(
+                                service,
+                                "patent.writer.v1",
+                                revision_prompt,
+                                context,
+                                event_callback=event_callback,
+                            ),
+                            timeout=int(context.metadata.get("writer_revision_timeout_seconds", 420) or 420),
                         )
                         agent_text = json.dumps(context_data, ensure_ascii=False)[:500]
                         agent_tool_results = []
+                    except asyncio.TimeoutError:
+                        timeout_seconds = int(
+                            context.metadata.get("writer_revision_timeout_seconds", 420) or 420
+                        )
+                        self._logger.warning(
+                            f"Patent writer revision timed out after {timeout_seconds}s; marking draft failed",
+                            task_id=context.task_id,
+                        )
+                        agent_text = ""
+                        agent_tool_results = []
+                        context_data = {
+                            "_agent_failed": True,
+                            "_incomplete_output": True,
+                            "_agent_error": (
+                                f"专利撰写 Agent 修正第{context.iteration_count}轮超过 "
+                                f"{timeout_seconds}s 未完成，不能继续生成最终DOCX。"
+                            ),
+                            "claims": {},
+                            "description": {},
+                            "abstract": "",
+                            "drawings": [],
+                            "docx_path": "",
+                        }
                     except Exception as exc:
                         self._logger.warning(
                             f"Patent writer revision failed; marking draft for Agent-led retry: {exc}",
@@ -950,10 +979,19 @@ class PatentWorkflowEngine:
                             {"agent_name": "专利撰写 Agent", "content": agent_text[:500] if agent_text else "", "phase": "patent_writing"})
 
                     context_data = self._normalize_phase_output("patent_draft", context_data)
+                    if not isinstance(context_data, dict):
+                        context_data = {
+                            "_agent_failed": True,
+                            "_incomplete_output": True,
+                            "_agent_error": "专利撰写 Agent 修正结果不是结构化对象。",
+                            "claims": {},
+                            "description": {},
+                            "abstract": "",
+                            "drawings": [],
+                            "docx_path": "",
+                        }
                     context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
-                    if not isinstance(context_data, dict) or context_data.get("_agent_failed") is True:
-                        context_data = context.patent_draft if isinstance(context.patent_draft, dict) else {}
-                    if isinstance(context_data, dict):
+                    if isinstance(context_data, dict) and context_data.get("_agent_failed") is not True:
                         context_data = self._apply_review_suggestions_to_draft(
                             context,
                             context_data,
@@ -966,7 +1004,10 @@ class PatentWorkflowEngine:
                             context_data,
                             event_callback=event_callback,
                         )
-                        context_data = self._apply_patent_manual_normalization(context_data)
+                        context_data = self._apply_patent_manual_normalization(
+                            context_data,
+                            fallback_title=context.title,
+                        )
                         context_data = await self._refresh_working_draft_docx(
                             context,
                             context_data,
@@ -1181,7 +1222,10 @@ class PatentWorkflowEngine:
                     from src.agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
 
                     draft = context.patent_draft
-                    draft = self._apply_patent_manual_normalization(draft)
+                    draft = self._apply_patent_manual_normalization(
+                        draft,
+                        fallback_title=context.title,
+                    )
                     context.patent_draft = draft
                     claims_data = draft.get("claims", {})
                     description_data = draft.get("description", {})
@@ -2584,11 +2628,19 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             normalized.append(drawing)
         return normalized
 
-    def _apply_patent_manual_normalization(self, draft: Dict[str, Any]) -> Dict[str, Any]:
+    def _apply_patent_manual_normalization(
+        self,
+        draft: Dict[str, Any],
+        fallback_title: str = "",
+    ) -> Dict[str, Any]:
         """Apply deterministic manual rules and attach objective compliance signals."""
         if not isinstance(draft, dict):
             return draft
         normalized = dict(draft)
+        if not str(normalized.get("title") or normalized.get("patent_title") or "").strip():
+            title = str(fallback_title or "").strip()
+            if title:
+                normalized["title"] = title
         claims = normalized.get("claims") or {}
         if isinstance(claims, dict):
             normalized["claims"] = normalize_claims_payload_linebreaks(claims)
@@ -2755,81 +2807,6 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         repaired["_writer_agent_recovered"] = True
         return repaired
 
-    def _build_deterministic_quality_review(
-        self,
-        context: WorkflowContext,
-        reason: str = "",
-    ) -> Dict[str, Any]:
-        """Build a non-approving review result when the reviewer LLM is unavailable.
-
-        Quality review is a required expert capability. A local heuristic may point out
-        obvious issues, but it must never approve a patent document or unblock DOCX
-        generation when the real reviewer failed or timed out.
-        """
-        draft = context.patent_draft if isinstance(context.patent_draft, dict) else {}
-        issues = self._reviewable_content_issues(draft)
-        if reason:
-            issues = [f"quality_reviewer_unavailable:{reason[:180]}"] + issues
-        else:
-            issues = ["quality_reviewer_unavailable"] + issues
-        severity = "critical"
-
-        def issue_payload(code: str) -> Dict[str, str]:
-            drawing_issue = "drawing" in code or "图" in code
-            return {
-                "severity": "critical" if drawing_issue else severity,
-                "location": "附图" if drawing_issue else "专利申请文件",
-                "description": f"本地审查发现问题：{code}",
-                "suggestion": (
-                    "由专利撰写 Agent 调用生图工具补齐附图并保持说明书图号一致。"
-                    if drawing_issue
-                    else "由专利撰写 Agent 补齐对应章节后重新审查。"
-                ),
-            }
-
-        formal_issues = [issue_payload(code) for code in issues if "drawing" not in code and "图" not in code]
-        drawing_issues = [issue_payload(code) for code in issues if "drawing" in code or "图" in code]
-        score = 0.0
-        notes = (
-            "质量审查 Agent 未产生可信审查结果，不能由本地规则代替通过。"
-            "需要 CEO 重新调度质量审查或修复导致审查失败的问题。"
-        )
-
-        return {
-            "recommendation": "revise",
-            "revision_priority": "critical",
-            "review_summary": {
-                "overall_score": score,
-                "overall_rating": "needs_revision",
-                "recommendation": "revise",
-                "reviewer_notes": notes,
-            },
-            "formal_compliance_review": {
-                "score": score,
-                "passed": False,
-                "issues": formal_issues,
-            },
-            "claims_review": {"issues": []},
-            "description_review": {"issues": []},
-            "consistency_review": {"issues": []},
-            "drawing_review": {
-                "score": 0.0,
-                "passed": False,
-                "issues": drawing_issues,
-                "checked_drawings": len(draft.get("drawings") or []) if isinstance(draft, dict) else 0,
-            },
-            "examination_risks": [
-                {
-                    "risk_type": "quality_gate",
-                    "likelihood": "high",
-                    "description": "质量审查 Agent 未完成，当前文档不能视为审查通过。",
-                    "mitigation_suggestion": "由 CEO 重新调度质量审查；若多次失败，应停留在待处理状态并展示错误。",
-                }
-            ],
-            "detailed_revision_suggestions": [],
-            "_deterministic_review": True,
-        }
-
     def _merge_manual_compliance_into_review(
         self,
         context: WorkflowContext,
@@ -2844,7 +2821,10 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         if not isinstance(review_report, dict):
             review_report = {}
         draft = (
-            self._apply_patent_manual_normalization(context.patent_draft)
+            self._apply_patent_manual_normalization(
+                context.patent_draft,
+                fallback_title=context.title,
+            )
             if isinstance(context.patent_draft, dict)
             else {}
         )
@@ -3489,6 +3469,33 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         final_response = ""
         last_failed_result: Optional[Dict[str, Any]] = None
 
+        def _preview(value: Any, limit: int = 220) -> str:
+            text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+            return text[:limit] + ("..." if len(text) > limit else "")
+
+        def _emit_writer_section_result(
+            section_key: str,
+            section_label: str,
+            content: Any,
+            extra: Optional[Dict[str, Any]] = None,
+        ) -> None:
+            if not event_callback:
+                return
+            preview = _preview(content)
+            event_callback(
+                "专利撰写 Agent",
+                "agent.content",
+                f"📝 {section_label}已生成" + (f"：{preview}" if preview else ""),
+                {
+                    "agent_name": "专利撰写 Agent",
+                    "phase": "patent_writing",
+                    "section": section_key,
+                    "section_label": section_label,
+                    "content_preview": preview,
+                    **(extra or {}),
+                },
+            )
+
         for writer_attempt in range(3):
             agent_result = await _run_agent_conversation(profile_id, task_prompt)
 
@@ -3546,10 +3553,25 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                             self._logger.info(
                                 f"Got claims from tool: {claims_count} claims"
                             )
+                            if claims_count:
+                                _emit_writer_section_result(
+                                    "claims",
+                                    "权利要求书",
+                                    claims_data.get("independent_claim", ""),
+                                    {"claims_count": claims_count},
+                                )
 
                         elif tool_name == "description_writer" and tool_content.get("success"):
                             section_type = tool_data.get("section_type", "")
                             content = tool_data.get("content", "")
+                            section_label = {
+                                "technical_field": "技术领域",
+                                "background": "背景技术",
+                                "summary": "发明内容",
+                                "drawings": "附图说明",
+                                "drawings_description": "附图说明",
+                                "detailed": "具体实施方式",
+                            }.get(str(section_type), str(section_type) or "说明书章节")
                             if section_type == "technical_field":
                                 description_data["technical_field"] = content
                             elif section_type == "background":
@@ -3561,17 +3583,37 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                             elif section_type == "detailed":
                                 description_data["detailed_description"] = content
                             self._logger.info(f"Got description section: {section_type}")
+                            if content:
+                                _emit_writer_section_result(
+                                    f"description.{section_type}",
+                                    section_label,
+                                    content,
+                                )
 
                         elif tool_name == "patent_docx_generator" and tool_content.get("success"):
                             docx_path = tool_data.get("file_path", "")
                             abstract_text = tool_data.get("abstract", "") or abstract_text
                             self._logger.info(f"DOCX generated: {docx_path}")
+                            if abstract_text:
+                                _emit_writer_section_result("abstract", "说明书摘要", abstract_text)
 
                         elif tool_name == "patent_drawing_generator" and tool_content.get("success"):
                             drawings = tool_data.get("drawings", [])
                             if isinstance(drawings, list):
                                 drawings_data.extend(item for item in drawings if isinstance(item, dict))
                             self._logger.info(f"Got patent drawings: {len(drawings_data)} drawings")
+                            if drawings_data:
+                                titles = [
+                                    str(item.get("figure_number") or item.get("title") or "").strip()
+                                    for item in drawings_data
+                                    if isinstance(item, dict)
+                                ]
+                                _emit_writer_section_result(
+                                    "drawings",
+                                    "专利附图",
+                                    "、".join(title for title in titles if title),
+                                    {"drawing_count": len(drawings_data)},
+                                )
 
                     except (json.JSONDecodeError, KeyError) as e:
                         self._logger.warning(f"Failed to parse tool result: {e}")
@@ -3593,6 +3635,15 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     normalized_claims = self._normalize_claims_payload(candidate_claims)
                     if normalized_claims.get("independent_claim"):
                         claims_data = normalized_claims
+                        _emit_writer_section_result(
+                            "claims",
+                            "权利要求书",
+                            normalized_claims.get("independent_claim", ""),
+                            {
+                                "claims_count": 1 + len(normalized_claims.get("dependent_claims") or []),
+                                "source": "agent_final_json",
+                            },
+                        )
 
                 candidate_description = agent_structured_output.get("description")
                 if isinstance(candidate_description, dict):
@@ -3607,13 +3658,44 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                         value = candidate_description.get(source_key)
                         if isinstance(value, str) and value.strip():
                             description_data[target_key] = value.strip()
+                            section_label = {
+                                "technical_field": "技术领域",
+                                "background_art": "背景技术",
+                                "summary_of_invention": "发明内容",
+                                "drawings_description": "附图说明",
+                                "detailed_description": "具体实施方式",
+                            }.get(target_key, "说明书章节")
+                            _emit_writer_section_result(
+                                f"description.{target_key}",
+                                section_label,
+                                value,
+                                {"source": "agent_final_json"},
+                            )
 
                 if isinstance(agent_structured_output.get("abstract"), str):
                     abstract_text = agent_structured_output["abstract"].strip() or abstract_text
+                    if abstract_text:
+                        _emit_writer_section_result(
+                            "abstract",
+                            "说明书摘要",
+                            abstract_text,
+                            {"source": "agent_final_json"},
+                        )
 
                 candidate_drawings = agent_structured_output.get("drawings")
                 if isinstance(candidate_drawings, list):
                     drawings_data = [item for item in candidate_drawings if isinstance(item, dict)]
+                    if drawings_data:
+                        _emit_writer_section_result(
+                            "drawings",
+                            "专利附图",
+                            "、".join(
+                                str(item.get("figure_number") or item.get("title") or "").strip()
+                                for item in drawings_data
+                                if isinstance(item, dict)
+                            ),
+                            {"drawing_count": len(drawings_data), "source": "agent_final_json"},
+                        )
 
             has_partial_content = bool(
                 claims_data
@@ -3773,10 +3855,27 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 if "abstract" in args:
                     abstract_text = args["abstract"]
             
-            # 如果仍然没有数据，回退到文本解析
             if not claims_data and not description_data:
-                self._logger.warning("No tool_call found, falling back to text parsing")
-                claims_data, description_data, abstract_text = self._parse_patent_from_text(final_response)
+                self._logger.warning(
+                    "Patent writer produced no structured tool or JSON result; marking draft incomplete"
+                )
+                return {
+                    "_agent_failed": True,
+                    "_incomplete_output": True,
+                    "_agent_error": "专利撰写 Agent 未返回可解析的结构化专利文件，不能由本地文本解析替代撰写结果。",
+                    "claims": {"independent_claim": "", "dependent_claims": []},
+                    "description": {
+                        "technical_field": "",
+                        "background_art": "",
+                        "summary_of_invention": "",
+                        "drawings_description": "",
+                        "detailed_description": "",
+                    },
+                    "abstract": "",
+                    "drawings": drawings_data,
+                    "docx_path": "",
+                    "full_response": final_response,
+                }
         
         # 组装为前端期望的结构化格式（不含 docx，待质量审查通过后生成）
         patent_result: Dict[str, Any] = {
@@ -3796,7 +3895,10 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             "docx_path": "",
             "full_response": final_response,
         }
-        patent_result = self._apply_patent_manual_normalization(patent_result)
+        patent_result = self._apply_patent_manual_normalization(
+            patent_result,
+            fallback_title=context.title,
+        )
 
         claims_count = 1 + len(patent_result["claims"]["dependent_claims"]) if patent_result["claims"]["independent_claim"] else 0
         sections_count = sum(1 for v in patent_result["description"].values() if v)
@@ -3885,11 +3987,13 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             structured = None
         parsed = structured or self._try_parse_json(text)
         if not isinstance(parsed, dict) or "raw_output" in parsed:
-            parsed_claims, parsed_description, parsed_abstract = self._parse_patent_from_text(text)
             parsed = {
-                "claims": parsed_claims,
-                "description": parsed_description,
-                "abstract": parsed_abstract,
+                "_agent_failed": True,
+                "_incomplete_output": True,
+                "_agent_error": "专利撰写 Agent 补齐结果不是有效 JSON，不能由本地文本解析替代。",
+                "claims": {},
+                "description": {},
+                "abstract": "",
             }
 
         repaired_claims = dict(claims_data or {})
@@ -4644,6 +4748,113 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     if refs:
                         data["prior_art_references"] = refs
 
+            # 6b. 真实检索工具常见字段 → prior_art_references
+            # 这里仅做结构归一，不生成或补造检索结论。
+            if not data.get("prior_art_references"):
+                candidate_items: List[Any] = []
+                for key in (
+                    "key_references",
+                    "references",
+                    "search_results",
+                    "patent_results",
+                    "retrieved_patents",
+                    "citations",
+                ):
+                    value = data.get(key)
+                    if isinstance(value, list):
+                        candidate_items.extend(value)
+                for nested_key in ("retrieval_results", "results"):
+                    nested = data.get(nested_key)
+                    if isinstance(nested, dict):
+                        for key in ("references", "results", "patents"):
+                            value = nested.get(key)
+                            if isinstance(value, list):
+                                candidate_items.extend(value)
+                    elif isinstance(nested, list):
+                        candidate_items.extend(nested)
+
+                refs = []
+                seen_ref_ids: set[str] = set()
+                for item in candidate_items:
+                    if isinstance(item, str):
+                        patent_id = item.strip()
+                        if not patent_id:
+                            continue
+                        source = ""
+                        ref = {
+                            "title": patent_id,
+                            "reference_id": patent_id,
+                            "source": source,
+                            "relevance": "medium",
+                            "abstract": "",
+                            "differences": "",
+                            "url": self._build_patent_url(patent_id, source),
+                            "applicant": "",
+                            "publication_date": "",
+                            "similarity_score": 0,
+                        }
+                    elif isinstance(item, dict):
+                        patent_id = str(
+                            item.get("reference_id")
+                            or item.get("patent_id")
+                            or item.get("patent_number")
+                            or item.get("publication_number")
+                            or item.get("document_id")
+                            or ""
+                        ).strip()
+                        title = str(item.get("title") or item.get("name") or patent_id).strip()
+                        if not patent_id and not title:
+                            continue
+                        source = str(item.get("source") or item.get("database") or "").strip()
+                        score = item.get("similarity_score", item.get("score", 0))
+                        risk = str(item.get("risk_level") or item.get("relevance") or "").strip()
+                        if not risk:
+                            if isinstance(score, (int, float)) and score >= 0.7:
+                                risk = "high"
+                            elif isinstance(score, (int, float)) and score >= 0.4:
+                                risk = "medium"
+                            else:
+                                risk = "low"
+                        differences = (
+                            item.get("key_differences")
+                            or item.get("differences")
+                            or item.get("distinguishing_features")
+                            or ""
+                        )
+                        if isinstance(differences, list):
+                            differences = "；".join(str(part) for part in differences if str(part).strip())
+                        applicant = (
+                            item.get("applicant")
+                            or item.get("assignee")
+                            or item.get("applicants")
+                            or ""
+                        )
+                        if isinstance(applicant, list):
+                            applicant = "、".join(str(part) for part in applicant if str(part).strip())
+                        ref = {
+                            "title": title,
+                            "reference_id": patent_id,
+                            "source": source,
+                            "relevance": risk,
+                            "abstract": item.get("abstract") or item.get("summary") or item.get("snippet") or "",
+                            "differences": differences,
+                            "url": item.get("url") or self._build_patent_url(patent_id, source),
+                            "applicant": applicant,
+                            "publication_date": item.get("publication_date") or item.get("publicationDate") or "",
+                            "similarity_score": score if isinstance(score, (int, float)) else 0,
+                            "matching_features": item.get("matching_features") or item.get("key_features") or [],
+                        }
+                    else:
+                        continue
+                    dedupe_key = str(ref.get("reference_id") or ref.get("title") or "")
+                    if dedupe_key in seen_ref_ids:
+                        continue
+                    seen_ref_ids.add(dedupe_key)
+                    refs.append(ref)
+                if refs:
+                    data["prior_art_references"] = refs
+                    data["similar_patents"] = refs
+
             # 7. 数据源字段: databases（顶层）→ retrieval_databases
             if "retrieval_databases" not in data:
                 dbs = data.get("databases")
@@ -4989,8 +5200,33 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 },
             )
 
-        review = self._build_deterministic_quality_review(context, reason=reason)
-        review = self._merge_manual_compliance_into_review(context, review)
+        review = {
+            "_agent_failed": True,
+            "failed": True,
+            "completed": False,
+            "_agent_error": reason,
+            "root_cause": "system_failure",
+            "recommendation": "revise",
+            "revision_priority": "critical",
+            "review_summary": {
+                "overall_score": 0.0,
+                "overall_rating": "needs_revision",
+                "recommendation": "revise",
+                "reviewer_notes": "质量审查 Agent 未返回可信审查结果，不能由本地规则或兜底审查替代通过。",
+            },
+            "formal_compliance_review": {"score": 0.0, "passed": False, "issues": []},
+            "claims_review": {"issues": []},
+            "description_review": {"issues": []},
+            "consistency_review": {"issues": []},
+            "drawing_review": {"issues": []},
+            "detailed_revision_suggestions": [
+                {
+                    "target": "quality_review",
+                    "issue": reason,
+                    "action": "重新调度质量审查 Agent；如连续失败，应暴露失败原因而不是生成最终 DOCX。",
+                }
+            ],
+        }
         return json.dumps(review, ensure_ascii=False)[:500], review
 
     async def _run_agent_stream(

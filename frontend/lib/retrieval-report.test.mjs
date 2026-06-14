@@ -86,3 +86,31 @@ test('normalizes similar_patents and preserves comparison fields', async () => {
   assert.deepEqual(references[0].differences, ['区别 B']);
   assert.equal(references[0].url, 'https://worldwide.espacenet.com/patent/search?q=EP1234567A1');
 });
+
+test('normalizes tool-style key_references and search_results', async () => {
+  const { getRetrievalPatentReferences } = await loadModule();
+  const references = getRetrievalPatentReferences({
+    key_references: [
+      {
+        publication_number: 'CN109876543A',
+        name: '多屏画面处理系统',
+        database: 'CNIPA',
+        assignee: '示例申请人',
+        publicationDate: '2024-05-01',
+        score: 76,
+        key_features: ['多屏显示', '画面映射'],
+        distinguishing_features: ['未公开姿态补偿'],
+      },
+    ],
+    search_results: ['US7654321B2'],
+  });
+
+  assert.equal(references.length, 2);
+  assert.equal(references[0].patentId, 'CN109876543A');
+  assert.equal(references[0].title, '多屏画面处理系统');
+  assert.equal(references[0].applicant, '示例申请人');
+  assert.equal(references[0].similarityScore, 0.76);
+  assert.deepEqual(references[0].similarities, ['多屏显示', '画面映射']);
+  assert.deepEqual(references[0].differences, ['未公开姿态补偿']);
+  assert.equal(references[1].patentId, 'US7654321B2');
+});

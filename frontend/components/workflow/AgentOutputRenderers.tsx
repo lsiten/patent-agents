@@ -139,6 +139,41 @@ function complianceIssueLabel(issue: unknown): string {
   ].filter(Boolean).join(' ');
 }
 
+const complianceMetricLabels: Record<string, string> = {
+  claim_count: '权利要求数量',
+  dependent_claim_count: '从属权利要求数量',
+  independent_step_count: '独权步骤数',
+  independent_length: '独权字数',
+  figure_references: '正文引用附图',
+  drawing_count: '已生成附图',
+  has_transcript_artifacts: '逐字稿残留',
+  has_markdown: 'Markdown残留',
+  title_length: '发明名称字数',
+  abstract_length: '摘要字数',
+  technical_field_length: '技术领域字数',
+  background_length: '背景技术字数',
+  summary_length: '发明内容字数',
+  drawings_description_length: '附图说明字数',
+  detailed_length: '具体实施方式字数',
+};
+
+function complianceMetricLabel(key: string): string {
+  return complianceMetricLabels[key] || key;
+}
+
+function complianceMetricValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.map((item) => String(item)).join('、') : '无';
+  }
+  if (typeof value === 'boolean') {
+    return value ? '是' : '否';
+  }
+  if (value === null || typeof value === 'undefined') {
+    return '无';
+  }
+  return String(value);
+}
+
 function collectComplianceIssues(data: Record<string, unknown>): string[] {
   const reports = [
     data.manual_compliance,
@@ -150,14 +185,29 @@ function collectComplianceIssues(data: Record<string, unknown>): string[] {
 
   const issues: string[] = [];
   reports.forEach((report) => {
-    stringList(report.issues).forEach((issue) => issues.push(issue));
+    let hasDetailedIssues = false;
+    const directIssues = stringList(report.issues);
+    if (directIssues.length > 0) {
+      hasDetailedIssues = true;
+      directIssues.forEach((issue) => issues.push(issue));
+    }
     if (isRecord(report.claim_rules)) {
-      stringList(report.claim_rules.issues).forEach((issue) => issues.push(issue));
+      const claimIssues = stringList(report.claim_rules.issues);
+      if (claimIssues.length > 0) {
+        hasDetailedIssues = true;
+        claimIssues.forEach((issue) => issues.push(issue));
+      }
     }
     if (isRecord(report.document_rules)) {
-      stringList(report.document_rules.issues).forEach((issue) => issues.push(issue));
+      const documentIssues = stringList(report.document_rules.issues);
+      if (documentIssues.length > 0) {
+        hasDetailedIssues = true;
+        documentIssues.forEach((issue) => issues.push(issue));
+      }
     }
-    stringList(report.high_priority_issues).forEach((issue) => issues.push(issue));
+    if (!hasDetailedIssues) {
+      stringList(report.high_priority_issues).forEach((issue) => issues.push(issue));
+    }
   });
 
   return Array.from(new Set(issues.map((issue) => issue.trim()).filter(Boolean)));
@@ -185,13 +235,13 @@ function CompliancePanel({ data }: { data: Record<string, unknown> }) {
       <div className="rounded-lg border border-hairline bg-surface-feature p-md">
         <div className="mb-sm flex flex-wrap gap-sm">
           {Object.entries(claimMetrics).map(([key, value]) => (
-            <Badge key={`claim-${key}`} variant="gray">
-              {key}: {String(value)}
+            <Badge key={`claim-${key}`} variant="gray" className="normal-case tracking-normal">
+              {complianceMetricLabel(key)}：{complianceMetricValue(value)}
             </Badge>
           ))}
           {Object.entries(documentMetrics).map(([key, value]) => (
-            <Badge key={`doc-${key}`} variant="gray">
-              {key}: {Array.isArray(value) ? value.join(', ') : String(value)}
+            <Badge key={`doc-${key}`} variant="gray" className="normal-case tracking-normal">
+              {complianceMetricLabel(key)}：{complianceMetricValue(value)}
             </Badge>
           ))}
         </div>

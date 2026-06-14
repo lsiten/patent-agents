@@ -220,6 +220,26 @@ def _contains_any(text: str, terms: Iterable[str]) -> bool:
     return any(term in text for term in terms)
 
 
+def _title_referenced_in_abstract(title: str, abstract: str) -> bool:
+    title = str(title or "").strip()
+    abstract = str(abstract or "").strip()
+    if not title or not abstract:
+        return False
+    if title in abstract:
+        return True
+    normalized_title = re.sub(r"^(一种|一项|一种用于|一种基于)", "", title)
+    normalized_title = re.sub(r"(的方法|的系统|的装置|的设备|的介质|方法|系统|装置|设备)$", "", normalized_title)
+    tokens = [
+        token
+        for token in re.split(r"[，,、；;：:\s及与和的]+", normalized_title)
+        if len(token) >= 2
+    ]
+    if not tokens:
+        tokens = [normalized_title[:8]] if len(normalized_title) >= 4 else []
+    matched = sum(1 for token in tokens if token and token in abstract)
+    return matched >= max(1, min(2, len(tokens)))
+
+
 def validate_patent_manual_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
     """Validate structured patent draft rules from the latest manual/report.
 
@@ -256,7 +276,7 @@ def validate_patent_manual_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
         if len(abstract) > 300:
             _issue(issues, "high", "说明书摘要", f"摘要超过300字，当前约{len(abstract)}字", "压缩摘要，保留名称、领域、方案和效果。")
         abstract_required_signals = {
-            "专利名称": bool(title and title.replace("一种", "", 1)[:8] in abstract),
+            "专利名称": _title_referenced_in_abstract(title, abstract),
             "技术领域": "技术领域" in abstract or "涉及" in abstract,
             "简化技术方案": any(word in abstract for word in ("包括", "首先", "确定", "获取", "处理", "生成")),
             "技术效果": any(word in abstract for word in ("实现", "避免", "提高", "减少", "保证", "保持", "提升")),
@@ -495,6 +515,7 @@ def normalize_claims_payload_linebreaks(claims: Dict[str, Any]) -> Dict[str, Any
 
 def collect_high_priority_issues(*reports: Dict[str, Any]) -> List[str]:
     items: List[str] = []
+    seen: set[str] = set()
     for report in reports:
         for issue in report.get("issues", []) if isinstance(report, dict) else []:
             if not isinstance(issue, dict):
@@ -503,5 +524,9 @@ def collect_high_priority_issues(*reports: Dict[str, Any]) -> List[str]:
                 location = issue.get("location") or "全文"
                 desc = issue.get("issue") or issue.get("description") or ""
                 suggestion = issue.get("suggestion") or ""
+                key = f"{location}|{desc}|{suggestion}"
+                if key in seen:
+                    continue
+                seen.add(key)
                 items.append(f"[{location}] {desc}。建议：{suggestion}")
     return items
