@@ -36,3 +36,9 @@ metadata:
 ## 工具使用
 
 - `oa_predictor` - 预判审查意见
+
+## Agent 与工具边界
+
+- `oa_predictor` 只提供可能审查意见的风险线索。
+- 最终审查风险、通过建议、补正优先级和修改路径必须由质量审查 Agent 结合四个工具信号和自身审查经验判断。
+- 如果问题可由撰写、检索或需求分析 Agent 修复，应在 `detailed_revision_suggestions` 中明确责任阶段，供 CEO 调度。

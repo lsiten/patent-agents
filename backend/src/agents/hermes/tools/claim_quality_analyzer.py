@@ -1,7 +1,4 @@
-"""
-Claim Quality Analyzer Tool - 权利要求质量分析工具
-分析权利要求的清楚性、保护范围和撰写质量
-"""
+"""Claim Quality Analyzer Tool - 权利要求客观规则检查工具."""
 import json
 import re
 from datetime import datetime
@@ -9,68 +6,15 @@ from typing import Any, Dict
 
 from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
-from src.core.llm_client import get_llm_service, LLMMessage
+from src.core.patent_compliance import validate_claim_rules
 
 logger = get_logger(__name__)
 
-QUALITY_PROMPT = """你是一位资深专利审查员。请分析以下权利要求的撰写质量。
-
-权利要求：
-{claims}
-
-请从以下维度评分(0-100)并分析：
-1. 清楚性 - 是否清楚界定保护范围
-2. 简要性 - 是否简洁无冗余
-3. 支持性 - 是否可获得说明书支持
-4. 保护范围 - 宽度是否合适
-5. 层次性 - 独立/从属关系是否合理
-
-请输出 JSON 格式：
-{{
-  "clarity_score": 85,
-  "conciseness_score": 80,
-  "support_score": 75,
-  "breadth_score": 70,
-  "hierarchy_score": 90,
-  "overall_quality": 80,
-  "issues": [
-    {{
-      "claim_number": 1,
-      "issue_type": "clarity/support/breadth",
-      "description": "问题描述",
-      "suggestion": "改进建议"
-    }}
-  ],
-  "strengths": ["优点1"],
-  "recommendation": "总体改进建议"
-}}"""
-
-
-def _extract_json_from_response(text: str) -> Dict[str, Any]:
-    """从 LLM 响应中提取 JSON"""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
-    if match:
-        try:
-            return json.loads(match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-    match = re.search(r'\{[\s\S]*\}', text)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
-    return {}
-
 
 class ClaimQualityAnalyzerTool(HermesTool):
-    """权利要求质量分析工具"""
+    """权利要求客观规则检查工具"""
     name = "claim_quality_analyzer"
-    description = "分析权利要求的清楚性、保护范围、层次结构等质量指标"
+    description = "检查权利要求中可确定的格式、编号、口语化和必要术语信号；质量结论由 Agent 判断"
 
     def _build_definition(self) -> HermesToolDefinition:
         return HermesToolDefinition(
@@ -86,41 +30,59 @@ class ClaimQualityAnalyzerTool(HermesTool):
         )
 
     async def execute(self, claims: str, **kwargs) -> Dict[str, Any]:
-        """执行权利要求质量分析"""
+        """执行权利要求客观检查：只返回确定信号，不给质量结论。"""
         start_time = datetime.now()
         logger.info("Analyzing claim quality")
-        
+
         try:
-            llm = get_llm_service()
-            prompt = QUALITY_PROMPT.format(claims=claims)
-            response = await llm.chat_completion(
-                messages=[LLMMessage(role="user", content=prompt)],
-                temperature=0.2,
-            )
-            
-            parsed = _extract_json_from_response(response.content)
-            
-            # 标准化输出数据
+            text = claims or ""
+            claim_numbers = re.findall(r"(?:^|\n)\s*(\d+)[\.、]", text)
+            issues = []
+            if not claim_numbers:
+                issues.append({"claim_number": 1, "issue_type": "format", "description": "未识别到规范编号的权利要求", "suggestion": "按1、2、3或1. 2.格式重排。"})
+            if len(text) < 300:
+                issues.append({"claim_number": 1, "issue_type": "support", "description": "权利要求内容过短，可能未覆盖完整技术方案", "suggestion": "补充姿态获取、边界判定、裁剪/补偿/重映射、同步输出等核心特征。"})
+            if re.search(r"比如|这个|东西|然后|你", text):
+                issues.append({"claim_number": 1, "issue_type": "clarity", "description": "存在口语化表述", "suggestion": "改为专利规范术语。"})
+            if "其特征在于" not in text and "包括" not in text:
+                issues.append({"claim_number": 1, "issue_type": "clarity", "description": "独立权利要求缺少清楚的开放式限定", "suggestion": "使用“包括”组织技术特征。"})
+            hard_rule_report = validate_claim_rules(text)
+            for issue in hard_rule_report.get("issues", []):
+                issues.append({
+                    "claim_number": int(re.search(r"\d+", issue.get("location", "1")).group(0)) if re.search(r"\d+", issue.get("location", "1")) else 1,
+                    "issue_type": "format",
+                    "severity": issue.get("severity", "medium"),
+                    "description": issue.get("issue", ""),
+                    "suggestion": issue.get("suggestion", ""),
+                    "target_agent": issue.get("target_agent", "patent_writer"),
+                })
             data = {
-                "clarity_score": parsed.get("clarity_score", 0),
-                "conciseness_score": parsed.get("conciseness_score", 0),
-                "support_score": parsed.get("support_score", 0),
-                "breadth_score": parsed.get("breadth_score", 0),
-                "hierarchy_score": parsed.get("hierarchy_score", 0),
-                "overall_quality": parsed.get("overall_quality", 0),
-                "scope_analysis": parsed.get("recommendation", ""),
-                "issues": parsed.get("issues", []),
-                "strengths": parsed.get("strengths", []),
+                "objective_findings": issues,
+                "metrics": {
+                    "claim_count": len(claim_numbers),
+                    "text_length": len(text),
+                    "has_open_transition": "包括" in text or "其特征在于" in text,
+                    "uses_display_surface_term": "显示面" in text,
+                    "has_oral_terms": bool(re.search(r"比如|这个|东西|然后|你", text)),
+                    **hard_rule_report.get("metrics", {}),
+                },
+                "hard_rule_report": hard_rule_report,
+                "requires_agent_judgment": [
+                    "清楚性是否可接受",
+                    "保护范围宽窄是否合适",
+                    "创造性支撑是否充分",
+                    "是否需要 CEO 调度撰写 Agent 修改",
+                ],
             }
-            
+
             return make_tool_output(
                 tool_name=self.name,
                 data=data,
                 success=True,
-                raw_response=response.content,
+                raw_response=json.dumps(data, ensure_ascii=False),
                 start_time=start_time,
             )
-            
+
         except Exception as e:
             logger.error(f"Claim quality analysis failed: {e}")
             return make_tool_output(

@@ -8,6 +8,7 @@ max_tokens: 8192
 enabled_toolsets:
 - patent
 enabled_tools:
+- transcript_sanitizer
 - ipc_classifier
 - tech_feature_extractor
 - scenario_miner

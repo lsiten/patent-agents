@@ -110,6 +110,8 @@ class WorkflowResponse(BaseModel):
     outputs: Dict[str, Dict[str, Any]]
     target_country: str = "中国"
     quality_remediation: Optional[Dict[str, Any]] = None
+    agent_loop: Optional[Dict[str, Any]] = None
+    sedimented_skills: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class WorkflowListResponse(BaseModel):

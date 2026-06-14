@@ -1,8 +1,11 @@
 """
-QualityAssessorTool - 质量评估工具
-评估各阶段产出的质量，决定是否需要迭代
+QualityAssessorTool - 确定性质量信号工具
+
+该工具只提取可代码化验证的客观信号，不在工具层判断内容质量是否达标。
+质量结论、是否迭代以及如何修改必须由调用该工具的 Hermes Agent LLM 决定。
 """
 import json
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -12,13 +15,15 @@ from src.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+TRANSCRIPT_PATTERN = re.compile(r"[\u4e00-\u9fa5A-Za-z]{1,12}\(\d{2}:\d{2}:\d{2}\)|\d{2}:\d{2}:\d{2}")
+DUPLICATE_FIGURE_PATTERN = re.compile(r"图\s*(\d+)\s*图\s*\1")
+
+
 class QualityAssessorTool(HermesTool):
-    """
-    质量评估工具
-    评估各阶段产出的质量，决定是否需要迭代
-    """
+    """提取阶段输出的确定性质量信号。"""
+
     name = "quality_assessor"
-    description = "评估各阶段产出的质量，判断是否达标，提出改进建议"
+    description = "提取阶段输出中的结构、完整性、格式和明显缺失信号；质量判断由Agent完成"
 
     def _build_definition(self) -> HermesToolDefinition:
         return HermesToolDefinition(
@@ -37,7 +42,7 @@ class QualityAssessorTool(HermesTool):
                 ),
                 "requirements": HermesToolParameter(
                     type="string",
-                    description="质量要求或验收标准",
+                    description="质量要求或验收标准；工具仅做关键词/格式匹配，不做语义判断",
                     required=False,
                 ),
             },
@@ -52,152 +57,91 @@ class QualityAssessorTool(HermesTool):
         requirements: Optional[str] = None,
         **kwargs,
     ) -> Dict[str, Any]:
-        """执行质量评估"""
-        # 兼容 adapter schema 传入的 param alias
-        #   adapter schema: document (内容), assessment_type (阶段类型)
-        #   tool original:  phase_name, output_content
+        """提取确定性质量信号。"""
         if not phase_name:
             phase_name = assessment_type or kwargs.get("phase_name", "requirement")
         if not output_content:
             output_content = document or kwargs.get("output_content", "")
-        logger.info("Assessing quality", phase=phase_name)
 
-        # 基础评分维度
-        scores = {}
-        issues = []
-        passed = True
+        logger.info("Collecting objective quality signals", phase=phase_name)
 
-        # 根据阶段类型进行不同的质量检查
-        if phase_name == "requirement":
-            scores = self._assess_requirement_quality(output_content)
-        elif phase_name == "retrieval":
-            scores = self._assess_retrieval_quality(output_content)
-        elif phase_name == "writing":
-            scores = self._assess_writing_quality(output_content)
-        elif phase_name == "review":
-            scores = self._assess_review_quality(output_content)
-        else:
-            scores = {"overall": 0.7}
+        parsed_json = self._parse_json(output_content)
+        content_lower = output_content.lower()
+        objective_findings: List[Dict[str, Any]] = []
 
-        # 计算总体得分
-        overall_score = sum(scores.values()) / len(scores) if scores else 0.7
-
-        # 判断是否通过
-        if overall_score < 0.7:
-            passed = False
-            issues.append({
-                "severity": "high",
-                "type": "quality_insufficient",
-                "description": f"整体质量评分较低（{overall_score:.2f}），建议优化",
+        required_markers = self._required_markers_for_phase(phase_name)
+        marker_presence = {
+            marker: (marker.lower() in content_lower or marker in output_content)
+            for marker in required_markers
+        }
+        missing_markers = [marker for marker, present in marker_presence.items() if not present]
+        for marker in missing_markers:
+            objective_findings.append({
+                "type": "missing_expected_marker",
+                "marker": marker,
+                "source": "deterministic_marker_check",
             })
+
+        if phase_name in {"writing", "review"}:
+            if TRANSCRIPT_PATTERN.search(output_content):
+                objective_findings.append({
+                    "type": "transcript_format_residue",
+                    "pattern": "speaker_or_timestamp",
+                    "source": "regex",
+                })
+            if DUPLICATE_FIGURE_PATTERN.search(output_content):
+                objective_findings.append({
+                    "type": "duplicate_figure_caption",
+                    "pattern": "图N 图N",
+                    "source": "regex",
+                })
+
+        if requirements:
+            requirement_terms = self._extract_requirement_terms(requirements)
+            missing_requirement_terms = [
+                term for term in requirement_terms if term not in output_content
+            ]
+        else:
+            requirement_terms = []
+            missing_requirement_terms = []
 
         return {
             "phase": phase_name,
-            "overall_score": round(overall_score, 2),
-            "dimension_scores": scores,
-            "passed": passed,
-            "needs_iteration": not passed,
-            "issues": issues,
-            "recommendations": self._generate_recommendations(phase_name, scores, issues),
+            "objective_signals": {
+                "content_length": len(output_content),
+                "is_json": parsed_json is not None,
+                "top_level_keys": sorted(parsed_json.keys()) if isinstance(parsed_json, dict) else [],
+                "expected_marker_presence": marker_presence,
+                "missing_expected_markers": missing_markers,
+                "requirement_terms_checked": requirement_terms,
+                "missing_requirement_terms": missing_requirement_terms,
+                "transcript_residue_count": len(TRANSCRIPT_PATTERN.findall(output_content)),
+                "duplicate_figure_caption_count": len(DUPLICATE_FIGURE_PATTERN.findall(output_content)),
+            },
+            "objective_findings": objective_findings,
+            "requires_agent_judgment": [
+                "阶段输出质量是否可接受",
+                "是否需要进入下一轮迭代",
+                "应由哪个Agent补充或修改",
+                "如何依据审查问题优化内容",
+            ],
             "assessment_timestamp": datetime.now().isoformat(),
         }
 
-    def _assess_requirement_quality(self, content: str) -> Dict[str, float]:
-        """评估需求分析质量"""
-        scores = {}
-        content_lower = content.lower()
-
-        # 创新点提取完整性
-        scores["innovation_extraction"] = 0.9 if "创新点" in content_lower or "key_innovative_features" in content else 0.6
-
-        # 信息缺口识别
-        scores["gap_identification"] = 0.85 if "缺口" in content_lower or "information_gaps" in content else 0.5
-
-        # 应用场景挖掘
-        scores["scenario_coverage"] = 0.8 if "应用场景" in content_lower or "application_scenarios" in content else 0.5
-
-        # 结构化程度
+    def _parse_json(self, content: str) -> Any:
         try:
-            json.loads(content)
-            scores["structured"] = 0.95
+            return json.loads(content)
         except (json.JSONDecodeError, TypeError):
-            scores["structured"] = 0.6
+            return None
 
-        return scores
+    def _required_markers_for_phase(self, phase_name: str) -> List[str]:
+        return {
+            "requirement": ["技术领域", "技术问题", "创新点", "应用场景"],
+            "retrieval": ["检索", "现有技术", "对比", "差异"],
+            "writing": ["权利要求", "说明书", "摘要", "附图"],
+            "review": ["问题", "建议", "审查", "结论"],
+        }.get(phase_name, [])
 
-    def _assess_retrieval_quality(self, content: str) -> Dict[str, float]:
-        """评估检索分析质量"""
-        scores = {}
-        content_lower = content.lower()
-
-        # 对比文件数量
-        scores["prior_art_coverage"] = 0.8 if "similar_patents" in content else 0.5
-
-        # 专利性评估
-        scores["patentability_assessment"] = 0.9 if "patentability" in content_lower else 0.5
-
-        # 风险识别
-        scores["risk_identification"] = 0.85 if "risk" in content_lower else 0.5
-
-        # 撰写建议
-        scores["actionable_guidance"] = 0.8 if "recommendations" in content_lower else 0.4
-
-        return scores
-
-    def _assess_writing_quality(self, content: str) -> Dict[str, float]:
-        """评估专利撰写质量"""
-        scores = {}
-        content_lower = content.lower()
-
-        # 权利要求完整性
-        scores["claim_completeness"] = 0.9 if "claims" in content_lower else 0.4
-
-        # 说明书完整性
-        scores["description_completeness"] = 0.85 if "description" in content_lower else 0.4
-
-        # 实施例充分性
-        scores["embodiment_sufficiency"] = 0.75 if "detailed_description" in content_lower else 0.4
-
-        # 术语一致性
-        scores["terminology_consistency"] = 0.8  # 简化处理
-
-        return scores
-
-    def _assess_review_quality(self, content: str) -> Dict[str, float]:
-        """评估审查质量"""
-        scores = {}
-        content_lower = content.lower()
-
-        # 审查维度覆盖
-        scores["coverage"] = 0.9 if "claims_review" in content_lower and "description_review" in content_lower else 0.6
-
-        # 问题具体性
-        scores["specificity"] = 0.8 if "issues" in content_lower else 0.5
-
-        # 修改建议可操作性
-        scores["actionability"] = 0.75 if "suggestion" in content_lower else 0.4
-
-        # OA 预判
-        scores["oa_prediction"] = 0.8 if "examination_risks" in content_lower else 0.5
-
-        return scores
-
-    def _generate_recommendations(self, phase: str, scores: Dict[str, float], issues: List) -> List[str]:
-        """生成改进建议"""
-        recommendations = []
-
-        for dim, score in scores.items():
-            if score < 0.7:
-                rec_map = {
-                    "innovation_extraction": "建议加强核心创新点的提取和描述",
-                    "gap_identification": "建议更全面地识别信息缺口，明确需要补充的内容",
-                    "prior_art_coverage": "建议扩大检索范围，增加对比文件数量",
-                    "patentability_assessment": "建议深化专利性（新颖性、创造性）的评估",
-                    "claim_completeness": "建议完善权利要求书，确保覆盖所有核心创新点",
-                    "description_completeness": "建议完善说明书内容，确保公开充分",
-                    "coverage": "建议增加审查维度的覆盖，确保全面审查",
-                }
-                if dim in rec_map:
-                    recommendations.append(rec_map[dim])
-
-        return recommendations
+    def _extract_requirement_terms(self, requirements: str) -> List[str]:
+        terms = re.split(r"[\s,，;；。.\n]+", requirements)
+        return [term for term in terms if len(term) >= 2][:30]

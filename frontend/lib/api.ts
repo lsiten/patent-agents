@@ -144,6 +144,35 @@ export interface WorkflowPhaseResult {
   warnings: string[];
 }
 
+export interface AgentLoopSnapshot {
+  schema?: string;
+  generated_at?: string;
+  task_id?: string;
+  title?: string;
+  terminal_state?: string;
+  current_phase?: string;
+  policy?: {
+    name?: string;
+    done_conditions?: string[];
+    topology?: string[];
+    guardrails?: Record<string, unknown>;
+  };
+  worktree?: Record<string, unknown>;
+  context?: Record<string, unknown>;
+  feedback?: Record<string, unknown>;
+  architecture_compliance?: Record<string, unknown>;
+  phase_history?: Array<Record<string, unknown>>;
+  path?: string;
+}
+
+export interface SedimentedSkill {
+  agent_profile: string;
+  skill: string;
+  skill_path?: string;
+  log_path?: string;
+  record?: Record<string, unknown>;
+}
+
 export interface WorkflowResponse {
   task_id: string;
   user_id: string;
@@ -163,6 +192,14 @@ export interface WorkflowResponse {
     review_report: Record<string, unknown>;
   };
   quality_remediation?: Record<string, unknown>;
+  agent_loop?: AgentLoopSnapshot;
+  sedimented_skills: SedimentedSkill[];
+}
+
+export interface WorkflowLoopResponse {
+  task_id: string;
+  agent_loop: AgentLoopSnapshot;
+  sedimented_skills: SedimentedSkill[];
 }
 
 export interface WorkflowDecisionResponse {
@@ -213,6 +250,46 @@ function safeRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }
 
+function stringRecordArray(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => isRecord(item)) : [];
+}
+
+function parseAgentLoopSnapshot(value: unknown): AgentLoopSnapshot | undefined {
+  if (!isRecord(value)) return undefined;
+  const policy = safeRecord(value.policy);
+  return {
+    schema: typeof value.schema === 'string' ? value.schema : undefined,
+    generated_at: typeof value.generated_at === 'string' ? value.generated_at : undefined,
+    task_id: typeof value.task_id === 'string' ? value.task_id : undefined,
+    title: typeof value.title === 'string' ? value.title : undefined,
+    terminal_state: typeof value.terminal_state === 'string' ? value.terminal_state : undefined,
+    current_phase: typeof value.current_phase === 'string' ? value.current_phase : undefined,
+    policy: {
+      name: typeof policy.name === 'string' ? policy.name : undefined,
+      done_conditions: stringArray(policy.done_conditions),
+      topology: stringArray(policy.topology),
+      guardrails: safeRecord(policy.guardrails),
+    },
+    worktree: safeRecord(value.worktree),
+    context: safeRecord(value.context),
+    feedback: safeRecord(value.feedback),
+    architecture_compliance: safeRecord(value.architecture_compliance),
+    phase_history: stringRecordArray(value.phase_history),
+    path: typeof value.path === 'string' ? value.path : undefined,
+  };
+}
+
+function parseSedimentedSkills(value: unknown): SedimentedSkill[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).map((item) => ({
+    agent_profile: typeof item.agent_profile === 'string' ? item.agent_profile : '',
+    skill: typeof item.skill === 'string' ? item.skill : '',
+    skill_path: typeof item.skill_path === 'string' ? item.skill_path : undefined,
+    log_path: typeof item.log_path === 'string' ? item.log_path : undefined,
+    record: safeRecord(item.record),
+  })).filter((item) => item.agent_profile || item.skill);
+}
+
 function parseWorkflowPhaseResult(value: unknown): WorkflowPhaseResult {
   if (!isRecord(value)) {
     throw new Error('Invalid workflow response: phase_history item must be an object');
@@ -255,6 +332,8 @@ function parseWorkflowResponse(value: unknown): WorkflowResponse {
       review_report: safeRecord(outputs.review_report),
     },
     quality_remediation: isRecord(value.quality_remediation) ? value.quality_remediation : undefined,
+    agent_loop: parseAgentLoopSnapshot(value.agent_loop),
+    sedimented_skills: parseSedimentedSkills(value.sedimented_skills),
   };
 }
 
@@ -301,6 +380,18 @@ export const workflowApi = {
 
   get: async (taskId: string) =>
     parseWorkflowResponse(await request<unknown>(`/workflows/${encodeURIComponent(taskId)}`)),
+
+  getLoop: async (taskId: string): Promise<WorkflowLoopResponse> => {
+    const value = await request<unknown>(`/workflows/${encodeURIComponent(taskId)}/loop`);
+    if (!isRecord(value)) {
+      throw new Error('Invalid workflow loop response');
+    }
+    return {
+      task_id: requireString(value.task_id, 'task_id'),
+      agent_loop: parseAgentLoopSnapshot(value.agent_loop) ?? {},
+      sedimented_skills: parseSedimentedSkills(value.sedimented_skills),
+    };
+  },
 
   getMessages: (taskId: string) =>
     request<{ messages: ChatMessage[]; count: number }>(`/workflows/${encodeURIComponent(taskId)}/messages`),

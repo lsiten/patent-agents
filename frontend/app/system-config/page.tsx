@@ -220,7 +220,7 @@ export default function SystemConfigPage() {
   // ── Loading ──
   if (loading) {
     return (
-      <div className="min-h-screen bg-canvas">
+      <div className="min-h-full bg-canvas">
         <div className="container mx-auto px-md py-xxl">
           <div className="flex items-center gap-3 mb-xl">
             <Settings className="w-6 h-6 text-steel" />
@@ -238,7 +238,7 @@ export default function SystemConfigPage() {
   // ── Error ──
   if (error && !config) {
     return (
-      <div className="min-h-screen bg-canvas">
+      <div className="min-h-full bg-canvas">
         <div className="container mx-auto px-md py-xxl">
           <div className="flex items-center gap-3 mb-xl">
             <Settings className="w-6 h-6 text-steel" />
@@ -388,7 +388,7 @@ export default function SystemConfigPage() {
   };
 
   return (
-    <div className="min-h-screen bg-canvas">
+    <div className="min-h-full bg-canvas">
       <div className="container mx-auto px-md py-xxl">
         {/* Header */}
         <div className="flex items-center justify-between mb-xl">

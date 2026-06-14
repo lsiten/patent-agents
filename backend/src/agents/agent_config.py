@@ -315,6 +315,31 @@ def get_agent_config(profile_id: str) -> Optional[AgentConfig]:
     return get_agent_config_registry().get(profile_id)
 
 
+def _build_profile_skill_prompt(skills: List[Dict[str, Any]], max_chars_per_skill: int = 2400) -> str:
+    """Build a compact Hermes-compatible skill context for the current profile."""
+    enabled_skills = [skill for skill in skills if skill.get("enabled", True)]
+    if not enabled_skills:
+        return ""
+
+    parts = [
+        "# Hermes Profile Skills",
+        "",
+        "以下是当前 Agent 自己 profile 下的 Hermes SKILL.md 技能资产。执行任务时优先复用这些过程经验；"
+        "如果技能与当前任务无关，可以忽略。",
+    ]
+    for skill in enabled_skills:
+        name = str(skill.get("name") or "unnamed-skill")
+        description = str(skill.get("description") or "")
+        content = str(skill.get("content") or "").strip()
+        if len(content) > max_chars_per_skill:
+            content = content[:max_chars_per_skill].rstrip() + "\n\n[技能内容已截断，请优先遵守以上可见部分。]"
+        parts.append(f"\n## Skill: {name}")
+        if description:
+            parts.append(f"Description: {description}")
+        parts.append(content)
+    return "\n".join(parts).strip()
+
+
 def create_ai_agent(
     profile_id: str,
     session_id: Optional[str] = None,
@@ -387,6 +412,10 @@ def create_ai_agent(
     final_api_mode = config.api_mode or api_mode or runtime_overrides.get("api_mode")
 
     cb = callbacks or {}
+    skill_prompt = _build_profile_skill_prompt(config.skills)
+    system_prompt = config.soul_md
+    if skill_prompt:
+        system_prompt = f"{system_prompt.rstrip()}\n\n{skill_prompt}"
 
     agent = AIAgent(
         base_url=base_url or None,
@@ -396,7 +425,7 @@ def create_ai_agent(
         max_iterations=config.max_iterations,
         max_tokens=max_tokens,
         enabled_toolsets=config.enabled_toolsets,
-        ephemeral_system_prompt=config.soul_md,
+        ephemeral_system_prompt=system_prompt,
         session_id=session_id,
         user_id=user_id,
         quiet_mode=True,

@@ -698,7 +698,7 @@ export default function AgentsPage() {
 
   if (isLoadingAgents) {
     return (
-      <div className="min-h-screen bg-surface">
+      <div className="min-h-full bg-surface">
         <div className="max-w-7xl mx-auto p-6">
           <div className="mb-6">
             <Skeleton className="h-8 w-48 mb-2" />
@@ -736,7 +736,7 @@ export default function AgentsPage() {
 
   if (!currentAgent) {
     return (
-      <div className="min-h-screen bg-surface p-6">
+      <div className="min-h-full bg-surface p-6">
         <Card className="p-12 text-center">
           <Bot className="w-12 h-12 text-slate-400 mx-auto mb-4" />
           <p className="text-slate-500">请选择一个Agent进行管理</p>
@@ -756,7 +756,7 @@ export default function AgentsPage() {
 
   return (
     <>
-    <div className="min-h-screen bg-surface">
+    <div className="min-h-full bg-surface">
       <div className="max-w-7xl mx-auto p-6">
         {/* Header */}
         <div className="mb-6">

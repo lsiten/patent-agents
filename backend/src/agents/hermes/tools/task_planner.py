@@ -115,10 +115,15 @@ class TaskPlannerTool(HermesTool):
                 {"name": "初稿完成", "after_phase": "patent_writing"},
                 {"name": "最终交付", "after_phase": "quality_review"},
             ],
-            "recommendations": [
+            "planning_notes": [
                 "建议在需求分析阶段与发明人充分沟通，确保信息完整",
                 "检索阶段建议使用多个数据库交叉验证",
                 "撰写阶段重点突出核心创新点的技术效果",
                 "审查阶段特别关注权利要求的支持性问题",
+            ],
+            "requires_agent_judgment": [
+                "是否采用该任务计划",
+                "是否调整阶段顺序、并行度或里程碑",
+                "是否因质量审查结果进入修复循环",
             ],
         }

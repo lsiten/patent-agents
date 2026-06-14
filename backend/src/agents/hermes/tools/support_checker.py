@@ -2,36 +2,22 @@
 Support Checker Tool - 支持性检查工具
 检查权利要求是否得到说明书的充分支持
 """
+import json
+import re
+from datetime import datetime
 from typing import Any, Dict
 
-from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
+from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
-from src.core.llm_client import get_llm_service, LLMMessage
 
 logger = get_logger(__name__)
 
-SUPPORT_PROMPT = """你是一位专利审查专家。请检查以下权利要求是否得到说明书的充分支持。
+TECH_TERMS = ["姿态", "显示面", "边界", "投影", "重叠", "空白", "补偿", "裁剪", "重映射", "同步输出"]
 
-权利要求：
-{claims}
 
-说明书内容：
-{description}
-
-请输出 JSON 格式：
-{{
-  "support_analysis": [
-    {{
-      "claim_number": 1,
-      "support_level": "full/partial/insufficient",
-      "supported_by": "说明书中支持该权利要求的具体内容",
-      "gaps": ["缺失的支持内容"],
-      "suggestion": "改进建议"
-    }}
-  ],
-  "overall_support": "充分/部分支持/不充分",
-  "critical_issues": ["关键支持性问题"]
-}}"""
+def _claim_numbers(claims: str) -> list[int]:
+    found = [int(item) for item in re.findall(r"(?:^|\n)\s*(\d+)[\.、]", claims or "")]
+    return found or [1]
 
 
 class SupportCheckerTool(HermesTool):
@@ -58,12 +44,32 @@ class SupportCheckerTool(HermesTool):
         )
 
     async def execute(self, claims: str, description: str, **kwargs) -> Dict[str, Any]:
-        """执行支持性检查"""
+        """执行支持性检查：规则化术语覆盖检查，不调用 LLM。"""
+        start_time = datetime.now()
         logger.info("Checking claim-description support")
-        llm = get_llm_service()
-        prompt = SUPPORT_PROMPT.format(claims=claims, description=description)
-        response = await llm.chat_completion(
-            messages=[LLMMessage(role="user", content=prompt)],
-            temperature=0.2,
+        desc = description or ""
+        claim_text = claims or ""
+        missing_terms = [term for term in TECH_TERMS if term in claim_text and term not in desc]
+        results = []
+        for number in _claim_numbers(claim_text):
+            results.append(
+                {
+                    "claim_number": number,
+                    "support_level": "partial" if missing_terms else "full",
+                    "supported_by": "说明书文本中存在对应技术术语" if not missing_terms else "部分术语未在说明书中找到直接对应",
+                    "gaps": missing_terms,
+                    "suggestion": "请由撰写 Agent 在具体实施方式补充缺失术语的结构、步骤和效果。" if missing_terms else "支持关系初步满足。",
+                }
+            )
+        data = {
+            "support_analysis": results,
+            "overall_support": "部分支持" if missing_terms else "充分",
+            "critical_issues": [f"缺少对“{term}”的说明书支持" for term in missing_terms],
+        }
+        return make_tool_output(
+            tool_name=self.name,
+            data=data,
+            success=True,
+            raw_response=json.dumps(data, ensure_ascii=False),
+            start_time=start_time,
         )
-        return {"support_check": response.content, "tool": self.name}
