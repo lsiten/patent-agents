@@ -35,7 +35,7 @@ def _isolated(tmp_path, monkeypatch):
 
 def _resolve_for_agent_in_priority(agent_id, yaml_llm=None, yaml_image_gen=None, system_llm=None, system_image_gen=None):
     """
-    模拟 create_ai_agent() 内部的 resolve 流程，不实例化 AIAgent。
+    复现 create_ai_agent() 内部的 resolve 流程，不实例化 AIAgent。
 
     返回 (resolved_llm, resolved_image_gen) dict。
     """
@@ -47,7 +47,7 @@ def _resolve_for_agent_in_priority(agent_id, yaml_llm=None, yaml_image_gen=None,
     merged_llm = {**(yaml_llm or {}), **llm_runtime}
     merged_img = {**(yaml_image_gen or {}), **img_runtime}
 
-    # 模拟 system-default：传给 resolve 时如果 provider 改了，base_url/api_key/model
+    # 复现 system-default：传给 resolve 时如果 provider 改了，base_url/api_key/model
     # 会从对应 provider 的全局配置取。这里我们直接调 settings 解析。
     resolved_llm = settings.llm.resolve_for_agent(merged_llm)
     resolved_img = settings.image_gen.resolve_for_agent(merged_img)

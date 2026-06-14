@@ -63,14 +63,14 @@ result = await agent.run_conversation("分析这个技术方案...")
 
 ### Per-Agent LLM / ImageGen Configuration
 
-每个 agent 可独立配置 LLM 供应商（provider / base_url / api_key / model）和生图供应商，**缺失字段时回退全局默认**。配置分三层，按优先级合并：
+每个 agent 可独立配置 LLM 供应商（provider / base_url / api_key / model）和生图供应商。配置分三层，按优先级合并：
 
 | 优先级 | 来源 | 位置 | 用途 |
 |-------|------|------|------|
 | 1 (最高) | runtime override | `backend/src/data/agent_overrides.json` → `llm_override` / `image_gen_override` | 前端 UI 改的；api_key 用 Fernet 加密 |
 | 2 | agent yaml | `hermes_home/profiles/<agent>/config.yaml` → `llm` / `image_gen` | 开发者 / CI 配的；支持 `${ENV_VAR}` 引用 |
-| 3 | system-config 默认 | `hermes_home/profiles/system-config/config.yaml` → `llm` / `image_gen` | 跨 agent 的兜底 |
-| 4 (最低) | 全局 settings | `src/core/config.py` → `LLMSettings` / `ImageGenSettings` 的 `active_provider` | 最终兜底 |
+| 3 | system-config 默认 | `hermes_home/profiles/system-config/config.yaml` → `llm` / `image_gen` | 跨 agent 默认配置 |
+| 4 (最低) | 全局 settings | `src/core/config.py` → `LLMSettings` / `ImageGenSettings` 的 `active_provider` | 启动级默认配置 |
 
 #### YAML 配置示例（`hermes_home/profiles/patent_writer/config.yaml`）
 ```yaml
@@ -118,6 +118,6 @@ image_gen:
 #### 单元 / 集成测试
 - `tests/test_secret_cipher.py` — Fernet 加解密（10 个测试）
 - `tests/test_config_resolve.py` — `resolve_for_agent` 优先级（17 个测试）
-- `tests/test_agent_config_resolution.py` — `${ENV_VAR}` 展开 + yaml fallback（12 个测试）
+- `tests/test_agent_config_resolution.py` — `${ENV_VAR}` 展开 + yaml 默认值解析（12 个测试）
 - `tests/test_override_store_llm.py` — 加密覆盖存储（13 个测试）
 - `tests/test_per_agent_config_integration.py` — 端到端优先级链（9 个测试）

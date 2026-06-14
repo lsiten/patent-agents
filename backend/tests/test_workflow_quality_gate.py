@@ -4,11 +4,11 @@ Quality Gate Iteration Tests
 These tests cover the bug where:
 1. (Bug #1) Quality review agent finds critical issues, but the workflow
    completes anyway instead of looping back to the writer agent.
-2. (Bug #2) The patent writer agent's fallback (when it can't parse output)
+2. (Bug #2) The patent writer agent's parse-error path
    injects "待生成" (to-be-generated) placeholders into the final draft.
 
 Both bugs share a root cause: agent failures are silently swallowed and the
-fallback function generates synthetic "looks-OK" data that masks the failure.
+workflow generates synthetic "looks-OK" data that masks the failure.
 """
 from __future__ import annotations
 

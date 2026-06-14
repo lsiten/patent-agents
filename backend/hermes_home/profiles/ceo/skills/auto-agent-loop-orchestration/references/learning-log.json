@@ -7,5 +7,41 @@
       "修复后必须回到质量审查，直到硬规则清零且审查可接受。",
       "任一阶段输出不符合最新结构时，不做非最新结构兼容，必须重新调度生成。"
     ]
+  },
+  {
+    "task_id": "5dd5c181-48d1-4e7d-aaed-c91bb3991166",
+    "title": "一种基于Cave折幕视频的处理方法及系统",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-14T23:17:18.606585",
+    "iteration_count": 0,
+    "review_score": null,
+    "review_recommendation": "",
+    "review_issues": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation": {}
+  },
+  {
+    "task_id": "ea87620c-2db1-4fde-b05e-dd5d764cb77c",
+    "title": "这样我开个头！这个东西",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-14T23:33:50.491980",
+    "iteration_count": 0,
+    "review_score": null,
+    "review_recommendation": "",
+    "review_issues": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation": {}
   }
 ]

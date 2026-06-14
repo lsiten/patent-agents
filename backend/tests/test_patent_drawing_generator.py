@@ -80,7 +80,7 @@ async def test_patent_drawing_generator_uses_resolved_image_config(monkeypatch, 
 
     tool = PatentDrawingGeneratorTool(exports_root=tmp_path)
     result = await tool.execute(
-        task_id="llm-fallback-task",
+        task_id="llm-config-task",
         tech_description="一种基于传感器检测身高并调整屏幕姿态的系统。",
     )
 

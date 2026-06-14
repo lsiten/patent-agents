@@ -42,7 +42,7 @@ test('normalizes prior_art_references with backend url first', async () => {
   assert.equal(references[0].similarityScore, 0.87);
 });
 
-test('builds fallback patent url when url is missing', async () => {
+test('builds patent url when url is missing', async () => {
   const { getRetrievalPatentReferences } = await loadModule();
   const references = getRetrievalPatentReferences({
     prior_art_references: [

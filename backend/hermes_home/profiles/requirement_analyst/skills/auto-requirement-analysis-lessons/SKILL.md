@@ -30,12 +30,9 @@ metadata:
 
 ## 最近样本
 
-历史失败样本不再作为需求分析参考加载。需求分析时只使用最新专利规范：
-
-- 先用 `transcript_sanitizer` 清洗交底/逐字稿。
-- 只提炼技术主题、技术问题、创新点、实施细节和可保护边界。
-- 输出 `claim_skeleton` 时只能建议 S1-S3 或 S1-S4。
-- 输出 `drawing_plan` 时必须保证每幅图目的不同、图号唯一。
+- ``：latest-requirement-analysis-rules；状态 `unknown`。
+- `5dd5c181-48d1-4e7d-aaed-c91bb3991166`：一种基于Cave折幕视频的处理方法及系统；状态 `failed`。
+- `ea87620c-2db1-4fde-b05e-dd5d764cb77c`：这样我开个头！这个东西；状态 `failed`。
 
 ## 使用要求
 

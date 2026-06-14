@@ -160,7 +160,7 @@ async def demo_ceo_workflow():
     ceo = factory.create_agent("patent.ceo.v1")
     print(f"\n👔 CEO Agent: {ceo.name}")
 
-    # 模拟技术描述
+    # 示例技术描述
     tech_description = """
     本发明涉及一种基于强化学习的神经网络自动结构搜索方法，
     主要创新点包括：

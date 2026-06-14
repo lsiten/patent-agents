@@ -30,11 +30,9 @@ metadata:
 
 ## 最近样本
 
-历史失败样本不再作为调度参考加载。CEO 调度时只使用最新专利规范：
-
-- Done 条件是质量审查可接受、硬规则问题清零、附图已生成并插入最终 DOCX。
-- 任一阶段输出不符合最新结构，不做非最新结构兼容，必须调度对应 Agent 重写。
-- 质量审查提出 revise/reject 时，把问题按目标 Agent 分派，修复后继续复审。
+- ``：latest-agent-loop-orchestration-rules；状态 `unknown`。
+- `5dd5c181-48d1-4e7d-aaed-c91bb3991166`：一种基于Cave折幕视频的处理方法及系统；状态 `failed`。
+- `ea87620c-2db1-4fde-b05e-dd5d764cb77c`：这样我开个头！这个东西；状态 `failed`。
 
 ## 使用要求
 

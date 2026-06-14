@@ -82,10 +82,10 @@ def test_workflow_log_event_reconstructs_from_redis_payload() -> None:
     assert reconstructed.summary == "reviewer gate passed"
 
 
-def test_workflow_log_event_uses_existing_task_event_fallback() -> None:
+def test_workflow_log_event_uses_existing_task_event_path() -> None:
     from src.api import routes
 
-    task_id = "task-workflow-log-fallback"
+    task_id = "task-workflow-log-event-path"
     routes.task_events.pop(task_id, None)
 
     routes._on_agent_event(

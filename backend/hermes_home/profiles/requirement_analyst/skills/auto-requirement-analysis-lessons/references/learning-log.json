@@ -7,5 +7,33 @@
       "需求分析输出必须过滤逐字稿格式、说话人、时间戳和会议口语。",
       "必须给出3步或4步独权骨架、附图规划和需要 CEO 确认的问题。"
     ]
+  },
+  {
+    "task_id": "5dd5c181-48d1-4e7d-aaed-c91bb3991166",
+    "title": "一种基于Cave折幕视频的处理方法及系统",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-14T23:17:18.608390",
+    "iteration_count": 0,
+    "review_score": null,
+    "review_recommendation": "",
+    "review_issues": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "innovation_points": [],
+    "technical_problem": ""
+  },
+  {
+    "task_id": "ea87620c-2db1-4fde-b05e-dd5d764cb77c",
+    "title": "这样我开个头！这个东西",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-14T23:33:50.492603",
+    "iteration_count": 0,
+    "review_score": null,
+    "review_recommendation": "",
+    "review_issues": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "innovation_points": [],
+    "technical_problem": ""
   }
 ]

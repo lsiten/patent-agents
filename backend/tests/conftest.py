@@ -44,8 +44,8 @@ async def _test_health():
 
 
 @pytest.fixture(autouse=True)
-def _mock_llm_api_key(monkeypatch: pytest.MonkeyPatch):
-    """Clear the LLM API key during tests so _call_hermes uses mock responses.
+def _test_llm_api_key(monkeypatch: pytest.MonkeyPatch):
+    """Clear the LLM API key during tests so _call_hermes uses test responses.
 
     Without this the background agent tasks (CEOAgent → HermesCore.execute)
     make real LLM API calls that hang or time out in TestClient context.

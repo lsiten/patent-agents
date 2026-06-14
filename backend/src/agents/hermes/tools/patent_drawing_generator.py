@@ -153,7 +153,7 @@ class PatentDrawingGeneratorTool:
                     "title": title,
                     "prompt_version": "patent_drawing_v3",
                     "layout": _layout_key_for_figure(figure_number),
-                    "image_config_source": image_config.source,
+                    "image_config_source": image_config.get("source"),
                 },
                 success=False,
                 error=f"AI image generation failed; no drawing artifact was created: {exc}",

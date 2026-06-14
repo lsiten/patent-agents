@@ -7,5 +7,33 @@
       "检索报告必须输出区别特征、风险点和可调度修复建议。",
       "不得把历史失败样本标题、逐字稿格式或非最新步骤编号写入检索结论。"
     ]
+  },
+  {
+    "task_id": "5dd5c181-48d1-4e7d-aaed-c91bb3991166",
+    "title": "一种基于Cave折幕视频的处理方法及系统",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-14T23:17:18.608886",
+    "iteration_count": 0,
+    "review_score": null,
+    "review_recommendation": "",
+    "review_issues": [],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "strategy": {},
+    "key_references_count": 0
+  },
+  {
+    "task_id": "ea87620c-2db1-4fde-b05e-dd5d764cb77c",
+    "title": "这样我开个头！这个东西",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-14T23:33:50.493094",
+    "iteration_count": 0,
+    "review_score": null,
+    "review_recommendation": "",
+    "review_issues": [],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "strategy": {},
+    "key_references_count": 0
   }
 ]

@@ -170,7 +170,7 @@ async def demo_chat_brainstorm() -> None:
     print(f"\n✅ 工作流创建成功，任务 ID: {context.task_id}")
     print(f"\n💬 开始头脑风暴对话...")
 
-    # 模拟用户消息
+    # 示例用户消息
     user_messages = [
         "我的发明主要是改进了卷积神经网络的特征提取方法",
         "具体来说，我提出了一种多尺度的特征融合策略",

@@ -7,5 +7,31 @@
       "发现问题时输出目标 Agent、问题类型、修复建议和是否需要复审。",
       "独权必须为3步或4步；权利要求每个分号和句号必须换行。"
     ]
+  },
+  {
+    "task_id": "5dd5c181-48d1-4e7d-aaed-c91bb3991166",
+    "title": "一种基于Cave折幕视频的处理方法及系统",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-14T23:17:18.610132",
+    "iteration_count": 0,
+    "review_score": null,
+    "review_recommendation": "",
+    "review_issues": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "task_id": "ea87620c-2db1-4fde-b05e-dd5d764cb77c",
+    "title": "这样我开个头！这个东西",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-14T23:33:50.493999",
+    "iteration_count": 0,
+    "review_score": null,
+    "review_recommendation": "",
+    "review_issues": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
   }
 ]

@@ -101,13 +101,13 @@ class TestEnvExpansion:
             {
                 "profile_id": "my_agent",
                 "llm": {
-                    "fallback_keys": ["${LIST_KEY}", "literal"],
+                    "default_keys": ["${LIST_KEY}", "literal"],
                 },
             },
         )
         from src.agents.agent_config import AgentConfig
         cfg = AgentConfig(fake_profile_dirs / "my_agent")
-        assert cfg.llm["fallback_keys"] == ["list-secret", "literal"]
+        assert cfg.llm["default_keys"] == ["list-secret", "literal"]
 
     def test_non_string_values_unchanged(self, monkeypatch, fake_profile_dirs):
         write_yaml(
@@ -139,7 +139,7 @@ class TestEnvExpansion:
         assert cfg.llm["api_key"] == "$PARTIAL-key"
 
 
-# ── 2) llm / image_gen 字段 + fallback ──────────────────────────────
+# ── 2) llm / image_gen 字段 + 默认值 ──────────────────────────────
 
 
 class TestLLMSectionFallback:

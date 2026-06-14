@@ -7,5 +7,35 @@
       "权利要求1只能采用S1-S3或S1-S4步骤结构，分号和句号必须换行。",
       "附图必须主题不同、内容不同，并插入最终 DOCX 对应位置。"
     ]
+  },
+  {
+    "task_id": "5dd5c181-48d1-4e7d-aaed-c91bb3991166",
+    "title": "一种基于Cave折幕视频的处理方法及系统",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-14T23:17:18.609488",
+    "iteration_count": 0,
+    "review_score": null,
+    "review_recommendation": "",
+    "review_issues": [],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "unknown",
+    "has_drawings": false,
+    "drawing_titles": [],
+    "final_document_path": ""
+  },
+  {
+    "task_id": "ea87620c-2db1-4fde-b05e-dd5d764cb77c",
+    "title": "这样我开个头！这个东西",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-14T23:33:50.493602",
+    "iteration_count": 0,
+    "review_score": null,
+    "review_recommendation": "",
+    "review_issues": [],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "unknown",
+    "has_drawings": false,
+    "drawing_titles": [],
+    "final_document_path": ""
   }
 ]
