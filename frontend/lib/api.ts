@@ -961,12 +961,15 @@ export const conversationApi = {
     };
   },
 
-  createWorkflow: (conv_id: string) =>
+  createWorkflow: (conv_id: string, patentTitle: string) =>
     request<{ task_id: string; status: string; redirect_url: string }>(
       `/conversations/${encodeURIComponent(conv_id)}/create-workflow`,
       {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          confirmed: true,
+          patent_title: patentTitle,
+        }),
       }
     ),
 

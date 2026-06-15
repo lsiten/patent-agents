@@ -3875,6 +3875,23 @@ def _brainstorm_converged_to_workflow_handoff(response_text: str) -> bool:
     return has_brainstorm_convergence and has_patent_application_handoff
 
 
+def _extract_recommended_patent_title(response_text: str) -> Optional[str]:
+    """Extract an explicit patent title from the agent's recommendation text."""
+    patterns = [
+        r"(?:专利名称|发明名称|建议专利名称|建议发明名称|推荐专利名称|推荐发明名称)\s*[：:]\s*([^\n。；;]+)",
+        r"(?:命名为|名称为|专利名为|发明名为)\s*[“\"]?([^”\"\n。；;]+)[”\"]?",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, response_text)
+        if not match:
+            continue
+        title = re.sub(r"^[《“\"'\s]+|[》”\"'\s]+$", "", match.group(1).strip())
+        title = re.sub(r"\s+", "", title)
+        if 4 <= len(title) <= 80:
+            return title
+    return None
+
+
 def _should_recommend_workflow_creation(
     *,
     messages: List[dict],
@@ -4134,6 +4151,7 @@ async def chat_in_conversation(conv_id: str, request: ConversationChatRequest):
         agent_events=[],
     )
     clean_text = response_text.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
+    suggested_title = _extract_recommended_patent_title(clean_text) if has_recommendation else None
 
     assistant_msg = {
         "id": str(uuid.uuid4()),
@@ -4141,7 +4159,10 @@ async def chat_in_conversation(conv_id: str, request: ConversationChatRequest):
         "content": clean_text,
         "timestamp": datetime.now().isoformat(),
         "type": "text",
-        "metadata": {"recommend_create_patent": has_recommendation} if has_recommendation else None,
+        "metadata": {
+            "recommend_create_patent": True,
+            **({"suggested_title": suggested_title} if suggested_title else {}),
+        } if has_recommendation else None,
         "tool_calls": tool_calls_data if tool_calls_data else None,
     }
 
@@ -4460,6 +4481,9 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
             assistant_metadata = {}
             if has_recommendation:
                 assistant_metadata["recommend_create_patent"] = True
+                suggested_title = _extract_recommended_patent_title(clean_content)
+                if suggested_title:
+                    assistant_metadata["suggested_title"] = suggested_title
             if confirmation_data:
                 assistant_metadata["confirmation"] = confirmation_data
 
@@ -4735,7 +4759,13 @@ async def upload_disclosure_file(
 
 @router.post("/conversations/{conv_id}/create-workflow", response_model=dict)
 async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflowFromConversationRequest, background_tasks: BackgroundTasks):
-    """从对话内容创建专利申请工作流（自动启动）"""
+    """从对话内容创建并启动专利申请工作流。必须由用户显式确认。"""
+    patent_title = re.sub(r"\s+", "", request.patent_title.strip())
+    if not request.confirmed:
+        raise HTTPException(status_code=400, detail="启动专利申请流程前必须先由用户显式确认")
+    if not patent_title:
+        raise HTTPException(status_code=400, detail="启动专利申请流程前必须明确专利名称")
+
     async with conversations_lock:
         conv = conversations_store.get(conv_id)
     if not conv:
@@ -4772,6 +4802,7 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             target_country=request.target_country,
         )
         task_id = context.task_id
+        context.title = patent_title
         task_events[task_id] = []
         patent_task = PatentTask(
             task_id=task_id,
@@ -4805,10 +4836,10 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             workflow_msg = {
                 "id": f"workflow-created-{task_id}",
                 "role": "assistant",
-                "content": f"专利申请流程已创建并自动启动！\n\n任务编号：{task_id}\n\n多智能体系统将依次执行：\n1. 需求分析 — 结构化您的技术需求\n2. 检索分析 — 现有技术检索与专利性评估\n3. 专利撰写 — 生成申请文件\n4. 质量审查 — 合规性审查",
+                "content": f"专利申请流程已创建并启动！\n\n专利名称：{patent_title}\n\n任务编号：{task_id}\n\n多智能体系统将依次执行：\n1. 需求分析 — 结构化您的技术需求\n2. 检索分析 — 现有技术检索与专利性评估\n3. 专利撰写 — 生成申请文件\n4. 质量审查 — 合规性审查",
                 "timestamp": datetime.now().isoformat(),
                 "type": "text",
-                "metadata": {"type": "workflow_created", "task_id": task_id},
+                "metadata": {"type": "workflow_created", "task_id": task_id, "patent_title": patent_title},
             }
             conv["messages"].append(workflow_msg)
 

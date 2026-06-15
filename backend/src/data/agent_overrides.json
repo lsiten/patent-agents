@@ -34,7 +34,9 @@
   },
   "patent.brainstorm_partner.v1": {
     "config_overrides": {},
-    "tools_disabled": [],
+    "tools_disabled": [
+      "agent_selector"
+    ],
     "tools_added": [
       {
         "id": "prior_art_comparator",

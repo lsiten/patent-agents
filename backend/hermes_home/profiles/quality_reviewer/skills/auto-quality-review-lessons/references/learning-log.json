@@ -2,7 +2,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.311107",
+    "generated_at": "2026-06-16T00:36:53.657490",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -13,7 +13,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.314890",
+    "generated_at": "2026-06-16T00:36:53.661836",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -24,7 +24,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.319226",
+    "generated_at": "2026-06-16T00:36:53.666207",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -35,7 +35,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.326756",
+    "generated_at": "2026-06-16T00:36:53.670433",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -46,7 +46,18 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.331267",
+    "generated_at": "2026-06-16T00:36:53.676347",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-16T00:36:53.681590",
     "iteration_count": 13,
     "review_recommendation": "revise",
     "review_issue_categories": [
@@ -62,7 +73,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.335926",
+    "generated_at": "2026-06-16T00:36:53.686148",
     "iteration_count": 1,
     "review_recommendation": "revise",
     "review_issue_categories": [
@@ -80,7 +91,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.343282",
+    "generated_at": "2026-06-16T00:36:53.692912",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -91,7 +102,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.352398",
+    "generated_at": "2026-06-16T00:36:53.701175",
     "iteration_count": 13,
     "review_recommendation": "reject",
     "review_issue_categories": [
@@ -107,7 +118,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.360554",
+    "generated_at": "2026-06-16T00:36:53.709146",
     "iteration_count": 13,
     "review_recommendation": "revise",
     "review_issue_categories": [
@@ -123,7 +134,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.368581",
+    "generated_at": "2026-06-16T00:36:53.716703",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -134,7 +145,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.372471",
+    "generated_at": "2026-06-16T00:36:53.721096",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -145,7 +156,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.379846",
+    "generated_at": "2026-06-16T00:36:53.728125",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -156,7 +167,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.386600",
+    "generated_at": "2026-06-16T00:36:53.734823",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -167,7 +178,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.393974",
+    "generated_at": "2026-06-16T00:36:53.742440",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -178,7 +189,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.401102",
+    "generated_at": "2026-06-16T00:36:53.749234",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -189,7 +200,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.406831",
+    "generated_at": "2026-06-16T00:36:53.756299",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -200,7 +211,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.413258",
+    "generated_at": "2026-06-16T00:36:53.763082",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -211,7 +222,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.417241",
+    "generated_at": "2026-06-16T00:36:53.767061",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -222,7 +233,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.420822",
+    "generated_at": "2026-06-16T00:36:53.771545",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -233,7 +244,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.427493",
+    "generated_at": "2026-06-16T00:36:53.778174",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -244,7 +255,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.434580",
+    "generated_at": "2026-06-16T00:36:53.785631",
     "iteration_count": 1,
     "review_recommendation": "reject",
     "review_issue_categories": [
@@ -261,94 +272,8 @@
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.440016",
-    "iteration_count": 0,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "摘要需包含专利名称、技术领域、简化方案和技术效果",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:06:49.593499",
-    "iteration_count": 0,
-    "review_recommendation": "reject",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:06:49.635206",
-    "iteration_count": 0,
-    "review_recommendation": "reject",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:06:49.670721",
-    "iteration_count": 0,
-    "review_recommendation": "reject",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:06:49.697686",
-    "iteration_count": 0,
-    "review_recommendation": "reject",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
     "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:13:38.261248",
+    "generated_at": "2026-06-16T00:51:00.119027",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -359,7 +284,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:13:40.176696",
+    "generated_at": "2026-06-16T00:51:00.153810",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -370,7 +295,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:13:51.180637",
+    "generated_at": "2026-06-16T00:51:00.170561",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -381,7 +306,51 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:13:51.190519",
+    "generated_at": "2026-06-16T00:51:00.185404",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "cancelled",
+    "generated_at": "2026-06-16T00:54:08.468642",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "cancelled",
+    "generated_at": "2026-06-16T00:54:08.500352",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "cancelled",
+    "generated_at": "2026-06-16T00:54:08.519681",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "cancelled",
+    "generated_at": "2026-06-16T00:54:08.532066",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],

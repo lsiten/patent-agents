@@ -258,15 +258,9 @@ function resolveAgentName(data: unknown, defaultAgent = 'patent.ceo.v1'): string
   return defaultAgent;
 }
 
-function shouldAutoStartWorkflowFromPrompt(content: string): boolean {
-  const normalized = content.replace(/\s+/g, '').toLowerCase();
-  const requestsCompletePatentApplication = /生成完整(?:发明)?专利申请文件/.test(normalized)
-    || /完整(?:发明)?专利申请(?:文件|流程)/.test(normalized);
-  const requestsFullProcess = normalized.includes('全流程')
-    || normalized.includes('完整流程')
-    || normalized.includes('工作流');
-
-  return requestsCompletePatentApplication && requestsFullProcess;
+function getSuggestedPatentTitle(message?: ChatMessage | null): string | null {
+  const title = message?.metadata?.suggested_title;
+  return typeof title === 'string' && title.trim() ? title.trim() : null;
 }
 
 function conversationWorkflowState(conversation: ConversationSummary): string {
@@ -457,7 +451,7 @@ function ChatPageContent() {
   );
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   };
 
   const handleCopy = async (msgId: string, content: string) => {
@@ -841,7 +835,7 @@ function ChatPageContent() {
     if (!content) {
       // File-only upload: auto-trigger AI analysis instead of waiting for text input
       if (fileUpload) {
-        content = '请分析我上传的技术交底文件，并开始专利申请讨论';
+        content = '请分析我上传的技术交底文件，先进行头脑风暴和方案确认，不要直接启动专利申请流程';
         isAutoAnalysis = true;
         appendSystemMessage('正在分析文件：AI 正在解读您上传的交底书...');
       } else {
@@ -895,15 +889,6 @@ function ChatPageContent() {
         void loadConversations();
       }
 
-      if (fileUpload && shouldAutoStartWorkflowFromPrompt(content)) {
-        setConnectionStatus('idle');
-        setIsLoading(false);
-        sendingRef.current = false;
-        setRecommendStartWorkflow(false);
-        await handleStartWorkflow(convId);
-        return;
-      }
-
       // Create a streaming assistant message placeholder
       const streamMsgId = `assistant-stream-${Date.now()}`;
       let localEventSequence = 0;
@@ -923,13 +908,6 @@ function ChatPageContent() {
         agent_events: [],
       };
       setMessages((prev) => [...prev, streamMsg]);
-      let didAutoStartWorkflow = false;
-      const maybeAutoStartWorkflow = () => {
-        if (didAutoStartWorkflow || !shouldAutoStartWorkflowFromPrompt(content)) return;
-        didAutoStartWorkflow = true;
-        void handleStartWorkflow(convId);
-      };
-
       // Use streaming API
       conversationApi.chatStream(convId, { content }, {
         onAgentActivity: (event: AgentEvent) => {
@@ -1091,7 +1069,6 @@ function ChatPageContent() {
           ));
           if (data.has_recommendation) {
             setRecommendStartWorkflow(true);
-            maybeAutoStartWorkflow();
           }
         },
         onConfirmation: (data) => {
@@ -1134,9 +1111,9 @@ function ChatPageContent() {
           ));
           setIsLoading(false);
           sendingRef.current = false;
-          if (data.has_recommendation || shouldAutoStartWorkflowFromPrompt(content)) {
+          if (data.has_recommendation) {
+            setSuggestedTitle(getSuggestedPatentTitle(data.message));
             setRecommendStartWorkflow(true);
-            maybeAutoStartWorkflow();
           }
           void loadConversations();
         },
@@ -1248,11 +1225,20 @@ function ChatPageContent() {
   // Start workflow from conversation
   const handleStartWorkflow = async (conversationId = activeConvId) => {
     if (!conversationId || isStartingWorkflow) return;
+    const patentTitle = suggestedTitle?.trim();
+    if (!patentTitle) {
+      addToast({
+        type: 'error',
+        title: '缺少专利名称',
+        message: '启动专利申请前需要先由 Agent 明确专利名。',
+      });
+      return;
+    }
     setIsStartingWorkflow(true);
     setError(null);
 
     try {
-      const result = await conversationApi.createWorkflow(conversationId);
+      const result = await conversationApi.createWorkflow(conversationId, patentTitle);
       setWorkflowTaskId(result.task_id);
       setWorkflowState(result.status);
       setRecommendStartWorkflow(false);
@@ -1261,7 +1247,9 @@ function ChatPageContent() {
       const processMsg: ChatMessage = {
         id: `workflow-${Date.now()}`,
         role: 'assistant',
-        content: `专利申请流程已创建并自动启动！
+        content: `专利申请流程已创建并启动！
+
+专利名称：${patentTitle}
 
 任务编号：${result.task_id}
 
@@ -1294,7 +1282,7 @@ function ChatPageContent() {
 
   return (
     <>
-    <div className="grid h-full min-h-0 w-full min-w-0 grid-cols-[20rem_minmax(0,1fr)] overflow-hidden max-md:grid-cols-1">
+    <div className="grid h-[calc(100dvh-4rem)] min-h-0 w-full min-w-0 grid-cols-[20rem_minmax(0,1fr)] overflow-hidden max-md:grid-cols-1">
       {/* Sidebar Toggle (mobile) */}
       <button
         className="md:hidden fixed left-2 top-20 z-10 p-2 rounded-lg bg-canvas border border-hairline shadow-sm"
@@ -1401,7 +1389,7 @@ function ChatPageContent() {
       </aside>
 
       {/* Main Chat Area */}
-      <div className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden" style={{height: 'calc(100vh - 64px)'}}>
+      <div className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
         {/* Header */}
         <div className="flex-shrink-0 border-b border-hairline bg-canvas/95 px-6 py-3 backdrop-blur">
           <div className="flex min-w-0 items-center justify-between gap-3">
@@ -1816,15 +1804,15 @@ function ChatPageContent() {
                 <Sparkles className="w-5 h-5 text-green-600" />
                 <p className="text-sm text-green-800">
                   {suggestedTitle
-                    ? `技术方案已整理完毕：「${suggestedTitle}」。是否启动正式专利申请？`
-                    : '技术方案已基本清晰，可以启动正式专利申请流程。'}
+                    ? `技术方案已整理完毕，专利名称：「${suggestedTitle}」。确认后启动正式专利申请流程。`
+                    : '技术方案已基本清晰，但尚未明确专利名称。请先让 Agent 补充专利名称后再启动。'}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <Button
                   size="sm"
                   onClick={() => handleStartWorkflow()}
-                  disabled={isStartingWorkflow}
+                  disabled={isStartingWorkflow || !suggestedTitle}
                   className="bg-green-600 hover:bg-green-700"
                 >
                   {isStartingWorkflow ? (

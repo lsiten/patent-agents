@@ -479,6 +479,8 @@ class CreateWorkflowFromConversationRequest(BaseModel):
     """从对话创建工作流请求"""
     user_id: str = "default_user"
     target_country: str = "中国"
+    confirmed: bool = False
+    patent_title: str = ""
 
 
 class FileUploadResponse(BaseModel):

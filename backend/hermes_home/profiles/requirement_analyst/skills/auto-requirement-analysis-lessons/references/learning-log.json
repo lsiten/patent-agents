@@ -2,7 +2,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.309844",
+    "generated_at": "2026-06-16T00:36:53.655950",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -14,7 +14,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.313415",
+    "generated_at": "2026-06-16T00:36:53.660306",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -26,7 +26,19 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.317906",
+    "generated_at": "2026-06-16T00:36:53.664894",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-16T00:36:53.669083",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -38,7 +50,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.324989",
+    "generated_at": "2026-06-16T00:36:53.674997",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -50,7 +62,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.329836",
+    "generated_at": "2026-06-16T00:36:53.680158",
     "iteration_count": 13,
     "review_recommendation": "revise",
     "review_issue_categories": [
@@ -67,7 +79,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.334516",
+    "generated_at": "2026-06-16T00:36:53.684647",
     "iteration_count": 1,
     "review_recommendation": "revise",
     "review_issue_categories": [
@@ -86,7 +98,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.341776",
+    "generated_at": "2026-06-16T00:36:53.691358",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -98,7 +110,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.350742",
+    "generated_at": "2026-06-16T00:36:53.699746",
     "iteration_count": 13,
     "review_recommendation": "reject",
     "review_issue_categories": [
@@ -115,7 +127,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.359024",
+    "generated_at": "2026-06-16T00:36:53.707496",
     "iteration_count": 13,
     "review_recommendation": "revise",
     "review_issue_categories": [
@@ -132,7 +144,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.366550",
+    "generated_at": "2026-06-16T00:36:53.715385",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -144,7 +156,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.371009",
+    "generated_at": "2026-06-16T00:36:53.719745",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -156,7 +168,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.378463",
+    "generated_at": "2026-06-16T00:36:53.726675",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -168,7 +180,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.385300",
+    "generated_at": "2026-06-16T00:36:53.733479",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -180,7 +192,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.392678",
+    "generated_at": "2026-06-16T00:36:53.741122",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -192,7 +204,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.399483",
+    "generated_at": "2026-06-16T00:36:53.747902",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -204,7 +216,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.405508",
+    "generated_at": "2026-06-16T00:36:53.754154",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -216,7 +228,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.411848",
+    "generated_at": "2026-06-16T00:36:53.761597",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -228,7 +240,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.415617",
+    "generated_at": "2026-06-16T00:36:53.765676",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -240,7 +252,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.419507",
+    "generated_at": "2026-06-16T00:36:53.770080",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -252,7 +264,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.426083",
+    "generated_at": "2026-06-16T00:36:53.776540",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -264,7 +276,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.433176",
+    "generated_at": "2026-06-16T00:36:53.783986",
     "iteration_count": 1,
     "review_recommendation": "reject",
     "review_issue_categories": [
@@ -282,99 +294,8 @@
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:05:15.438626",
-    "iteration_count": 0,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "摘要需包含专利名称、技术领域、简化方案和技术效果",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:06:49.588127",
-    "iteration_count": 0,
-    "review_recommendation": "reject",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:06:49.623738",
-    "iteration_count": 0,
-    "review_recommendation": "reject",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:06:49.668629",
-    "iteration_count": 0,
-    "review_recommendation": "reject",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:06:49.689368",
-    "iteration_count": 0,
-    "review_recommendation": "reject",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
     "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:13:38.259602",
+    "generated_at": "2026-06-16T00:51:00.115175",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -386,7 +307,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:13:40.175035",
+    "generated_at": "2026-06-16T00:51:00.146945",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -398,7 +319,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:13:51.179070",
+    "generated_at": "2026-06-16T00:51:00.168525",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -410,7 +331,55 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:13:51.188755",
+    "generated_at": "2026-06-16T00:51:00.182359",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "cancelled",
+    "generated_at": "2026-06-16T00:54:08.467021",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "cancelled",
+    "generated_at": "2026-06-16T00:54:08.495926",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "cancelled",
+    "generated_at": "2026-06-16T00:54:08.513893",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "cancelled",
+    "generated_at": "2026-06-16T00:54:08.529023",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
