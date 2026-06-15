@@ -39,7 +39,9 @@ def _parse_features(features: str) -> list[str]:
 
 
 def _normalize_text(text: str) -> str:
-    return re.sub(r"\s+", " ", text or "").strip()
+    text = re.sub(r"[\u4e00-\u9fa5A-Za-z]+?\(\d{2}:\d{2}:\d{2}\)[:：]", " ", text or "")
+    text = re.sub(r"\(\d{2}:\d{2}:\d{2}\)[:：]?", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _matches(text: str, keywords: list[str]) -> bool:
@@ -51,7 +53,7 @@ def _domain_from_text(text: str) -> str:
     for keywords, domain in DOMAIN_RULES:
         if _matches(text, keywords):
             return domain
-    return "通用技术系统"
+    return ""
 
 
 class ScenarioMinerTool(HermesTool):
@@ -97,26 +99,22 @@ class ScenarioMinerTool(HermesTool):
             for keyword in keywords
             if keyword.lower() in text.lower()
         ]
-        scenarios = [
-            {
-                "name": f"{domain}应用场景",
-                "description": "基于当前技术描述和特征抽取的候选应用场景，具体场景名称由 Agent 结合发明事实判断。",
-                "domain": domain,
-                "potential_value": "可作为方法、系统、设备和介质多维保护的实施场景",
-                "confidence": 0.62 if matched_keywords else 0.45,
-                "target_users": ["当前技术领域的系统开发者", "设备或平台提供方", "终端使用方"],
-                "evidence_keywords": matched_keywords,
-            }
-        ]
+        scenarios = []
+        if domain and matched_keywords:
+            scenarios.append(
+                {
+                    "candidate_domain": domain,
+                    "description": "本地规则仅识别到候选领域关键词；具体应用场景、目标用户和市场价值必须由 Agent 结合发明事实判断。",
+                    "confidence": 0.62,
+                    "evidence_keywords": matched_keywords,
+                }
+            )
 
         data = {
-            "scenarios": scenarios,
-            "extension_directions": [
-                "输入来源上位化，覆盖用户输入、传感器数据、业务数据或系统状态数据",
-                "核心处理步骤模块化，形成方法、系统和设备的一一对应关系",
-                "异常处理、反馈校正和效果验证作为从属保护方向",
-            ],
-            "market_assessment": "该评估仅为基于关键词的客观场景线索，最终应用场景和保护布局由 Agent 判断。",
+            "scenario_signals": scenarios,
+            "extension_directions": [],
+            "market_assessment": "工具仅返回关键词证据，不生成通用场景结论；最终应用场景和保护布局由 Agent 判断。",
+            "requires_agent_judgment": True,
         }
 
         return make_tool_output(

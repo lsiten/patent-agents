@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { selectBrowser, knownBrowsers, findFallbackPort } from './browser-discovery.mjs';
+import { selectBrowser, knownBrowsers } from './browser-discovery.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PROXY_SCRIPT = path.join(ROOT, 'scripts', 'cdp-proxy.mjs');
@@ -40,7 +40,7 @@ function ensureConfigExists() {
     fs.copyFileSync(CONFIG_TEMPLATE, CONFIG_PATH);
     console.log(`config: 已从模板创建 ${CONFIG_PATH}`);
   } catch {
-    // 模板不存在或拷贝失败 —— 不阻塞，readConfig 会兜底
+    // 模板不存在或拷贝失败 —— 不阻塞，readConfig 会按空配置处理
   }
 }
 
@@ -164,12 +164,6 @@ async function resolveAndReport(override) {
     }
 
     case 'empty': {
-      // 末路兜底：尝试常见固定端口（用户手动 --remote-debugging-port=9222 启动的场景）
-      const fallbackPort = await findFallbackPort();
-      if (fallbackPort) {
-        console.log(`browser: ok (port ${fallbackPort}) [通过手动调试端口连接]`);
-        return { proceed: true };
-      }
       console.log('browser: 未连接 — 没有任何浏览器打开远程调试开关');
       console.log(`  支持的浏览器：${knownBrowsers().map(b => b.label).join('、')}`);
       console.log('  在你想用的浏览器地址栏打开 chrome://inspect/#remote-debugging 或 edge://inspect/#remote-debugging，勾选 "Allow remote debugging for this browser instance"');

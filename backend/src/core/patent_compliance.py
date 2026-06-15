@@ -83,7 +83,7 @@ def _find_claim_steps(independent_claim: str) -> List[str]:
     step_matches = list(re.finditer(r"(S\d+|步骤[一二三四五六七八九十A-D]|[A-D][、.．])", text))
     if step_matches:
         return [match.group(0) for match in step_matches]
-    # Fallback: count semicolon-separated technical actions after "包括".
+    # When explicit step markers are absent, count technical actions after "包括".
     body = text.split("包括", 1)[-1] if "包括" in text else text
     parts = [part.strip() for part in re.split(r"[；;。]\s*", body) if part.strip()]
     return parts
@@ -155,6 +155,14 @@ def validate_claim_rules(claims: Any) -> Dict[str, Any]:
             })
 
     for idx, block in enumerate(claim_blocks, start=1):
+        if idx > 1 and len(block) > 250:
+            issues.append({
+                "severity": "high",
+                "location": f"权利要求{idx}",
+                "issue": f"从属权利要求超过250字，当前约{len(block)}字",
+                "suggestion": "删减实施例细节和非必要限定，保留该从属权利要求的单一附加特征。",
+                "target_agent": "patent_writer",
+            })
         for match in re.finditer(r"[；;。]", block):
             following = block[match.end(): match.end() + 1]
             if following and following != "\n":
@@ -296,6 +304,13 @@ def validate_patent_manual_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
     if not background:
         _issue(issues, "critical", "背景技术", "缺少背景技术", "背景技术应包含现有技术状况、公开文献或可核验来源及其技术缺陷。")
     else:
+        background_paragraphs = [
+            part.strip()
+            for part in re.split(r"\n{1,}|(?<=[。])\s*(?=第[一二三]段|现有|目前|因此)", background)
+            if part.strip()
+        ]
+        if len(background_paragraphs) < 3:
+            _issue(issues, "high", "背景技术", "背景技术未形成三段式结构", "按宏观现有技术、公开文献评述、一个待解决技术问题三段重写。")
         if len(background) > 900:
             _issue(issues, "high", "背景技术", f"背景技术过长，当前约{len(background)}字", "背景技术应精简，避免把实施方式写入背景。")
         if _contains_any(background, ("本发明", "本申请", "本方案")):
@@ -401,6 +416,14 @@ def validate_patent_document_structure(
             "location": "附图",
             "issue": "正文引用附图但未生成对应附图文件",
             "suggestion": "由专利撰写 Agent 调用 patent_drawing_generator 生成附图。",
+            "target_agent": "patent_writer",
+        })
+    if refs and len(drawing_items) < 4:
+        issues.append({
+            "severity": "high",
+            "location": "附图",
+            "issue": f"需要附图但附图数量少于4幅，当前{len(drawing_items)}幅",
+            "suggestion": "按公司规范规划并生成不少于4幅差异化附图。",
             "target_agent": "patent_writer",
         })
     missing = [ref for ref in refs if ref not in actual]

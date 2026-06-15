@@ -28,8 +28,6 @@ DISPLAY_CONTEXT_KEYWORDS = (
     "投影",
     "视频",
     "画面",
-    "Cave",
-    "折幕",
     "LED",
 )
 

@@ -33,7 +33,23 @@ def _contains_any(text: str, keywords: list[str]) -> bool:
 
 def _ordered_terms(text: str, limit: int = 12) -> list[str]:
     terms = re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fa5]{2,}", text or "")
-    stop_words = {"这个", "然后", "就是", "可以", "需要", "进行", "一个", "一种", "我们", "他们"}
+    stop_words = {
+        "这个",
+        "然后",
+        "就是",
+        "可以",
+        "需要",
+        "进行",
+        "一个",
+        "一种",
+        "我们",
+        "他们",
+        "东西",
+        "开头",
+        "比如",
+        "可能",
+        "相当于",
+    }
     ordered = []
     for term in terms:
         clean = term.strip()
@@ -87,9 +103,9 @@ class TechFeatureExtractorTool(HermesTool):
                 features.append(
                     {
                         "name": label,
-                        "description": f"围绕当前技术对象（{ '、'.join(key_terms[:5]) or '待Agent判断' }）执行{label}。",
+                        "description": "检测到该类技术动作信号；具体技术特征名称和保护重点必须由 Agent 结合完整发明事实判断。",
                         "is_innovative": True,
-                        "technical_significance": "为撰写 Agent 组织方法步骤、系统模块和从属限定提供客观输入信号。",
+                        "technical_significance": "为 Agent 识别方法步骤、系统模块和从属限定提供客观关键词证据。",
                         "evidence_keywords": evidence,
                     }
                 )
@@ -98,9 +114,9 @@ class TechFeatureExtractorTool(HermesTool):
             features.append(
                 {
                     "name": "结构化技术处理流程",
-                    "description": "从输入信息中形成可执行的数据处理或控制流程。",
+                    "description": "未检测到足够稳定的动作关键词；需要 Agent 通过 LLM 结合全文判断真实技术流程。",
                     "is_innovative": True,
-                    "technical_significance": "为专利方案抽象为方法、系统和介质权利要求提供基础。",
+                    "technical_significance": "提示 Agent 不应依赖本地工具直接得出创新特征。",
                     "evidence_keywords": [],
                 }
             )
@@ -126,7 +142,8 @@ class TechFeatureExtractorTool(HermesTool):
             "core_innovation": core_innovation,
             "technical_problem": technical_problem,
             "beneficial_effects": beneficial_effects,
-            "cleaned_description_preview": text[:800],
+            "evidence_terms": key_terms,
+            "requires_agent_judgment": True,
         }
 
         return make_tool_output(

@@ -20,7 +20,7 @@ IPC_RULES = [
     },
     {
         "code": "G09G 5/00",
-        "keywords": ["显示", "屏幕", "显示面", "多屏", "拼接屏", "LED", "折幕", "Cave"],
+        "keywords": ["显示", "屏幕", "显示面", "多屏", "拼接屏", "LED", "投影", "显示参数", "画面输出"],
         "reason": "涉及显示装置控制、多显示面输出或显示参数调节。",
     },
     {
@@ -86,13 +86,21 @@ class IPCClassifierTool(HermesTool):
         matches.sort(key=lambda item: item["score"], reverse=True)
 
         if not matches:
-            matches = [
-                {
-                    "code": "G06F 17/00",
-                    "score": 1,
-                    "reason": "文本描述涉及数据处理流程，但未命中特定领域关键词。",
-                }
-            ]
+            data = {
+                "primary_code": "",
+                "secondary_codes": [],
+                "classification_rationale": "未命中可追溯 IPC 分类关键词，需由需求分析 Agent 基于当前技术事实补充分类判断。",
+                "confidence": 0.0,
+                "matched_keywords": {},
+                "requires_agent_judgment": True,
+            }
+            return make_tool_output(
+                tool_name=self.name,
+                data=data,
+                success=True,
+                raw_response=json.dumps(data, ensure_ascii=False),
+                start_time=start_time,
+            )
 
         primary = matches[0]
         secondary = [item["code"] for item in matches[1:4]]

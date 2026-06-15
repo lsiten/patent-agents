@@ -19,7 +19,6 @@ _BACKEND_DIR = Path(__file__).resolve().parents[3]
 _PROFILES_DIR = _BACKEND_DIR / "hermes_home" / "profiles"
 
 _MAX_LOG_RECORDS = 30
-_MAX_RENDERED_EXAMPLES = 6
 
 
 AGENT_SKILL_TARGETS: Dict[str, Dict[str, str]] = {
@@ -72,7 +71,29 @@ def _load_records(path: Path) -> List[Dict[str, Any]]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return []
-    return data if isinstance(data, list) else []
+    if not isinstance(data, list):
+        return []
+
+    safe_records: List[Dict[str, Any]] = []
+    forbidden_keys = {
+        "task_id",
+        "title",
+        "technical_problem",
+        "innovation_points",
+        "strategy",
+        "final_document_path",
+        "drawing_titles",
+        "review_issues",
+    }
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        if item.get("record_type") != "abstract_workflow_lesson":
+            continue
+        if any(key in item for key in forbidden_keys):
+            continue
+        safe_records.append(item)
+    return safe_records
 
 
 def _write_json(path: Path, data: Any) -> None:
@@ -95,6 +116,24 @@ def _review_issues(snapshot: Dict[str, Any]) -> List[str]:
     return [item for item in issues if item][:8]
 
 
+def _issue_categories(issues: Iterable[str]) -> List[str]:
+    categories: List[str] = []
+    mapping = [
+        (("标题", "发明名称"), "标题需清楚、简要且与技术主题一致"),
+        (("摘要",), "摘要需包含专利名称、技术领域、简化方案和技术效果"),
+        (("权利要求", "独立权利要求", "从属"), "权利要求需短句分行、独权3或4步、从权逐项限定"),
+        (("说明书", "实施方式", "公开"), "说明书需充分公开可实施细节并避免Markdown和交底噪声"),
+        (("附图", "图号", "图片"), "附图需按当前专利内容逐图差异化生成并插入DOCX"),
+        (("DOCX", "下载", "文件"), "最终DOCX路径、图片资源和下载可用性必须确认"),
+        (("检索", "现有技术", "创造性"), "检索报告需支撑区别特征和创造性论证"),
+    ]
+    joined_issues = "；".join(str(item) for item in issues)
+    for keywords, category in mapping:
+        if any(keyword in joined_issues for keyword in keywords) and category not in categories:
+            categories.append(category)
+    return categories[:8]
+
+
 def _last_phase_status(snapshot: Dict[str, Any], phase_name: str) -> str:
     history = _as_list(snapshot.get("phase_history"))
     matched = [
@@ -112,36 +151,35 @@ def _build_record(agent_profile: str, context: Any, snapshot: Dict[str, Any]) ->
     retrieval = _as_dict(getattr(context, "retrieval_report", {}))
     feedback = _as_dict(snapshot.get("feedback"))
 
+    review_issues = _review_issues(snapshot)
     base = {
-        "task_id": snapshot.get("task_id", ""),
-        "title": _safe_text(snapshot.get("title") or getattr(context, "title", ""), 180),
+        "record_type": "abstract_workflow_lesson",
         "terminal_state": snapshot.get("terminal_state", ""),
         "generated_at": datetime.now().isoformat(),
         "iteration_count": _as_dict(snapshot.get("context")).get("iteration_count", 0),
-        "review_score": feedback.get("review_score"),
         "review_recommendation": _safe_text(feedback.get("review_recommendation"), 80),
-        "review_issues": _review_issues(snapshot),
+        "review_issue_categories": _issue_categories(review_issues),
     }
 
     if agent_profile == "ceo":
         base.update({
             "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
             "loop_topology": _as_dict(snapshot.get("policy")).get("topology", []),
-            "quality_remediation": feedback.get("quality_remediation") or {},
+            "quality_remediation_required": bool(feedback.get("quality_remediation")),
         })
     elif agent_profile == "requirement_analyst":
         base.update({
             "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
             "phase_status": _last_phase_status(snapshot, "requirement"),
-            "innovation_points": _as_list(requirements.get("innovation_points"))[:8],
-            "technical_problem": _safe_text(requirements.get("technical_problem"), 260),
+            "has_innovation_points": bool(_as_list(requirements.get("innovation_points"))),
+            "has_technical_problem": bool(_safe_text(requirements.get("technical_problem"), 260)),
         })
     elif agent_profile == "retrieval_analyst":
         strategy = retrieval.get("retrieval_strategy") or retrieval.get("search_strategy") or {}
         base.update({
             "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
             "phase_status": _last_phase_status(snapshot, "retrieval"),
-            "strategy": strategy,
+            "has_search_strategy": bool(strategy),
             "key_references_count": len(_as_list(retrieval.get("key_references") or retrieval.get("references"))),
         })
     elif agent_profile == "patent_writer":
@@ -150,8 +188,8 @@ def _build_record(agent_profile: str, context: Any, snapshot: Dict[str, Any]) ->
             "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
             "phase_status": _last_phase_status(snapshot, "writing"),
             "has_drawings": bool(drawings),
-            "drawing_titles": [_safe_text(item.get("title") if isinstance(item, dict) else item, 120) for item in drawings[:8]],
-            "final_document_path": _as_dict(snapshot.get("context")).get("final_document_path", ""),
+            "drawing_count": len(drawings),
+            "has_final_document": bool(_as_dict(snapshot.get("context")).get("final_document_path", "")),
         })
     elif agent_profile == "quality_reviewer":
         base.update({
@@ -164,24 +202,19 @@ def _build_record(agent_profile: str, context: Any, snapshot: Dict[str, Any]) ->
 
 
 def _dedupe_append(records: List[Dict[str, Any]], record: Dict[str, Any]) -> List[Dict[str, Any]]:
-    task_id = record.get("task_id")
-    records = [item for item in records if item.get("task_id") != task_id]
     records.append(record)
     return records[-_MAX_LOG_RECORDS:]
 
 
 def _render_examples(records: Iterable[Dict[str, Any]]) -> str:
-    lines: List[str] = []
-    for item in list(records)[-_MAX_RENDERED_EXAMPLES:]:
-        title = _safe_text(item.get("title"), 120) or item.get("task_id", "unknown")
-        state = item.get("terminal_state", "unknown")
-        score = item.get("review_score")
-        score_text = f"，审查分 {score}" if score is not None else ""
-        lines.append(f"- `{item.get('task_id', '')}`：{title}；状态 `{state}`{score_text}。")
-        issues = item.get("review_issues") or []
-        if issues:
-            lines.append(f"  复用提醒：{_safe_text('；'.join(issues[:2]), 260)}")
-    return "\n".join(lines) if lines else "- 暂无样本。"
+    categories: List[str] = []
+    for item in records:
+        for category in item.get("review_issue_categories") or []:
+            if category not in categories:
+                categories.append(category)
+    if not categories:
+        return "- 暂无抽象缺陷类型。"
+    return "\n".join(f"- {category}" for category in categories[:8])
 
 
 def _render_skill(agent_profile: str, target: Dict[str, str], records: List[Dict[str, Any]]) -> str:
@@ -246,14 +279,14 @@ metadata:
 
 {guidance}
 
-## 最近样本
+## 可复用缺陷类型
 
 {examples}
 
 ## 使用要求
 
 - 本技能是 Hermes profile-local skill，随对应 Agent 的 `HERMES_HOME` 加载。
-- 只沉淀可复用方法、缺陷类型和修复策略，不把完整交底原文或用户隐私内容写入技能。
+- 只沉淀可复用方法、缺陷类型和修复策略；禁止写入任务 ID、历史标题、历史附图标题、完整交底原文或用户隐私内容。
 - 新一轮流程遇到相同缺陷时，先复用这里的修复策略，再调用工具或请求补充信息。
 """
 

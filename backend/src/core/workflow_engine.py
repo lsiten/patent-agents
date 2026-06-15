@@ -203,7 +203,7 @@ class WorkflowContext:
         self.created_at = datetime.now()
         self.updated_at = self.created_at
 
-        # 专利标题（从技术描述中提取）
+        # 专利标题（仅接收用户明确给出的发明名称或 Agent 产出的标题）
         self.title: str = ""
 
         # 原始输入
@@ -382,27 +382,29 @@ class PatentWorkflowEngine:
 
     @staticmethod
     def _extract_title(description: str) -> str:
-        """从技术描述中提取专利标题"""
+        """Extract only an explicitly provided invention title.
+
+        Meeting transcripts often begin with casual speech. Guessing a title from
+        the first sentence leaks disclosure artifacts into the patent document, so
+        missing titles must remain empty and be handled by the drafting/review loop.
+        """
         if not description:
-            return "未命名专利"
+            return ""
         text = PatentWorkflowEngine._sanitize_disclosure_text(description)
-        # 取第一句或前40字符作为标题
-        # 按句号、换行截断（逗号不截断，保留完整短语）
-        for sep in ["。", ".", "\n", "；", ";"]:
-            idx = text.find(sep, 0, 80)
-            if idx > 0:
-                text = text[:idx]
-                break
-        text = re.sub(r"^本发明(?:公开|涉及|提供|提出)了?", "", text).strip(" ：:，,。")
-        # 如果仍然太长，在逗号处截断
-        if len(text) > 40:
-            comma_idx = text.find("，", 0, 50) or text.find(",", 0, 50)
-            if comma_idx and comma_idx > 0:
-                text = text[:comma_idx]
-        # 最终限制
-        if len(text) > 50:
-            text = text[:50]
-        return text.strip() or "未命名专利"
+        explicit_patterns = [
+            r"(?:^|\n)\s*(?:发明名称|专利名称|申请名称|技术名称)\s*[:：]\s*(.+)",
+            r"(?:^|\n)\s*名称\s*[:：]\s*(.+)",
+        ]
+        for pattern in explicit_patterns:
+            match = re.search(pattern, text)
+            if not match:
+                continue
+            title = str(match.group(1) or "").strip()
+            title = re.split(r"[\n。；;]", title, maxsplit=1)[0].strip(" ：:，,。")
+            title = re.sub(r"^(一种|一项)?待命名[:：]?", "", title).strip()
+            if 2 <= len(title) <= 60 and not re.search(r"\d{1,2}:\d{2}|\d{2}:\d{2}:\d{2}", title):
+                return title
+        return ""
 
     def get_workflow(self, task_id: str) -> Optional[WorkflowContext]:
         """获取工作流上下文"""
@@ -523,6 +525,18 @@ class PatentWorkflowEngine:
             for agent_id, profile_id, context_field, phase_state, phase_enum in phases:
                 if context.metadata.get("cancel_requested") or context.current_phase == WorkflowState.CANCELLED:
                     raise asyncio.CancelledError()
+                if phase_state == WorkflowState.PATENT_WRITING:
+                    ready_to_write = await self._ensure_prewriting_ready(
+                        context,
+                        event_callback=event_callback,
+                    )
+                    if not ready_to_write:
+                        await self._persist_loop_and_sediment_skills(
+                            context,
+                            "awaiting_user_decision",
+                            event_callback,
+                        )
+                        return context
                 phase_started_at = time.perf_counter()
                 context.current_phase = phase_state
                 await self._publish_progress_event(context, phase_state, "running")
@@ -668,7 +682,7 @@ class PatentWorkflowEngine:
                     )
                     context_data = self._apply_patent_manual_normalization(
                         context_data,
-                        fallback_title=context.title,
+                        context_title=context.title,
                     )
                     context_data = await self._refresh_working_draft_docx(
                         context,
@@ -907,6 +921,19 @@ class PatentWorkflowEngine:
                             event_callback=event_callback,
                         )
 
+                    ready_to_write = await self._ensure_prewriting_ready(
+                        context,
+                        event_callback=event_callback,
+                        max_attempts=2,
+                    )
+                    if not ready_to_write:
+                        await self._persist_loop_and_sediment_skills(
+                            context,
+                            "awaiting_user_decision",
+                            event_callback,
+                        )
+                        return context
+
                     # ── 修正撰写 ──
                     revision_started_at = time.perf_counter()
                     context.current_phase = WorkflowState.PATENT_WRITING
@@ -1006,7 +1033,7 @@ class PatentWorkflowEngine:
                         )
                         context_data = self._apply_patent_manual_normalization(
                             context_data,
-                            fallback_title=context.title,
+                            context_title=context.title,
                         )
                         context_data = await self._refresh_working_draft_docx(
                             context,
@@ -1224,7 +1251,7 @@ class PatentWorkflowEngine:
                     draft = context.patent_draft
                     draft = self._apply_patent_manual_normalization(
                         draft,
-                        fallback_title=context.title,
+                        context_title=context.title,
                     )
                     context.patent_draft = draft
                     claims_data = draft.get("claims", {})
@@ -1533,7 +1560,7 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
 
         start_hint = ""
         if force_start_from:
-            start_hint = f"\n请从【{force_start_from.value}】阶段重新开始（这是第{context.iteration_count}轮迭代修正）。"
+            start_hint = f"\n请从【{force_start_from.value}】阶段继续迭代修正（这是第{context.iteration_count}轮），必须基于已有成果和修正建议增量优化，不得无故从头重写。"
 
         target_country = context.metadata.get("target_country", "中国")
 
@@ -1564,16 +1591,13 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
         """
         base = context.get_combined_input()
 
-        # 强制工具调用前缀（针对不同阶段）
+        # 阶段契约前缀：工具提供客观信号/外部产物，阶段结论必须由对应 Hermes Agent LLM 判断。
         TOOL_FORCE_PREFIX = {
-            WorkflowState.REQUIREMENT_ANALYSIS: """【强制工具调用指令 - 必须严格执行】
-在输出任何分析结论之前，你必须按以下顺序调用工具：
-1. 首先调用 transcript_sanitizer 工具清洗交底逐字稿、时间戳和说话人格式
-2. 然后调用 ipc_classifier 工具
-3. 接着调用 tech_feature_extractor 工具
-4. 最后调用 scenario_miner 工具
-只有在获得所有工具返回结果后，才能由你作为需求分析 Agent 通过 LLM 综合判断并生成最终JSON输出。
-不得把逐字稿时间戳、说话人或会议口语写入需求分析结论。
+            WorkflowState.REQUIREMENT_ANALYSIS: """【需求分析阶段输出契约】
+你必须先加载并遵守本 profile 的需求分析 skills，最终结论由你作为需求分析 Agent 的 LLM 判断。
+可调用 transcript_sanitizer、ipc_classifier、tech_feature_extractor、scenario_miner 获取客观信号；工具结果只能作为线索，不能替代技术领域、创新点、保护主题、专利类型和信息缺口判断。
+如果工具信号不足，必须在输出中如实标注 `tool_signal_insufficient`，不得用本地规则或工具空结果代替 Agent 结论。
+最终 JSON 必须剔除逐字稿时间戳、说话人、寒暄和会议口语。
 ---
 
 """,
@@ -1587,24 +1611,18 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
 ---
 
 """,
-            WorkflowState.PATENT_WRITING: """【强制工具调用指令 - 必须严格执行】
-在输出任何专利文件内容之前，你必须调用以下工具：
-1. 调用 claim_drafter 工具获取权利要求撰写骨架和客观约束
-2. 调用 description_writer 工具获取说明书章节约束和客观提示
-3. 如果发明涉及结构、装置、系统、流程、空间关系或说明书包含附图说明，必须调用 patent_drawing_generator 工具生成附图
-4. 调用 support_checker 工具检查支持性
-只有在获得所有工具返回结果后，才能由你作为 Agent 通过 LLM 生成正式权利要求、说明书、摘要和最终JSON输出。
+            WorkflowState.PATENT_WRITING: """【专利撰写阶段输出契约】
+你必须先加载并遵守本 profile 的撰写、权利要求、附图和规范 skills；正式专利正文由你作为专利撰写 Agent 的 LLM 分段生成。
+claim_drafter、description_writer、terminology_normalizer、support_checker 只提供结构、约束和客观信号，不能替代正式权利要求、说明书和摘要。
+如果发明涉及结构、装置、系统、流程、空间关系或说明书包含附图说明，必须由你调用 patent_drawing_generator 为每一张附图分别生成真实附图，且绘图输入必须来自当前专利内容。
 注意：当前阶段只生成审查前的专利草稿和附图，不得调用 patent_docx_generator；最终 DOCX 必须在质量审查合格后由工作流统一生成。
 ---
 
 """,
-            WorkflowState.QUALITY_REVIEW: """【强制工具调用指令 - 必须严格执行】
-在输出任何审查结论之前，你必须按以下顺序调用工具：
-1. 首先调用 compliance_checker 工具检查形式合规性
-2. 然后调用 claim_quality_analyzer 工具分析权利要求质量
-3. 接着调用 support_verifier 工具验证支持性
-4. 最后调用 oa_predictor 工具预判审查风险
-只有在获得所有工具返回结果后，才能由你作为质量审查 Agent 通过 LLM 综合判断并生成最终JSON输出。
+            WorkflowState.QUALITY_REVIEW: """【质量审查阶段输出契约】
+你必须先加载并遵守本 profile 的质量审查 skills；最终评分、是否通过、是否需要补正和修复路径必须由你作为质量审查 Agent 的 LLM 判断。
+可调用 compliance_checker、claim_quality_analyzer、support_verifier、oa_predictor 获取客观信号和审查线索；工具结果不能替代内容质量、创造性、充分公开、权利要求清楚性和附图一致性的专业判断。
+必须同时审查文本、权利要求、说明书、附图是否缺失/重复、图号和 DOCX 插图位置。发现问题时输出可由 CEO 调度的缺陷清单。
 ---
 
 """,
@@ -1612,13 +1630,10 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
 
         # content_only 模式 — 用于质量门前的专利内容生成，不生成 .docx
         CONTENT_ONLY_TOOL_FORCE_PREFIX = {
-            WorkflowState.PATENT_WRITING: """【强制工具调用指令 - 必须严格执行】
-在输出任何专利文件内容之前，你必须调用以下工具：
-1. 调用 claim_drafter 工具获取权利要求撰写骨架和客观约束
-2. 调用 description_writer 工具获取说明书章节约束和客观提示
-3. 如果发明涉及结构、装置、系统、流程、空间关系或说明书包含附图说明，必须调用 patent_drawing_generator 工具生成附图
-4. 调用 support_checker 工具检查支持性
-只有在获得所有工具返回结果后，才能由你作为 Agent 通过 LLM 生成正式权利要求、说明书、摘要和最终JSON输出。
+            WorkflowState.PATENT_WRITING: """【专利撰写阶段输出契约】
+你必须先加载并遵守本 profile 的撰写、权利要求、附图和规范 skills；正式专利正文由你作为专利撰写 Agent 的 LLM 分段生成。
+claim_drafter、description_writer、terminology_normalizer、support_checker 只提供结构、约束和客观信号，不能替代正式权利要求、说明书和摘要。
+如果发明涉及结构、装置、系统、流程、空间关系或说明书包含附图说明，必须由你调用 patent_drawing_generator 为每一张附图分别生成真实附图，且绘图输入必须来自当前专利内容。
 注意：工具不能替代你的专利撰写判断；不得调用 patent_docx_generator。
 ---
 
@@ -1684,6 +1699,57 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
             return f"{tool_prefix}对以下专利申请文件进行质量审查：\n\n{draft}{country_hint_map[phase]}"
 
         return base
+
+    def _build_phase_continuation_prompt(
+        self,
+        context: WorkflowContext,
+        phase: WorkflowState,
+        base_prompt: str,
+    ) -> str:
+        """Wrap a remediation phase prompt so each round improves the last result.
+
+        A remediation round must preserve valid parts from the previous round and
+        only amend the issues that CEO/reviewer/gates identified. The Agent still
+        returns a complete updated JSON so downstream rendering remains simple.
+        """
+        context_field = _PHASE_CONTEXT_FIELDS.get(phase)
+        previous_output = getattr(context, context_field, {}) if context_field else {}
+        suggestions = [
+            str(item).strip()
+            for item in (context.latest_revision_suggestions or [])
+            if str(item).strip()
+        ]
+        has_previous = isinstance(previous_output, dict) and bool(previous_output)
+        if not has_previous and not suggestions:
+            return base_prompt
+
+        previous_text = (
+            json.dumps(previous_output, ensure_ascii=False, indent=2)[:12000]
+            if has_previous
+            else "无"
+        )
+        suggestions_text = "\n".join(
+            f"{index}. {item}" for index, item in enumerate(suggestions[:20], start=1)
+        ) or "无"
+
+        return f"""{base_prompt}
+
+---
+
+【本轮是迭代补充/修正，不是重新开始】
+你必须基于上一轮本阶段结果继续优化：
+- 保留上一轮已经正确、已被后续阶段使用或已通过检查的内容；
+- 只针对本轮反馈指出的问题补充、修正或替换；
+- 如果需求分析更新导致检索依据变化，检索阶段应复用上一轮可用证据并补充新的检索证据，不得删除仍然有效的对比文件；
+- 如果撰写阶段修正，必须保留未被反馈指出有问题的权利要求、说明书章节、摘要和附图，只修改需要修复的部分；
+- 最终仍输出完整的本阶段 JSON，而不是只输出差异。
+
+【上一轮本阶段结果】
+{previous_text}
+
+【本轮必须解决的反馈/缺口】
+{suggestions_text}
+"""
 
     def _build_quality_review_draft_summary(self, draft: Dict[str, Any]) -> str:
         if not isinstance(draft, dict):
@@ -1990,6 +2056,311 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             "resume_phase": self._resolve_remediation_resume_phase(classification).value,
         }
 
+    def _iter_phase_text_values(self, value: Any) -> List[str]:
+        texts: List[str] = []
+        if isinstance(value, str):
+            if value.strip():
+                texts.append(value)
+        elif isinstance(value, dict):
+            for nested in value.values():
+                texts.extend(self._iter_phase_text_values(nested))
+        elif isinstance(value, list):
+            for item in value:
+                texts.extend(self._iter_phase_text_values(item))
+        return texts
+
+    def _has_phase_signal(self, value: Any, *needles: str) -> bool:
+        combined = "\n".join(self._iter_phase_text_values(value)).lower()
+        return any(needle.lower() in combined for needle in needles)
+
+    def _as_nonempty_list(self, value: Any) -> List[Any]:
+        if isinstance(value, list):
+            return [item for item in value if str(item).strip()]
+        if isinstance(value, str) and value.strip():
+            return [value.strip()]
+        return []
+
+    def _has_real_retrieval_evidence(self, report: Dict[str, Any]) -> bool:
+        candidate_fields = (
+            "prior_art_references",
+            "similar_patents",
+            "search_results",
+            "patent_results",
+            "web_evidence",
+            "non_patent_prior_art",
+            "evidence_sources",
+        )
+        for field_name in candidate_fields:
+            items = report.get(field_name)
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict):
+                        reference_id = str(
+                            item.get("reference_id")
+                            or item.get("patent_id")
+                            or item.get("publication_number")
+                            or item.get("url")
+                            or item.get("title")
+                            or ""
+                        ).strip()
+                        if reference_id:
+                            return True
+                    elif str(item).strip():
+                        return True
+            elif isinstance(items, dict) and any(str(v).strip() for v in items.values()):
+                return True
+        tool_results = report.get("tool_results")
+        if isinstance(tool_results, list):
+            for result in tool_results:
+                if not isinstance(result, dict) or result.get("success") is False:
+                    continue
+                result_text = "\n".join(self._iter_phase_text_values(result.get("result")))
+                if re.search(r"\b(CN|US|EP|WO|JP)\s?\d{4,}", result_text, re.IGNORECASE):
+                    return True
+                if re.search(r"https?://", result_text):
+                    return True
+        return False
+
+    def _collect_prewriting_blockers(self, context: WorkflowContext) -> List[Dict[str, str]]:
+        """Return blockers that must be resolved before the writer Agent runs.
+
+        The gate only checks workflow readiness. It does not synthesize patent
+        substance; unresolved items are routed back to the responsible Hermes Agent.
+        """
+        blockers: List[Dict[str, str]] = []
+        req = context.requirement_analysis
+        if not isinstance(req, dict) or not req:
+            return [{
+                "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
+                "severity": "critical",
+                "message": "需求分析结果缺失，不能进入专利撰写。",
+            }]
+        if req.get("_agent_failed") is True:
+            blockers.append({
+                "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
+                "severity": "critical",
+                "message": f"需求分析 Agent 执行失败：{str(req.get('_agent_error') or '')[:220]}",
+            })
+
+        required_requirement_fields = [
+            ("tech_field", "技术领域"),
+            ("core_principle", "核心原理"),
+            ("technical_problem", "技术问题"),
+            ("beneficial_effects", "有益效果"),
+            ("key_innovative_features", "关键创新特征"),
+            ("application_scenarios", "应用场景"),
+            ("patent_type_recommendation", "专利类型建议"),
+            ("claim_skeleton", "权利要求骨架"),
+        ]
+        for field_name, label in required_requirement_fields:
+            value = req.get(field_name)
+            if isinstance(value, dict):
+                has_value = any(str(v).strip() for v in value.values())
+            elif isinstance(value, list):
+                has_value = bool(self._as_nonempty_list(value))
+            else:
+                has_value = bool(str(value or "").strip())
+            if not has_value:
+                blockers.append({
+                    "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
+                    "severity": "high",
+                    "message": f"需求分析缺少{label}，撰写前必须由需求分析 Agent 补齐。",
+                })
+
+        claim_skeleton = req.get("claim_skeleton")
+        if isinstance(claim_skeleton, dict):
+            step_count = claim_skeleton.get("step_count")
+            steps = claim_skeleton.get("steps")
+            actual_step_count = len(steps) if isinstance(steps, list) else step_count
+            if actual_step_count not in (3, 4):
+                blockers.append({
+                    "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
+                    "severity": "high",
+                    "message": "需求分析中的独权骨架不是3步或4步，必须先修正保护方案再撰写。",
+                })
+
+        gaps = self._as_nonempty_list(req.get("information_gaps"))
+        if gaps:
+            blockers.append({
+                "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
+                "severity": "high",
+                "message": "需求分析仍存在信息缺口，不能直接交给撰写 Agent：" + "；".join(str(item)[:120] for item in gaps[:5]),
+            })
+        if self._has_phase_signal(req, "tool_signal_insufficient", "knowledge_insufficient", "genuinely_missing"):
+            blockers.append({
+                "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
+                "severity": "high",
+                "message": "需求分析标记了未解决的信息不足信号，必须先由 CEO 调度补齐或确认。",
+            })
+
+        ret = context.retrieval_report
+        if not isinstance(ret, dict) or not ret:
+            blockers.append({
+                "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
+                "severity": "critical",
+                "message": "检索分析结果缺失，不能进入专利撰写。",
+            })
+            return blockers
+        if ret.get("_agent_failed") is True:
+            blockers.append({
+                "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
+                "severity": "critical",
+                "message": f"检索分析 Agent 执行失败：{str(ret.get('_agent_error') or '')[:220]}",
+            })
+
+        strategy = ret.get("retrieval_strategy")
+        if isinstance(strategy, dict):
+            keywords = self._as_nonempty_list(strategy.get("keywords") or ret.get("retrieval_keywords"))
+            databases = self._as_nonempty_list(strategy.get("databases_used") or ret.get("retrieval_databases"))
+        else:
+            keywords = self._as_nonempty_list(ret.get("retrieval_keywords"))
+            databases = self._as_nonempty_list(ret.get("retrieval_databases"))
+        if len(keywords) < 3:
+            blockers.append({
+                "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
+                "severity": "high",
+                "message": "检索策略缺少足够的实际检索关键词，必须补充检索。",
+            })
+        if not databases:
+            blockers.append({
+                "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
+                "severity": "high",
+                "message": "检索报告未记录实际使用的数据源，必须补充检索证据。",
+            })
+        if not self._has_real_retrieval_evidence(ret):
+            blockers.append({
+                "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
+                "severity": "high",
+                "message": "检索报告没有可核验的专利或网页证据列表，不能进入撰写。",
+            })
+        evidence_gaps = self._as_nonempty_list(ret.get("evidence_gaps"))
+        if evidence_gaps:
+            blockers.append({
+                "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
+                "severity": "high",
+                "message": "检索报告仍存在证据缺口：" + "；".join(str(item)[:120] for item in evidence_gaps[:5]),
+            })
+        if self._has_phase_signal(ret, "data_source_unavailable", "insufficient_evidence", "no_results"):
+            blockers.append({
+                "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
+                "severity": "high",
+                "message": "检索报告标记了数据源不可用、无结果或证据不足，必须先补充检索或明确风险。",
+            })
+
+        return blockers
+
+    def _select_prewriting_remediation_phase(self, blockers: List[Dict[str, str]]) -> WorkflowState:
+        phases = {item.get("phase") for item in blockers}
+        if WorkflowState.REQUIREMENT_ANALYSIS.value in phases:
+            return WorkflowState.REQUIREMENT_ANALYSIS
+        return WorkflowState.RETRIEVAL_ANALYSIS
+
+    async def _ensure_prewriting_ready(
+        self,
+        context: WorkflowContext,
+        event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
+        max_attempts: int = 3,
+    ) -> bool:
+        attempts = int(context.metadata.get("prewriting_gate_attempts", 0) or 0)
+
+        while True:
+            blockers = self._collect_prewriting_blockers(context)
+            if not blockers:
+                context.metadata.pop("prewriting_gate_blockers", None)
+                context.metadata["prewriting_gate_passed"] = True
+                if attempts and event_callback:
+                    event_callback(
+                        "CEO Agent",
+                        "agent.content",
+                        "✅ 撰写前置检查已通过：需求分析和检索问题已处理完毕",
+                        {
+                            "agent_name": "CEO Agent",
+                            "phase": "prewriting_gate",
+                            "content": "需求分析和检索分析已满足撰写前置条件。",
+                        },
+                    )
+                return True
+
+            context.metadata["prewriting_gate_passed"] = False
+            context.metadata["prewriting_gate_blockers"] = blockers
+            context.latest_revision_suggestions = [item["message"] for item in blockers]
+            issue_text = "\n".join(
+                f"{index}. [{item.get('phase')}] {item.get('message')}"
+                for index, item in enumerate(blockers[:12], start=1)
+            )
+            if event_callback:
+                event_callback(
+                    "CEO Agent",
+                    "agent.content",
+                    "🛑 撰写前置检查未通过，先补齐需求/检索问题\n" + issue_text,
+                    {
+                        "agent_name": "CEO Agent",
+                        "phase": "prewriting_gate",
+                        "content": issue_text,
+                        "blockers": blockers,
+                        "attempt": attempts,
+                    },
+                )
+
+            if attempts >= max_attempts:
+                context.current_phase = WorkflowState.AWAITING_USER_DECISION
+                context.metadata["quality_remediation"] = {
+                    "classification": "prewriting_gate_blocked",
+                    "missing_information": [item["message"] for item in blockers],
+                    "attempt_count": attempts,
+                    "recommended_next_action": "provide_info",
+                    "resume_phase": self._select_prewriting_remediation_phase(blockers).value,
+                }
+                await self._publish_progress_event(
+                    context,
+                    WorkflowState.AWAITING_USER_DECISION,
+                    "waiting",
+                )
+                return False
+
+            attempts += 1
+            context.metadata["prewriting_gate_attempts"] = attempts
+            phase = self._select_prewriting_remediation_phase(blockers)
+            if event_callback:
+                event_callback(
+                    "CEO Agent",
+                    "agent.dispatch",
+                    f"🎯 撰写前置检查要求先调度 → {_PHASE_DISPLAY_NAMES.get(phase, phase.value)}（第{attempts}轮）",
+                    {
+                        "from_agent": "CEO Agent",
+                        "to_agent": _PHASE_DISPLAY_NAMES.get(phase, phase.value),
+                        "phase": "prewriting_gate",
+                        "task_description": issue_text[:1000],
+                        "attempt": attempts,
+                    },
+                )
+            await self._execute_remediation_phase(
+                context,
+                phase,
+                event_callback=event_callback,
+            )
+            if phase == WorkflowState.REQUIREMENT_ANALYSIS:
+                if event_callback:
+                    event_callback(
+                        "CEO Agent",
+                        "agent.dispatch",
+                        "🎯 需求分析已更新，重新调度 → 检索分析 Agent",
+                        {
+                            "from_agent": "CEO Agent",
+                            "to_agent": _PHASE_DISPLAY_NAMES.get(
+                                WorkflowState.RETRIEVAL_ANALYSIS,
+                                "检索分析 Agent",
+                            ),
+                            "phase": "prewriting_gate",
+                            "attempt": attempts,
+                        },
+                    )
+                await self._execute_remediation_phase(
+                    context,
+                    WorkflowState.RETRIEVAL_ANALYSIS,
+                    event_callback=event_callback,
+                )
+
     def _build_writer_failure_review(self, patent_draft: Dict[str, Any]) -> Dict[str, Any]:
         """Convert an invalid writer result into a quality issue for CEO remediation."""
         error = ""
@@ -2052,7 +2423,11 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         context.current_phase = phase_state
         await self._publish_progress_event(context, phase_state, "running")
 
-        task_desc = self._build_phase_prompt(context, phase_state)
+        task_desc = self._build_phase_continuation_prompt(
+            context,
+            phase_state,
+            self._build_phase_prompt(context, phase_state),
+        )
         agent_display_name = _PHASE_DISPLAY_NAMES.get(phase_state, phase_state.value)
 
         if event_callback:
@@ -2631,16 +3006,14 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
     def _apply_patent_manual_normalization(
         self,
         draft: Dict[str, Any],
-        fallback_title: str = "",
+        context_title: str = "",
     ) -> Dict[str, Any]:
         """Apply deterministic manual rules and attach objective compliance signals."""
         if not isinstance(draft, dict):
             return draft
         normalized = dict(draft)
-        if not str(normalized.get("title") or normalized.get("patent_title") or "").strip():
-            title = str(fallback_title or "").strip()
-            if title:
-                normalized["title"] = title
+        # Do not infer or fill patent titles from the disclosure context. If the
+        # Agent omits a title, compliance review must surface the defect.
         claims = normalized.get("claims") or {}
         if isinstance(claims, dict):
             normalized["claims"] = normalize_claims_payload_linebreaks(claims)
@@ -2823,7 +3196,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         draft = (
             self._apply_patent_manual_normalization(
                 context.patent_draft,
-                fallback_title=context.title,
+                context_title=context.title,
             )
             if isinstance(context.patent_draft, dict)
             else {}
@@ -3205,10 +3578,12 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 {draft_summary}
 
 ## 修正要求：
-1. 逐一解决上述所有问题
-2. 保持原有文件结构不变（权利要求书+说明书+摘要）
-3. 修正后输出完整的JSON格式专利文件
-4. 确保修改后权利要求与说明书的一致性"""
+1. 这是基于上一轮专利文件的迭代修正，不是重新开始；上一轮已正确且未被指出问题的内容必须保留
+2. 逐一解决上述所有问题；仅替换或补充需要修复的权利要求、说明书章节、摘要或附图
+3. 如果需求分析或检索报告中已有明确结论，不得丢弃；如确需调整，必须与审查问题直接相关
+4. 保持原有文件结构不变（权利要求书+说明书+摘要+必要附图）
+5. 修正后输出完整的JSON格式专利文件，而不是只输出修改片段
+6. 确保修改后权利要求与说明书、附图的一致性"""
 
     def _parse_ceo_output(self, context: WorkflowContext, result_text: str) -> None:
         """从 dispatch_specialist 缓存中读取各专业 Agent 的实际输出填入 context
@@ -3897,7 +4272,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         }
         patent_result = self._apply_patent_manual_normalization(
             patent_result,
-            fallback_title=context.title,
+            context_title=context.title,
         )
 
         claims_count = 1 + len(patent_result["claims"]["dependent_claims"]) if patent_result["claims"]["independent_claim"] else 0
@@ -5148,7 +5523,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         context: WorkflowContext,
         event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
         round_label: str = "",
-        timeout_seconds: int = 150,
+        timeout_seconds: int = 900,
     ) -> tuple[str, Dict[str, Any]]:
         """Run the quality reviewer with a bounded wait.
 
@@ -5212,7 +5587,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 "overall_score": 0.0,
                 "overall_rating": "needs_revision",
                 "recommendation": "revise",
-                "reviewer_notes": "质量审查 Agent 未返回可信审查结果，不能由本地规则或兜底审查替代通过。",
+                "reviewer_notes": "质量审查 Agent 未返回可信审查结果，不能由本地规则替代通过。",
             },
             "formal_compliance_review": {"score": 0.0, "passed": False, "issues": []},
             "claims_review": {"issues": []},
@@ -5358,7 +5733,13 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 
         try:
             event_count = 0
-            AGENT_TIMEOUT_SECONDS = 240
+            try:
+                from src.core.config import settings
+
+                configured_timeout = int(getattr(settings.workflow, "agent_timeout", 600) or 600)
+            except Exception:
+                configured_timeout = 600
+            AGENT_TIMEOUT_SECONDS = max(configured_timeout, 900)
             deadline = asyncio.get_event_loop().time() + AGENT_TIMEOUT_SECONDS
             while not result_holder["done"] or events:
                 if asyncio.get_event_loop().time() > deadline:

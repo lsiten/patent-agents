@@ -48,4 +48,4 @@ metadata:
 
 - 信息缺口是需求分析 Agent 的专业判断结果，不能由工具返回的空字段直接决定。
 - 不要把工具已覆盖的信息重复要求用户补充。
-- 缺口必须写成用户可回答的短句，并标注来源：`tool_infer_failed`、`knowledge_insufficient` 或 `genuinely_missing`。
+- 缺口必须写成用户可回答的短句，并标注来源：`tool_signal_insufficient`、`knowledge_insufficient` 或 `genuinely_missing`。

@@ -114,10 +114,10 @@ test('workflow phase preview uses successful phase history output when current o
             duration_seconds: 1,
             output: {
               tech_field: {
-                primary_domain: '沉浸式折幕显示控制技术',
-                secondary_domains: ['可重构展示空间'],
+                primary_domain: '自适应设备控制技术',
+                secondary_domains: ['多端协同控制'],
               },
-              core_principle: '根据观众姿态调整折幕画面映射',
+              core_principle: '根据状态数据调整设备协同控制策略',
             },
             issues: [],
             warnings: [],
@@ -139,6 +139,6 @@ test('workflow phase preview uses successful phase history output when current o
 
   await page.goto('/workflow/wf-phase-preview');
 
-  await expect(page.getByText('沉浸式折幕显示控制技术')).toBeVisible();
+  await expect(page.getByText('自适应设备控制技术')).toBeVisible();
   await expect(page.getByText('待分析')).toHaveCount(0);
 });

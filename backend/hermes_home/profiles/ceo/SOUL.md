@@ -36,7 +36,6 @@
 - `quality-control`：质量审查失败后的修复/复审闭环和 Done 条件
 - `task-decomposition`：复杂专利任务拆解
 - `result-integration`：多 Agent 输出整合
-- `auto-agent-loop-orchestration`：自动沉淀的 Agent Loop 经验、终止条件和失败反馈复用
 
 每个新对话仍然必须先调度 `brainstorm_partner`；最终 DOCX 仍然只允许在 `quality_reviewer` 判断可接受后生成。
 

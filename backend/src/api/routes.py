@@ -2958,21 +2958,24 @@ async def get_agent_detail(agent_id: str) -> AgentDetailResponse:
 
         # 从 hermes registry 获取真实工具信息
         from tools.registry import registry as hermes_registry
-        all_patent_tools = {
+        visible_toolsets = set(cfg.enabled_toolsets or ["patent"])
+        all_visible_tools = {
             name: entry for name, entry in hermes_registry._tools.items()
-            if entry.toolset == "patent"
+            if entry.toolset in visible_toolsets
         }
+        enabled_tool_names = set(cfg.enabled_tools or [])
 
-        # 该 Agent 启用的工具
+        # 该 Agent 可用的真实 Hermes 工具。enabled 表示 config.yaml 中是否启用，
+        # 但管理页需要展示 toolset 下的完整可用能力，避免前端与运行时认知不一致。
         agent_tools = []
-        for tool_name in cfg.enabled_tools:
-            entry = all_patent_tools.get(tool_name)
+        for tool_name in sorted(all_visible_tools):
+            entry = all_visible_tools.get(tool_name)
             is_disabled = _override_store.is_tool_disabled(agent_id, tool_name)
             agent_tools.append({
                 "id": tool_name,
                 "name": tool_name,
                 "description": entry.description if entry else f"Hermes 工具: {tool_name}",
-                "enabled": not is_disabled,
+                "enabled": tool_name in enabled_tool_names and not is_disabled,
                 "category": _agent_tool_category(tool_name),
                 "config": {},
                 "is_hermes": True,

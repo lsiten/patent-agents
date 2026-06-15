@@ -114,6 +114,28 @@ SPECIALIST_AGENTS = {
 _dispatch_results: List[Dict[str, Any]] = []
 
 
+SPECIALIST_TIMEOUT_SECONDS = {
+    # 专利撰写会分段生成正文并逐张生成附图，真实工具链可能持续数分钟。
+    "patent_writer": 1200,
+    "quality_reviewer": 900,
+    "retrieval_analyst": 900,
+    "requirement_analyst": 600,
+    "brainstorm_partner": 600,
+}
+
+
+def _get_specialist_timeout(agent_id: str) -> int:
+    """Return the execution boundary for a specialist Agent."""
+    configured_timeout = 600
+    try:
+        from src.core.config import settings
+
+        configured_timeout = int(getattr(settings.workflow, "agent_timeout", 600) or 600)
+    except Exception:
+        configured_timeout = 600
+    return max(configured_timeout, SPECIALIST_TIMEOUT_SECONDS.get(agent_id, configured_timeout))
+
+
 def get_dispatch_results() -> List[Dict[str, Any]]:
     """获取所有 dispatch 结果"""
     return list(_dispatch_results)
@@ -289,12 +311,13 @@ class DispatchSpecialistTool(HermesTool):
             # AIAgent.run_conversation 是同步的，需要在线程中运行；必须有边界，
             # 否则子 Agent 内部的 LLM 重试会把 CEO 调度链路长期挂住。
             try:
+                timeout_seconds = _get_specialist_timeout(agent_id)
                 result = await asyncio.wait_for(
                     asyncio.to_thread(agent.run_conversation, full_prompt),
-                    timeout=240,
+                    timeout=timeout_seconds,
                 )
             except asyncio.TimeoutError:
-                raise TimeoutError(f"{specialist['name']} 执行超过 240 秒")
+                raise TimeoutError(f"{specialist['name']} 执行超过 {timeout_seconds} 秒")
 
             # 归一化结果为字符串
             if isinstance(result, dict):
