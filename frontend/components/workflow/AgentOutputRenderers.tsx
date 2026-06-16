@@ -889,13 +889,15 @@ export function PatentDraftView({ data, taskId, title }: PatentDraftViewProps) {
             variant="secondary"
             size="sm"
             onClick={() => {
+              if (!title?.trim()) return;
               const link = document.createElement('a');
               link.href = workflowApi.exportDocx(taskId);
-              link.download = `${title || '专利申请文件'}.docx`;
+              link.download = `${title.trim()}.docx`;
               document.body.appendChild(link);
               link.click();
               document.body.removeChild(link);
             }}
+            disabled={!title?.trim()}
           >
             <Download className="w-4 h-4 mr-1" />
             下载 DOCX

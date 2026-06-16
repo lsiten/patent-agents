@@ -417,6 +417,22 @@ def create_ai_agent(
     if skill_prompt:
         system_prompt = f"{system_prompt.rstrip()}\n\n{skill_prompt}"
 
+    def _wrap_status_callback(callback):
+        if not callback:
+            return None
+
+        def _status(kind: Any, message: Any) -> None:
+            status_message = str(message or "")
+            normalized = status_message.lower()
+            if "fallback" in normalized:
+                if "max retries" in normalized or "retry" in normalized:
+                    status_message = "模型请求失败，未启用备用模型，正在返回真实错误。"
+                else:
+                    return
+            callback(kind, status_message)
+
+        return _status
+
     agent = AIAgent(
         base_url=base_url or None,
         api_key=api_key or None,
@@ -434,9 +450,16 @@ def create_ai_agent(
         tool_complete_callback=cb.get("tool_complete"),
         thinking_callback=cb.get("thinking"),
         stream_delta_callback=cb.get("stream_delta"),
-        status_callback=cb.get("status"),
+        status_callback=_wrap_status_callback(cb.get("status")),
         platform="api",
     )
+
+    # 项目要求不能存在本地假数据或备用模型替代路径。Hermes 底座默认支持 API 重试，
+    # 但本项目不启用 provider failover。
+    agent._fallback_chain = []
+    agent._fallback_index = 0
+    agent._fallback_model = None
+    agent._fallback_activated = False
 
     logger.info(
         f"AIAgent created: profile={profile_id}, model={model}, "

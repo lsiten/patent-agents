@@ -108,20 +108,36 @@ class PatentDrawingGeneratorTool:
         self,
         tech_description: str,
         task_id: str,
-        title: str = "专利附图",
+        title: str = "",
         description: str = "",
         **kwargs: Any,
     ) -> Dict[str, Any]:
         start_time = datetime.now()
         figure_number = str(kwargs.get("figure_number") or "图1")
+        drawing_title = str(title or "").strip()
         drawing_description = str(description or "").strip()
+        if not drawing_title:
+            return make_tool_output(
+                tool_name=self.name,
+                data={
+                    "drawings": [],
+                    "figure_number": figure_number,
+                    "prompt_version": "patent_drawing_v3",
+                    "layout": _layout_key_for_figure(figure_number),
+                },
+                success=False,
+                error=(
+                    "title is required. The drawing tool does not provide generic figure titles."
+                ),
+                start_time=start_time,
+            )
         if len(drawing_description) < 20:
             return make_tool_output(
                 tool_name=self.name,
                 data={
                     "drawings": [],
                     "figure_number": figure_number,
-                    "title": title,
+                    "title": drawing_title,
                     "prompt_version": "patent_drawing_v3",
                     "layout": _layout_key_for_figure(figure_number),
                 },
@@ -139,7 +155,7 @@ class PatentDrawingGeneratorTool:
             output_name = f"{Path(output_name).stem or 'fig1'}.png"
         output_path = output_dir / output_name
         image_config = _resolve_image_config(str(kwargs.get("profile_id") or "patent.writer.v1"))
-        prompt = self._build_prompt(title, tech_description, figure_number, drawing_description)
+        prompt = self._build_prompt(drawing_title, tech_description, figure_number, drawing_description)
 
         try:
             _generate_image_file(prompt, output_path, image_config)
@@ -150,7 +166,7 @@ class PatentDrawingGeneratorTool:
                 data={
                     "drawings": [],
                     "figure_number": figure_number,
-                    "title": title,
+                    "title": drawing_title,
                     "prompt_version": "patent_drawing_v3",
                     "layout": _layout_key_for_figure(figure_number),
                     "image_config_source": image_config.get("source"),
@@ -166,7 +182,7 @@ class PatentDrawingGeneratorTool:
                 "drawings": [
                     {
                         "figure_number": figure_number,
-                        "title": title,
+                        "title": drawing_title,
                         "description": drawing_description,
                         "file_path": str(output_path),
                         "artifact_url": f"/api/v1/workflows/{task_id or 'default'}/artifacts/draft/drawings/{output_path.name}",

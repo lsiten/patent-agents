@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 import asyncio
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -525,28 +525,39 @@ async def restore_stores_from_db() -> None:
                     # 恢复状态
                     current_state = value.get("current_state", "initialized")
                     
-                    # 检测僵尸工作流：如果工作流在执行阶段（非终端状态）且长时间未更新
+                    # 检测僵尸工作流：只处理真正执行中的阶段。
+                    # awaiting_user_decision 是合法人工暂停态，重启后必须保持，不能标记失败。
                     updated_at_str = value.get("updated_at", "")
                     is_zombie = False
-                    if current_state not in ["initialized", "completed", "failed", "cancelled"]:
-                        try:
-                            if updated_at_str:
-                                updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
-                                now = datetime.now(timezone.utc)
-                                # 如果超过30分钟没有更新，认为是僵尸工作流
-                                if (now - updated_at).total_seconds() > 1800:
-                                    is_zombie = True
-                            else:
-                                # 如果没有更新时间，且状态是执行中，也认为是僵尸
-                                is_zombie = True
-                        except Exception:
-                            is_zombie = True
+                    running_states = {
+                        "brainstorming",
+                        "requirement_analysis",
+                        "retrieval_analysis",
+                        "patent_writing",
+                        "quality_review",
+                        "iteration",
+                    }
+                    if current_state in running_states:
+                        # 进程重启后内存中的后台任务一定已经丢失。无论更新时间多近，
+                        # 持久化里的执行中状态都只能恢复为“可继续”，不能继续显示运行中。
+                        is_zombie = True
                     
                     if is_zombie:
-                        # 将僵尸工作流标记为失败
-                        ctx.current_phase = WorkflowState.FAILED
+                        # 服务重启/进程中断会让执行中的后台任务消失，但这不代表业务失败。
+                        # 保留已有阶段输出，进入可恢复的人工暂停态，由用户或前端触发 resume 后
+                        # 按原执行阶段继续。这样刷新/重启不会把真实流程误标失败。
+                        ctx.current_phase = WorkflowState.AWAITING_USER_DECISION
+                        ctx.metadata["quality_remediation"] = {
+                            **ctx.metadata.get("quality_remediation", {}),
+                            "classification": "service_restarted_resume_required",
+                            "missing_information": [],
+                            "recommended_next_action": "continue_auto_fix",
+                            "resume_phase": current_state,
+                            "interrupted_state": current_state,
+                            "reason": "服务重启或后台任务中断，工作流已暂停等待继续执行。",
+                        }
                         zombie_workflows += 1
-                        logger.warning(f"检测到僵尸工作流，已标记为失败: {key}, 状态: {current_state}")
+                        logger.warning(f"检测到中断工作流，已恢复为可继续状态: {key}, 原状态: {current_state}")
                     else:
                         ctx.current_phase = WorkflowState(current_state)
                     
@@ -567,7 +578,7 @@ async def restore_stores_from_db() -> None:
         logger.warning(f"恢复工作流列表失败: {e}")
     
     if zombie_workflows > 0:
-        logger.warning(f"共检测到 {zombie_workflows} 个僵尸工作流，已自动标记为失败")
+        logger.warning(f"共检测到 {zombie_workflows} 个中断工作流，已恢复为可继续状态")
 
     # 恢复组织架构
     try:
@@ -617,9 +628,21 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
 
     # 读取时归一化 — 确保旧数据也能适配前端格式
     req_norm = workflow_engine._normalize_phase_output("requirement_analysis", context.requirement_analysis or {})
-    ret_norm = workflow_engine._normalize_phase_output("retrieval_report", context.retrieval_report or {})
-    pat_norm = workflow_engine._normalize_phase_output("patent_draft", context.patent_draft or {})
-    rev_norm = workflow_engine._normalize_phase_output("review_report", context.review_report or {})
+    ret_norm = (
+        workflow_engine._normalize_phase_output("retrieval_report", context.retrieval_report or {})
+        if _current_output_is_not_superseded(context, "retrieval_report")
+        else {}
+    )
+    pat_norm = (
+        workflow_engine._normalize_phase_output("patent_draft", context.patent_draft or {})
+        if _current_output_is_not_superseded(context, "patent_draft")
+        else {}
+    )
+    rev_norm = (
+        workflow_engine._normalize_phase_output("review_report", context.review_report or {})
+        if _current_output_is_not_superseded(context, "review_report")
+        else {}
+    )
 
     phase_output_fields = {
         WorkflowPhase.REQUIREMENT: "requirement_analysis",
@@ -764,6 +787,46 @@ def _phase_has_real_result(context: WorkflowContext, phase: WorkflowPhase) -> bo
         if "Recovered from exported artifacts" not in (result.warnings or []):
             return True
     return False
+
+
+def _last_phase_history_index(context: WorkflowContext, phase: WorkflowPhase) -> int:
+    latest = -1
+    for index, result in enumerate(context.phase_history or []):
+        if result.phase == phase:
+            latest = index
+    return latest
+
+
+def _current_output_is_not_superseded(
+    context: WorkflowContext,
+    output_name: str,
+) -> bool:
+    """Return whether an output is still the latest valid artifact.
+
+    Multi-round workflows keep every PhaseResult for display. The current output
+    field, however, must not expose a draft/review generated before a later
+    requirement or retrieval remediation round.
+    """
+    req_idx = _last_phase_history_index(context, WorkflowPhase.REQUIREMENT)
+    ret_idx = _last_phase_history_index(context, WorkflowPhase.RETRIEVAL)
+    write_idx = _last_phase_history_index(context, WorkflowPhase.WRITING)
+    review_idx = _last_phase_history_index(context, WorkflowPhase.REVIEW)
+
+    if output_name in {"brainstorming", "requirement_analysis"}:
+        return True
+    if output_name == "retrieval_report":
+        if ret_idx < 0:
+            return False
+        return ret_idx >= req_idx
+    if output_name == "patent_draft":
+        if write_idx < 0:
+            return False
+        return write_idx >= max(req_idx, ret_idx)
+    if output_name == "review_report":
+        if review_idx < 0:
+            return False
+        return review_idx >= write_idx >= max(req_idx, ret_idx)
+    return True
 
 
 def _drop_superseded_recovered_phases(context: WorkflowContext) -> None:
@@ -1587,6 +1650,7 @@ async def _execute_full_workflow_compat(
     phase_callback=None,
     event_callback=None,
     agent_event_callback=None,
+    force_start_from=None,
 ):
     import inspect as _inspect
 
@@ -1598,7 +1662,216 @@ async def _execute_full_workflow_compat(
         kwargs["event_callback"] = event_callback
     if "agent_event_callback" in params:
         kwargs["agent_event_callback"] = agent_event_callback
+    if "force_start_from" in params:
+        kwargs["force_start_from"] = force_start_from
     return await workflow_engine.execute_full_workflow(context, **kwargs)
+
+
+def _coerce_engine_workflow_state(value: Any) -> Optional[EngineWorkflowState]:
+    if isinstance(value, EngineWorkflowState):
+        return value
+    if isinstance(value, WorkflowState):
+        value = value.value
+    if value is None:
+        return None
+    try:
+        return EngineWorkflowState(str(value))
+    except ValueError:
+        return None
+
+
+def _phase_result_has_output(context: WorkflowContext, phase_name: str) -> bool:
+    outputs = getattr(context, "outputs", None)
+    if isinstance(outputs, dict):
+        phase_output = outputs.get(phase_name)
+        if isinstance(phase_output, dict) and phase_output:
+            return True
+        if isinstance(phase_output, str) and phase_output.strip():
+            return True
+
+    field_map = {
+        EngineWorkflowState.REQUIREMENT_ANALYSIS.value: "requirement_analysis",
+        EngineWorkflowState.RETRIEVAL_ANALYSIS.value: "retrieval_report",
+        EngineWorkflowState.PATENT_WRITING.value: "patent_draft",
+        EngineWorkflowState.QUALITY_REVIEW.value: "review_report",
+    }
+    field_name = field_map.get(phase_name)
+    if field_name:
+        output_name = field_name
+        if output_name and not _current_output_is_not_superseded(context, output_name):
+            return False
+        field_value = getattr(context, field_name, None)
+        if isinstance(field_value, dict) and field_value:
+            return True
+        if isinstance(field_value, str) and field_value.strip():
+            return True
+
+    for result in getattr(context, "phase_history", []) or []:
+        phase = getattr(result, "phase", None)
+        phase_value = getattr(phase, "value", phase)
+        normalized_phase = str(phase_value or "").lower()
+        if phase_name == EngineWorkflowState.REQUIREMENT_ANALYSIS.value and normalized_phase in {"requirement", "requirement_analysis"}:
+            pass
+        elif phase_name == EngineWorkflowState.RETRIEVAL_ANALYSIS.value and normalized_phase in {"retrieval", "retrieval_analysis"}:
+            pass
+        elif phase_name == EngineWorkflowState.PATENT_WRITING.value and normalized_phase in {"writing", "patent_writing"}:
+            pass
+        elif phase_name == EngineWorkflowState.QUALITY_REVIEW.value and normalized_phase in {"review", "quality_review"}:
+            pass
+        else:
+            continue
+
+        output = getattr(result, "output", None)
+        if isinstance(output, dict) and output:
+            return True
+        if isinstance(output, str) and output.strip():
+            return True
+    return False
+
+
+def _infer_workflow_resume_phase(context: WorkflowContext) -> EngineWorkflowState:
+    """Infer a safe resume phase for older persisted workflows without metadata.
+
+    Resuming is intentionally conservative: after retrieval has produced output
+    but before drafting, continue retrieval so evidence gaps are rechecked before
+    writing; after drafting, resume quality review.
+    """
+    remediation = context.metadata.get("quality_remediation")
+    if isinstance(remediation, dict):
+        resume_phase = _coerce_engine_workflow_state(remediation.get("resume_phase"))
+        if resume_phase:
+            return resume_phase
+        interrupted_state = _coerce_engine_workflow_state(remediation.get("interrupted_state"))
+        if interrupted_state:
+            return interrupted_state
+
+        interrupted_state = _coerce_engine_workflow_state(context.metadata.get("interrupted_state"))
+    if interrupted_state:
+        return interrupted_state
+
+    # Prefer actual completed artifacts/history over stale current_phase values.
+    # Older persisted workflows may keep current_phase=requirement_analysis even
+    # after retrieval finished, especially if the service was restarted during a
+    # pre-writing gate loop.
+    if _phase_result_has_output(context, EngineWorkflowState.PATENT_WRITING.value):
+        return EngineWorkflowState.QUALITY_REVIEW
+    if _phase_result_has_output(context, EngineWorkflowState.RETRIEVAL_ANALYSIS.value):
+        return EngineWorkflowState.RETRIEVAL_ANALYSIS
+    if _phase_result_has_output(context, EngineWorkflowState.REQUIREMENT_ANALYSIS.value):
+        return EngineWorkflowState.RETRIEVAL_ANALYSIS
+
+    current_phase = _coerce_engine_workflow_state(context.current_phase)
+    if current_phase and current_phase not in {
+        EngineWorkflowState.INITIALIZED,
+        EngineWorkflowState.AWAITING_USER_DECISION,
+        EngineWorkflowState.COMPLETED,
+        EngineWorkflowState.FAILED,
+        EngineWorkflowState.CANCELLED,
+    }:
+        return current_phase
+
+    return EngineWorkflowState.REQUIREMENT_ANALYSIS
+
+
+async def _resume_workflow_from_user_supplement(
+    task_id: str,
+    context: WorkflowContext,
+    supplemental_info: str,
+    *,
+    conversation_id: str | None = None,
+) -> bool:
+    """Resume a held workflow when the user supplies information in chat."""
+    if context.current_phase != EngineWorkflowState.AWAITING_USER_DECISION:
+        return False
+
+    remediation = context.metadata.get("quality_remediation")
+    if not isinstance(remediation, dict):
+        return False
+
+    resume_phase = _infer_workflow_resume_phase(context)
+
+    user_supplies = context.metadata.setdefault("user_supplemental_info", [])
+    if isinstance(user_supplies, list) and supplemental_info:
+        if not user_supplies or user_supplies[-1] != supplemental_info:
+            user_supplies.append(supplemental_info)
+    remediation["recommended_next_action"] = "continue_auto_fix"
+    remediation["user_supplied_at"] = datetime.now().isoformat()
+    remediation["user_supplied_info"] = supplemental_info
+    remediation["resume_phase"] = resume_phase.value
+
+    async def phase_callback(phase, result):
+        async with workflow_lock:
+            _append_workflow_event(
+                task_id=task_id,
+                agent=phase.value,
+                message=f"阶段 {phase.value} 已完成",
+                event_type="workflow.phase.completed",
+                data={
+                    "phase": phase.value,
+                    "success": result.success,
+                    "duration_seconds": result.duration_seconds,
+                    "issues": result.issues,
+                },
+            )
+        await _persist_events(task_id)
+        await _persist_workflow(task_id)
+
+    async def agent_event_callback(event: Dict[str, Any]):
+        event = dict(event)
+        event.setdefault("task_id", task_id)
+        event.setdefault("timestamp", datetime.now().isoformat())
+        message = _agent_work_message("", event)
+        async with workflow_lock:
+            _append_workflow_event(
+                task_id=task_id,
+                agent=str(event.get("agent_name") or event.get("agent_id") or "agent"),
+                message=message["content"],
+                event_type=str(event.get("event_type") or "agent.work"),
+                data=event,
+            )
+        await _persist_events(task_id)
+
+    async def run_resume_from_chat():
+        try:
+            await _execute_full_workflow_compat(
+                context,
+                phase_callback=phase_callback,
+                agent_event_callback=agent_event_callback,
+                force_start_from=resume_phase,
+            )
+            async with workflow_lock:
+                _append_workflow_terminal_event(task_id, context, "专利工作流已根据补充信息继续执行")
+            await _persist_events(task_id)
+            await _persist_workflow(task_id)
+        except Exception as e:
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent="workflow_engine",
+                    message=str(e),
+                    event_type="workflow.failed",
+                )
+            await _persist_events(task_id)
+            await _persist_workflow(task_id)
+            logger.exception("工作流补充信息恢复后台任务失败", exc_info=e)
+
+    _track_workflow_background_task(task_id, run_resume_from_chat())
+    async with workflow_lock:
+        _append_workflow_event(
+            task_id=task_id,
+            agent="workflow_engine",
+            message="用户已补充信息，工作流继续执行",
+            event_type="workflow.remediation.decision",
+            data={
+                "action": "provide_info",
+                "resume_phase": resume_phase.value,
+                "has_supplemental_info": bool(supplemental_info),
+                "conversation_id": conversation_id,
+            },
+        )
+    await _persist_events(task_id)
+    await _persist_workflow(task_id)
+    return True
 
 
 @router.post("/workflows", status_code=status.HTTP_201_CREATED)
@@ -1650,6 +1923,7 @@ async def chat_with_brainstorm_agent(task_id: str, request: ChatMessageRequest):
             event_type="chat.message.created",
             data=response,
         )
+    await _resume_workflow_from_user_supplement(task_id, workflow_engine.get_workflow(task_id), request.content)
     await _persist_events(task_id)
     return response
 
@@ -1816,6 +2090,7 @@ async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
                 phase_callback=phase_callback,
                 event_callback=_workflow_event_callback,
                 agent_event_callback=agent_event_callback,
+                force_start_from=resume_phase,
             )
             async with workflow_lock:
                 _append_workflow_terminal_event(task_id, context, "专利工作流已恢复并完成")
@@ -1833,20 +2108,27 @@ async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
             await _persist_workflow(task_id)
             logger.exception("工作流恢复后台任务失败", exc_info=e)
 
-    background_tasks.add_task(run_resume)
+    resume_phase = _infer_workflow_resume_phase(context)
+    remediation = context.metadata.setdefault("quality_remediation", {})
+    if isinstance(remediation, dict):
+        remediation.setdefault("recommended_next_action", "continue_auto_fix")
+        remediation["resume_phase"] = resume_phase.value
+
+    _track_workflow_background_task(task_id, run_resume())
     async with workflow_lock:
         _append_workflow_event(
             task_id=task_id,
             agent="workflow_engine",
-            message=f"工作流已从 {context.current_phase.value} 阶段恢复",
+            message=f"工作流已从 {context.current_phase.value} 阶段恢复，继续阶段：{resume_phase.value}",
             event_type="workflow.resumed",
-            data={"current_phase": context.current_phase.value},
+            data={"current_phase": context.current_phase.value, "resume_phase": resume_phase.value},
         )
     await _persist_events(task_id)
     return {
         "task_id": task_id,
         "status": "resumed",
         "current_phase": context.current_phase.value,
+        "resume_phase": resume_phase.value,
     }
 
 
@@ -1907,10 +2189,26 @@ async def workflow_decision(
         await _persist_workflow(task_id)
 
     async def run_decision_resume():
+        async def agent_event_callback(event: Dict[str, Any]):
+            event = dict(event)
+            event.setdefault("task_id", task_id)
+            event.setdefault("timestamp", datetime.now().isoformat())
+            message = _agent_work_message("", event)
+            async with workflow_lock:
+                _append_workflow_event(
+                    task_id=task_id,
+                    agent=str(event.get("agent_name") or event.get("agent_id") or "agent"),
+                    message=message["content"],
+                    event_type=str(event.get("event_type") or "agent.work"),
+                    data=event,
+                )
+            await _persist_events(task_id)
+
         try:
-            await workflow_engine.resume_workflow(
+            await _execute_full_workflow_compat(
                 context,
                 phase_callback=phase_callback,
+                agent_event_callback=agent_event_callback,
                 force_start_from=resume_phase,
             )
             async with workflow_lock:
@@ -1927,7 +2225,7 @@ async def workflow_decision(
             await _persist_events(task_id)
             logger.exception("工作流决策恢复后台任务失败", exc_info=e)
 
-    background_tasks.add_task(run_decision_resume)
+    _track_workflow_background_task(task_id, run_decision_resume())
     async with workflow_lock:
         _append_workflow_event(
             task_id=task_id,
@@ -3892,6 +4190,127 @@ def _extract_recommended_patent_title(response_text: str) -> Optional[str]:
     return None
 
 
+_PATENT_PREFLIGHT_MARKER = "[PATENT_PREFLIGHT_READY]"
+_PATENT_PREFLIGHT_REQUIRED_FIELDS = {
+    "patent_title": ("专利名称", "发明名称"),
+    "protection_theme": ("保护主题", "核心保护主题", "保护主线"),
+    "patent_type": ("专利类型", "保护类型", "申请类型"),
+    "claim_skeleton": ("独权骨架", "独立权利要求骨架", "三步", "四步", "3步", "4步"),
+    "technical_facts": ("关键技术事实", "必要技术事实", "技术事实"),
+    "public_status": ("公开状态", "是否公开"),
+    "drawing_plan": ("附图需求", "附图规划", "附图方案"),
+}
+_PATENT_PREFLIGHT_UNRESOLVED_PATTERNS = (
+    "尚未明确",
+    "不明确",
+    "待确认",
+    "待补充",
+    "缺少",
+    "信息不足",
+    "无法确定",
+    "需要用户",
+    "需用户",
+    "继续确认",
+)
+
+
+def _strip_workflow_recommendation_markers(text: str) -> str:
+    return (
+        text.replace("[CREATE_PATENT_RECOMMENDATION]", "")
+        .replace(_PATENT_PREFLIGHT_MARKER, "")
+        .strip()
+    )
+
+
+def _extract_patent_preflight_summary(response_text: str) -> Optional[Dict[str, Any]]:
+    """Return structured readiness metadata when the agent explicitly completed preflight."""
+    if _PATENT_PREFLIGHT_MARKER not in response_text:
+        return None
+
+    clean_text = _strip_workflow_recommendation_markers(response_text)
+    title = _extract_recommended_patent_title(clean_text)
+    if not title:
+        return None
+
+    missing_fields: List[str] = []
+    for field, aliases in _PATENT_PREFLIGHT_REQUIRED_FIELDS.items():
+        if field == "patent_title":
+            continue
+        if not any(alias in clean_text for alias in aliases):
+            missing_fields.append(field)
+
+    # A preflight summary is only useful when the agent says the required facts are settled.
+    unresolved_hits = [
+        pattern for pattern in _PATENT_PREFLIGHT_UNRESOLVED_PATTERNS if pattern in clean_text
+    ]
+    if missing_fields or unresolved_hits:
+        return None
+
+    return {
+        "patent_title": title,
+        "ready_marker": _PATENT_PREFLIGHT_MARKER,
+        "required_fields": sorted(_PATENT_PREFLIGHT_REQUIRED_FIELDS.keys()),
+        "summary_text": clean_text[:6000],
+    }
+
+
+def _conversation_has_patent_preflight_ready(conv: dict, patent_title: str) -> bool:
+    """Server-side gate: frontend confirmation cannot start a workflow without preflight."""
+    normalized_title = re.sub(r"\s+", "", patent_title or "")
+    for message in reversed(conv.get("messages", [])):
+        if message.get("role") != "assistant":
+            continue
+        metadata = message.get("metadata") or {}
+        preflight = metadata.get("patent_preflight")
+        if not isinstance(preflight, dict):
+            continue
+        if not metadata.get("recommend_create_patent"):
+            continue
+        ready_title = re.sub(r"\s+", "", str(preflight.get("patent_title") or ""))
+        if ready_title and ready_title == normalized_title:
+            return True
+    return False
+
+
+def _extract_latest_patent_preflight(conv: dict, patent_title: str) -> Dict[str, Any]:
+    """Get the latest confirmed preflight package for workflow shared context."""
+    normalized_title = re.sub(r"\s+", "", patent_title or "")
+    for message in reversed(conv.get("messages", [])):
+        if message.get("role") != "assistant":
+            continue
+        metadata = message.get("metadata") or {}
+        preflight = metadata.get("patent_preflight")
+        if not isinstance(preflight, dict):
+            continue
+        ready_title = re.sub(r"\s+", "", str(preflight.get("patent_title") or ""))
+        if ready_title and ready_title == normalized_title:
+            return dict(preflight)
+    return {}
+
+
+_PATENT_PREFLIGHT_PROMPT = f"""- 启动正式专利申请流程前，必须先完成“启动前方案确认”，不能只凭用户一句“生成专利/开始流程”直接启动
+- 头脑风暴阶段可以调用 patent_search 等工具做初步事实补齐；正式检索阶段再按已确认的专利方向做更细的现有技术证据收集
+- 未满足以下全部条件时，禁止输出 [CREATE_PATENT_RECOMMENDATION]，应继续调用工具、调度专业 Agent 或向用户确认：
+  1. 专利名称/发明名称已明确，且与技术主题一致
+  2. 核心保护主题已明确，不能是泛泛领域名
+  3. 专利类型/保护类型已明确
+  4. 独权骨架已明确为 3 步或 4 步，并能覆盖核心创新
+  5. 关键技术事实已明确到足以撰写：输入、处理对象、核心步骤、输出、关键参数/边界条件
+  6. 公开状态/申请策略风险已确认
+  7. 附图需求和每张图表达内容已初步规划
+- 满足全部条件并准备建议启动时，回复中必须包含：
+  专利名称：……
+  保护主题：……
+  专利类型：……
+  独权骨架：3步/4步，……
+  关键技术事实：……
+  公开状态：……
+  附图需求：……
+  {_PATENT_PREFLIGHT_MARKER}
+  [CREATE_PATENT_RECOMMENDATION]
+- 如果任一项还不能确认，必须给出下一步确认问题，必要时使用 [CONFIRM: 问题|选项1|选项2|选项3]，不要输出启动推荐标记"""
+
+
 def _should_recommend_workflow_creation(
     *,
     messages: List[dict],
@@ -3900,14 +4319,13 @@ def _should_recommend_workflow_creation(
     tool_calls: List[dict],
     agent_events: List[dict],
 ) -> bool:
+    # 启动工作流前必须先由 Agent 完成完整 preflight。缺信息时继续头脑风暴，
+    # 不向前端展示“启动专利申请”确认条。
+    if not _extract_patent_preflight_summary(response_text):
+        return False
     if "[CREATE_PATENT_RECOMMENDATION]" in response_text:
         return True
-    if _brainstorm_converged_to_workflow_handoff(response_text):
-        return True
-    return _conversation_requested_complete_workflow(
-        messages,
-        current_content,
-    ) and _agent_completed_core_workflow_analysis(tool_calls, agent_events, response_text)
+    return False
 
 
 async def _handle_linked_workflow_conversation_chat(
@@ -3943,7 +4361,16 @@ async def _handle_linked_workflow_conversation_chat(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
-    response_content = str(workflow_response.get("content") or "补充信息已同步到关联工作流")
+    resumed = await _resume_workflow_from_user_supplement(
+        task_id,
+        context,
+        content,
+        conversation_id=conv_id,
+    )
+    response_content = str(
+        workflow_response.get("content")
+        or ("补充信息已同步，工作流正在继续执行" if resumed else "补充信息已同步到关联工作流")
+    )
     assistant_msg = {
         "id": str(uuid.uuid4()),
         "role": "assistant",
@@ -4127,7 +4554,7 @@ async def chat_in_conversation(conv_id: str, request: ConversationChatRequest):
 - 言简意赅回复，3-5句话
 - 需要分析时调用工具（ipc_classifier/risk_analyzer/task_planner/patent_search/tech_feature_extractor），不要自己编造
 - 提1-2个关键追问推进讨论
-- 收集够信息后加标记 [CREATE_PATENT_RECOMMENDATION]
+{_PATENT_PREFLIGHT_PROMPT}
 """
         # 使用真实 hermes-agent AIAgent（run_conversation 是同步方法）
         response = await asyncio.to_thread(agent.run_conversation, prompt)
@@ -4150,8 +4577,9 @@ async def chat_in_conversation(conv_id: str, request: ConversationChatRequest):
         tool_calls=tool_calls_data,
         agent_events=[],
     )
-    clean_text = response_text.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
-    suggested_title = _extract_recommended_patent_title(clean_text) if has_recommendation else None
+    preflight_summary = _extract_patent_preflight_summary(response_text) if has_recommendation else None
+    clean_text = _strip_workflow_recommendation_markers(response_text)
+    suggested_title = preflight_summary.get("patent_title") if preflight_summary else None
 
     assistant_msg = {
         "id": str(uuid.uuid4()),
@@ -4162,6 +4590,7 @@ async def chat_in_conversation(conv_id: str, request: ConversationChatRequest):
         "metadata": {
             "recommend_create_patent": True,
             **({"suggested_title": suggested_title} if suggested_title else {}),
+            **({"patent_preflight": preflight_summary} if preflight_summary else {}),
         } if has_recommendation else None,
         "tool_calls": tool_calls_data if tool_calls_data else None,
     }
@@ -4304,7 +4733,7 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
 - 言简意赅回复，3-5句话
 - 需要分析时调用工具（ipc_classifier/risk_analyzer/task_planner/patent_search/tech_feature_extractor），不要自己编造
 - 提1-2个关键追问推进讨论
-- 收集够信息后加标记 [CREATE_PATENT_RECOMMENDATION]
+{_PATENT_PREFLIGHT_PROMPT}
 - 当需要用户做关键确认时（如是否已公开、专利类型选择等），在回复末尾加上确认标记：
   [CONFIRM: 问题|选项1|选项2|选项3]
   例如：[CONFIRM: 该方案是否已经公开？|尚未公开|已经公开|部分公开]
@@ -4464,7 +4893,10 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                 tool_calls=tool_calls_data,
                 agent_events=persisted_agent_events,
             )
-            clean_content = final_content.replace("[CREATE_PATENT_RECOMMENDATION]", "").strip()
+            preflight_summary = (
+                _extract_patent_preflight_summary(final_content) if has_recommendation else None
+            )
+            clean_content = _strip_workflow_recommendation_markers(final_content)
 
             confirmation_data = None
             confirm_pattern = r'\[CONFIRM:\s*(.*?)\]'
@@ -4481,9 +4913,11 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
             assistant_metadata = {}
             if has_recommendation:
                 assistant_metadata["recommend_create_patent"] = True
-                suggested_title = _extract_recommended_patent_title(clean_content)
+                suggested_title = preflight_summary.get("patent_title") if preflight_summary else None
                 if suggested_title:
                     assistant_metadata["suggested_title"] = suggested_title
+                if preflight_summary:
+                    assistant_metadata["patent_preflight"] = preflight_summary
             if confirmation_data:
                 assistant_metadata["confirmation"] = confirmation_data
 
@@ -4786,6 +5220,15 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             "status": "already_linked",
             "conversation_id": conv_id,
         }
+    if not _conversation_has_patent_preflight_ready(conv, patent_title):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "启动专利申请前必须先完成方案确认：专利名称、保护主题、专利类型、"
+                "独权3步或4步骨架、关键技术事实、公开状态和附图需求都需由 Agent 明确并经用户确认。"
+                "请继续头脑风暴补齐后再启动。"
+            ),
+        )
 
     # 从对话中提取技术描述（取所有用户消息合并）
     user_msgs = [m["content"] for m in conv["messages"] if m["role"] == "user"]
@@ -4800,6 +5243,7 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             user_id=request.user_id,
             description=tech_description,
             target_country=request.target_country,
+            confirmed_preflight=_extract_latest_patent_preflight(conv, patent_title),
         )
         task_id = context.task_id
         context.title = patent_title
@@ -5996,7 +6440,7 @@ async def export_patent_docx(task_id: str):
 
     tool = PatentDocxGeneratorTool()
     result = await tool.execute(
-        title=patent_data.get("title", "专利申请文件"),
+        title=patent_data.get("title") or patent_data.get("patent_title") or "",
         claims={"independent_claim": ind_claim, "dependent_claims": dep_claims},
         description={
             "technical_field": patent_data.get("technical_field", ""),

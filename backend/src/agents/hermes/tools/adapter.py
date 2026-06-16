@@ -379,7 +379,10 @@ PATENT_TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "检索查询关键词或技术描述"},
-                    "sources": {"type": "string", "description": "数据源(逗号分隔): uspto,epo,cnipa"},
+                    "sources": {
+                        "type": "string",
+                        "description": "数据源(逗号分隔): google_patents,uspto,epo,cnipa",
+                    },
                     "limit": {"type": "string", "description": "最大结果数量"},
                 },
                 "required": ["query"],

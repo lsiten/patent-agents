@@ -1,8 +1,360 @@
 [
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.655442",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T12:06:39.656134",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T12:07:40.216520",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T12:13:46.009088",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:33:33.682397",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:33:33.696519",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:33:36.672741",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:33:39.674621",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:33:42.678435",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:33:45.672996",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:33:48.673937",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:33:51.672357",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:33:54.674997",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:33:57.674762",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:34:00.676747",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:34:03.674752",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:34:06.678639",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:34:09.673002",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:34:12.674861",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:34:15.674549",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:34:18.674431",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:34:21.674814",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T21:34:24.678251",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T22:06:38.562206",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -13,12 +365,12 @@
       "generate-verifier",
       "feedback-remediation-loop"
     ],
-    "quality_remediation_required": false
+    "quality_remediation_required": true
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.659794",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T22:06:38.799928",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -29,12 +381,12 @@
       "generate-verifier",
       "feedback-remediation-loop"
     ],
-    "quality_remediation_required": false
+    "quality_remediation_required": true
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.664376",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T22:06:41.483392",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -45,52 +397,15 @@
       "generate-verifier",
       "feedback-remediation-loop"
     ],
-    "quality_remediation_required": false
+    "quality_remediation_required": true
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.668447",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-16T22:06:44.479314",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.674559",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.679509",
-    "iteration_count": 13,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
     "loop_topology": [
       "coordinator-worker",
@@ -103,30 +418,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.684141",
-    "iteration_count": 1,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "摘要需包含专利名称、技术领域、简化方案和技术效果",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.690808",
+    "generated_at": "2026-06-17T01:05:37.874622",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -142,49 +434,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.699160",
-    "iteration_count": 13,
-    "review_recommendation": "reject",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.706849",
-    "iteration_count": 13,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.714890",
+    "generated_at": "2026-06-17T01:05:37.892260",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -200,7 +450,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.719140",
+    "generated_at": "2026-06-17T01:12:36.370835",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],
@@ -216,286 +466,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.726203",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.733020",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.740572",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.747421",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.753428",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.760918",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.765211",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.769503",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.776018",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-16T00:36:53.783524",
-    "iteration_count": 1,
-    "review_recommendation": "reject",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "摘要需包含专利名称、技术领域、简化方案和技术效果",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:51:00.112769",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:51:00.145294",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:51:00.167232",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:51:00.180153",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:54:08.466139",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:54:08.495242",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:54:08.513254",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "cancelled",
-    "generated_at": "2026-06-16T00:54:08.528439",
+    "generated_at": "2026-06-17T01:12:36.384052",
     "iteration_count": 0,
     "review_recommendation": "",
     "review_issue_categories": [],

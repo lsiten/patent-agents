@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 class PatentSearchTool(HermesTool):
     """专利检索工具 - 对接多源数据库"""
     name = "patent_search"
-    description = "在多源专利数据库(USPTO/EPO/CNIPA)中检索相关现有技术"
+    description = "在多源专利数据库(USPTO/EPO/CNIPA/Google Patents)中检索相关现有技术"
 
     def _build_definition(self) -> HermesToolDefinition:
         return HermesToolDefinition(
@@ -42,7 +42,7 @@ class PatentSearchTool(HermesTool):
         )
 
     async def execute(
-        self, query: str, sources: str = "uspto,epo", limit: str = "10", **kwargs
+        self, query: str, sources: str = "google_patents,uspto,epo,cnipa", limit: str = "10", **kwargs
     ) -> Dict[str, Any]:
         """执行专利检索"""
         start_time = datetime.now()
@@ -59,6 +59,7 @@ class PatentSearchTool(HermesTool):
             references = await manager.search_all(
                 SearchQuery(query=query, max_results=max_results, databases=source_list)
             )
+            source_status = getattr(manager, "last_search_status", {}) or {}
 
             results: List[Dict[str, Any]] = []
             for ref in references[:max_results]:
@@ -67,9 +68,31 @@ class PatentSearchTool(HermesTool):
                 item["relevance_score"] = item.get("similarity_score", 0)
                 results.append(item)
 
+            source_result_counts: Dict[str, int] = {}
+            for item in results:
+                source = str(item.get("source") or "unknown").strip().lower()
+                if source:
+                    source_result_counts[source] = source_result_counts.get(source, 0) + 1
+            actual_sources_used = sorted(source_result_counts.keys())
+            unavailable_or_empty_sources = [
+                source for source in source_list if source.lower() not in source_result_counts
+            ]
+            unavailable_reasons = {
+                source: (source_status.get(source, {}) or {}).get("error")
+                or ("未返回可核验证据" if source in unavailable_or_empty_sources else "")
+                for source in source_list
+                if source in unavailable_or_empty_sources
+            }
+
             data = {
                 "query": query,
-                "sources": source_list,
+                "requested_sources": source_list,
+                "sources": actual_sources_used,
+                "actual_sources_used": actual_sources_used,
+                "source_result_counts": source_result_counts,
+                "source_status": source_status,
+                "unavailable_or_empty_sources": unavailable_or_empty_sources,
+                "unavailable_reasons": unavailable_reasons,
                 "search_results": results,
                 "total_found": len(results),
                 "search_strategy": "real_data_source_query",

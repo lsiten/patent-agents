@@ -27,7 +27,7 @@ metadata:
 
 - `patent_search` - 执行专利检索
   - query: 检索关键词或技术描述
-  - sources: cnipa,uspto,epo
+  - sources: google_patents,cnipa,uspto,epo
   - limit: 最大结果数量
 
 ## Agent 与工具边界
@@ -35,4 +35,7 @@ metadata:
 - `patent_search` 负责连接真实专利数据源并返回可核验证据；检索式设计、关键词取舍、数据库优先级和补检策略由检索分析 Agent 判断。
 - 默认中国申请时，CNIPA 为第一顺位，USPTO/EPO/WIPO/Google Patents 只作为补充；其他法域按目标法域调整第一顺位。
 - 数据源超时、未接入或无结果时，必须如实记录证据缺口，不得虚构专利号、申请人或公开日。
+- `databases_used` 只能记录已有真实返回证据或已成功读取证据的数据源；请求过但无结果、未接入、超时或无法验证的数据源要写入 `unavailable_sources` 或 `evidence_gaps`。
+- 无结果不是终止条件。必须分析无结果原因，并至少尝试中文宽检索、英文宽检索、核心区别特征窄检索三类补检；每轮基于上一轮返回或失败信息调整检索式。
+- 公开网页或 Google Patents 候选证据必须用专业信息网站、专利详情页、专利局页面、标准组织或官方资料交叉确认真伪。
 - 需要网页证据时，先完成专利检索主链路，再按 `web-evidence-strategy` 补充。

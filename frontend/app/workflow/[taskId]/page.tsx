@@ -976,13 +976,16 @@ export default function WorkflowPage() {
                 variant="default"
                 size="sm"
                 onClick={() => {
+                  const title = workflow?.title?.trim();
+                  if (!title) return;
                   const link = document.createElement('a');
                   link.href = workflowApi.exportDocx(taskId);
-                  link.download = `${workflow?.title || '专利申请文件'}.docx`;
+                  link.download = `${title}.docx`;
                   document.body.appendChild(link);
                   link.click();
                   document.body.removeChild(link);
                 }}
+                disabled={!workflow?.title?.trim()}
               >
                 <Download className="w-4 h-4 mr-1" />
                 下载专利文件

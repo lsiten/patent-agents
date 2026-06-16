@@ -127,14 +127,6 @@ def validate_claim_rules(claims: Any) -> Dict[str, Any]:
             "suggestion": "由专利撰写 Agent 重写权利要求1。",
             "target_agent": "patent_writer",
         })
-    if not dependent:
-        issues.append({
-            "severity": "critical",
-            "location": "权利要求书",
-            "issue": "缺少从属权利要求",
-            "suggestion": "权利要求书必须由独立权利要求和从属权利要求组成。",
-            "target_agent": "patent_writer",
-        })
     else:
         step_count = len(_find_claim_steps(independent))
         if step_count not in (3, 4):
@@ -153,13 +145,21 @@ def validate_claim_rules(claims: Any) -> Dict[str, Any]:
                 "suggestion": "删除实施例细节和非必要参数，保留必要技术特征。",
                 "target_agent": "patent_writer",
             })
+    if not dependent:
+        issues.append({
+            "severity": "critical",
+            "location": "权利要求书",
+            "issue": "缺少从属权利要求",
+            "suggestion": "权利要求书必须由独立权利要求和从属权利要求组成。",
+            "target_agent": "patent_writer",
+        })
 
     for idx, block in enumerate(claim_blocks, start=1):
-        if idx > 1 and len(block) > 250:
+        if idx > 1 and len(block) > 200:
             issues.append({
                 "severity": "high",
                 "location": f"权利要求{idx}",
-                "issue": f"从属权利要求超过250字，当前约{len(block)}字",
+                "issue": f"从属权利要求超过200字，当前约{len(block)}字",
                 "suggestion": "删减实施例细节和非必要限定，保留该从属权利要求的单一附加特征。",
                 "target_agent": "patent_writer",
             })

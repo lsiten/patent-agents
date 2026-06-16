@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
 import asyncio
 from datetime import datetime
+import re
+from urllib.parse import quote
 
 import httpx
 from loguru import logger
@@ -16,6 +18,7 @@ class DataSource(ABC):
     def __init__(self, config: DataSourceConfig):
         self.config = config
         self.client: Optional[httpx.AsyncClient] = None
+        self.last_error: Optional[str] = None
         self.last_request_time: float = 0
         self.min_interval = 60.0 / config.rate_limit if config.rate_limit > 0 else 0
 
@@ -30,10 +33,10 @@ class DataSource(ABC):
     async def _rate_limit(self):
         """简单速率限制"""
         if self.min_interval > 0:
-            elapsed = asyncio.get_event_loop().time() - self.last_request_time
+            elapsed = asyncio.get_running_loop().time() - self.last_request_time
             if elapsed < self.min_interval:
                 await asyncio.sleep(self.min_interval - elapsed)
-            self.last_request_time = asyncio.get_event_loop().time()
+            self.last_request_time = asyncio.get_running_loop().time()
 
     @abstractmethod
     async def search(self, query: SearchQuery) -> List[PriorArtReference]:
@@ -70,7 +73,8 @@ class CNIPASource(DataSource):
         # TODO: 实现真实的CNIPA API调用
         # 注意: CNIPA有反爬机制，需要使用浏览器自动化
         # 参考: playwright 实现
-        logger.warning("CNIPA真实检索尚未接入，跳过该数据源，不返回结果")
+        self.last_error = "CNIPA真实检索尚未接入，跳过该数据源，不返回结果"
+        logger.warning(self.last_error)
         return []
 
     async def get_details(self, reference_id: str) -> Optional[PriorArtReference]:
@@ -110,15 +114,16 @@ class UsptoSource(DataSource):
                 "rows": min(query.max_results, 50),
             }
 
-            if not self.client:
-                self.client = httpx.AsyncClient(timeout=30.0)
-
-            response = await self.client.get(url, params=params)
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(url, params=params)
             if response.status_code == 200:
                 data = response.json()
+                self.last_error = None
                 return self._parse_response(data)
+            self.last_error = f"USPTO HTTP status={response.status_code}"
         except Exception as e:
-            logger.warning(f"USPTO检索失败: {e}")
+            self.last_error = f"USPTO检索失败: {e}"
+            logger.warning(self.last_error)
 
         return []
 
@@ -166,6 +171,7 @@ class EpoSource(DataSource):
         await self._rate_limit()
         logger.info(f"EPO检索: {query.query}")
         # TODO: 实现EPO OPS API调用
+        self.last_error = "EPO OPS真实检索尚未接入或未配置认证，跳过该数据源"
         return []
 
     async def get_details(self, reference_id: str) -> Optional[PriorArtReference]:
@@ -188,53 +194,131 @@ class GooglePatentsSource(DataSource):
         super().__init__(config or default_config)
 
     async def search(self, query: SearchQuery) -> List[PriorArtReference]:
-        """使用Playwright浏览器自动化检索Google Patents"""
+        """检索 Google Patents，并返回页面中可核验的公开专利记录。"""
         await self._rate_limit()
         logger.info(f"Google Patents检索: {query.query}")
 
-        try:
-            from playwright.async_api import async_playwright
+        encoded_query = quote(f"q={query.query}", safe="")
+        url = f"{self.config.base_url}/xhr/query?url={encoded_query}&exp="
+        http_results = await self._search_with_http(url, query.max_results)
+        if http_results:
+            return http_results
 
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                page = await browser.new_page()
-
-                url = f"{self.config.base_url}/search?q={query.query}&assignee=google"
-                await page.goto(url)
-                await page.wait_for_selector(".result-item", timeout=10000)
-
-                results = []
-                items = await page.query_selector_all(".result-item")
-                for item in items[:query.max_results]:
-                    try:
-                        title_elem = await item.query_selector("h3")
-                        number_elem = await item.query_selector(".patent-number")
-                        abstract_elem = await item.query_selector(".abstract")
-
-                        title = await title_elem.inner_text() if title_elem else ""
-                        pat_num = await number_elem.inner_text() if number_elem else ""
-                        abstract = await abstract_elem.inner_text() if abstract_elem else ""
-
-                        if title and pat_num:
-                            results.append(PriorArtReference(
-                                reference_id=pat_num.strip(),
-                                title=title.strip(),
-                                abstract=abstract.strip()[:500],
-                                similarity_score=0.6,
-                                source="google_patents",
-                            ))
-                    except Exception as e:
-                        logger.debug(f"解析专利项失败: {e}")
-
-                await browser.close()
-                return results
-
-        except ImportError:
-            logger.warning("Playwright未安装，跳过Google Patents检索")
-        except Exception as e:
-            logger.warning(f"Google Patents检索失败: {e}")
-
+        logger.warning("Google Patents真实HTTP检索未返回可核验证据")
         return []
+
+    async def _search_with_http(self, url: str, max_results: int) -> List[PriorArtReference]:
+        try:
+            async with httpx.AsyncClient(
+                    timeout=30.0,
+                    follow_redirects=True,
+                    headers={
+                        "User-Agent": (
+                            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
+                        )
+                    },
+                ) as client:
+                response = await client.get(url)
+            if response.status_code != 200:
+                self.last_error = f"Google Patents HTTP status={response.status_code}"
+                logger.warning(f"Google Patents HTTP检索失败: status={response.status_code}")
+                return []
+            content_type = response.headers.get("content-type", "")
+            if "json" in content_type:
+                parsed = self._parse_xhr_response(response.json(), max_results)
+                self.last_error = None if parsed else "Google Patents JSON响应无可核验专利记录"
+                return parsed
+            from bs4 import BeautifulSoup
+
+            soup = BeautifulSoup(response.text, "html.parser")
+            candidates = soup.select("search-result-item, article, .result, .result-item")
+            if not candidates:
+                candidates = [
+                    link.parent
+                    for link in soup.select('a[href*="/patent/"]')
+                    if link.parent is not None
+                ]
+            results: List[PriorArtReference] = []
+            seen = set()
+            for candidate in candidates:
+                text = candidate.get_text("\n", strip=True)
+                href = ""
+                link = candidate.select_one('a[href*="/patent/"]')
+                if link:
+                    href = str(link.get("href") or "")
+                parsed = self._parse_result_text(text, href=href)
+                if not parsed or parsed["reference_id"] in seen:
+                    continue
+                seen.add(parsed["reference_id"])
+                results.append(PriorArtReference(
+                    reference_id=parsed["reference_id"],
+                    title=parsed["title"],
+                    abstract=parsed.get("abstract", "")[:500],
+                    publication_date=parsed.get("publication_date"),
+                    similarity_score=0.6,
+                    source="google_patents",
+                    url=f"{self.config.base_url}/patent/{parsed['reference_id']}",
+                ))
+                if len(results) >= max_results:
+                    break
+            self.last_error = None if results else "Google Patents HTML响应无可核验专利记录"
+            return results
+        except Exception as e:
+            self.last_error = f"Google Patents HTTP检索失败: {e}"
+            logger.warning(self.last_error)
+            return []
+
+    def _parse_xhr_response(self, data: Dict[str, Any], max_results: int) -> List[PriorArtReference]:
+        results: List[PriorArtReference] = []
+        seen = set()
+        clusters = ((data.get("results") or {}).get("cluster") or [])
+        for cluster in clusters:
+            for item in cluster.get("result") or []:
+                patent = item.get("patent") or {}
+                publication_number = str(patent.get("publication_number") or "").strip()
+                if not publication_number or publication_number in seen:
+                    continue
+                seen.add(publication_number)
+                title = str(patent.get("title") or publication_number).strip()
+                snippet = re.sub(r"<[^>]+>", "", str(patent.get("snippet") or "")).strip()
+                results.append(PriorArtReference(
+                    reference_id=publication_number,
+                    title=title,
+                    applicant=patent.get("assignee"),
+                    publication_date=patent.get("publication_date"),
+                    abstract=snippet[:500],
+                    similarity_score=max(0.1, 0.75 - (0.03 * len(results))),
+                    source="google_patents",
+                    url=f"{self.config.base_url}/patent/{publication_number}",
+                ))
+                if len(results) >= max_results:
+                    return results
+        return results
+
+    def _parse_result_text(self, text: str, href: str = "") -> Optional[Dict[str, Any]]:
+        normalized = re.sub(r"\s+", " ", text or "").strip()
+        ref_match = re.search(
+            r"\b(CN|US|EP|WO|JP|KR)\s?[\d/]{4,}[A-Z]?\d?\b",
+            f"{href} {normalized}",
+            re.IGNORECASE,
+        )
+        if not ref_match:
+            return None
+        reference_id = re.sub(r"\s+", "", ref_match.group(0)).upper()
+        title = normalized
+        if reference_id in title:
+            title = title.split(reference_id, 1)[-1].strip(" -:：")
+        title = title[:160] or reference_id
+        date_match = re.search(r"\b(19|20)\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}", normalized)
+        publication_date = date_match.group(0) if date_match else None
+        abstract = normalized[:500]
+        return {
+            "reference_id": reference_id,
+            "title": title,
+            "publication_date": publication_date,
+            "abstract": abstract,
+        }
 
     async def get_details(self, reference_id: str) -> Optional[PriorArtReference]:
         await self._rate_limit()
@@ -273,14 +357,15 @@ class ArxivSource(DataSource):
                 "max_results": min(query.max_results, 20),
             }
 
-            if not self.client:
-                self.client = httpx.AsyncClient(timeout=30.0)
-
-            response = await self.client.get(url, params=params)
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(url, params=params)
             if response.status_code == 200:
+                self.last_error = None
                 return self._parse_atom_response(response.text)
+            self.last_error = f"arXiv HTTP status={response.status_code}"
         except Exception as e:
-            logger.warning(f"arXiv检索失败: {e}")
+            self.last_error = f"arXiv检索失败: {e}"
+            logger.warning(self.last_error)
 
         return []
 
@@ -400,6 +485,7 @@ class DataSourceManager:
             "arxiv": ArxivSource(),
         }
         self.web_fetcher = WebFetchSource()
+        self.last_search_status: Dict[str, Dict[str, Any]] = {}
         logger.info(f"数据源管理器初始化完成，可用数据源: {list(self.sources.keys())}")
 
     async def search_all(self, query: SearchQuery) -> List[PriorArtReference]:
@@ -407,10 +493,20 @@ class DataSourceManager:
         databases = query.databases or list(self.sources.keys())
 
         tasks = []
+        task_sources: List[str] = []
+        self.last_search_status = {}
         for source_id in databases:
             source = self.sources.get(source_id)
             if source and source.config.enabled:
+                source.last_error = None
                 tasks.append(source.search(query))
+                task_sources.append(source_id)
+            else:
+                self.last_search_status[source_id] = {
+                    "success": False,
+                    "count": 0,
+                    "error": "数据源未配置或未启用",
+                }
 
         if not tasks:
             return []
@@ -419,9 +515,21 @@ class DataSourceManager:
         all_references = []
 
         for i, result in enumerate(results):
+            source_id = task_sources[i]
             if isinstance(result, Exception):
-                logger.warning(f"数据源 {databases[i]} 检索失败: {result}")
+                self.last_search_status[source_id] = {
+                    "success": False,
+                    "count": 0,
+                    "error": str(result),
+                }
+                logger.warning(f"数据源 {source_id} 检索失败: {result}")
             else:
+                source = self.sources.get(source_id)
+                self.last_search_status[source_id] = {
+                    "success": bool(result),
+                    "count": len(result),
+                    "error": source.last_error if source and not result else None,
+                }
                 all_references.extend(result)
 
         # 去重（根据reference_id）

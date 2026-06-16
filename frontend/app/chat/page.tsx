@@ -200,7 +200,7 @@ function restoreConversationUiState(messages: ChatMessage[], convId: string, has
   const lastAssistant = assistantMessages.at(-1);
   const lastRecommendation = [...assistantMessages]
     .reverse()
-    .find((message) => message.metadata?.recommend_create_patent === true);
+    .find((message) => message.metadata?.recommend_create_patent === true && isRecord(message.metadata?.patent_preflight));
   const pendingConfirmation = !hasWorkflow && lastAssistant?.metadata?.confirmation && isRecord(lastAssistant.metadata.confirmation)
     ? {
         question: typeof lastAssistant.metadata.confirmation.question === 'string'
@@ -259,6 +259,7 @@ function resolveAgentName(data: unknown, defaultAgent = 'patent.ceo.v1'): string
 }
 
 function getSuggestedPatentTitle(message?: ChatMessage | null): string | null {
+  if (!isRecord(message?.metadata?.patent_preflight)) return null;
   const title = message?.metadata?.suggested_title;
   return typeof title === 'string' && title.trim() ? title.trim() : null;
 }
@@ -1230,7 +1231,7 @@ function ChatPageContent() {
       addToast({
         type: 'error',
         title: '缺少专利名称',
-        message: '启动专利申请前需要先由 Agent 明确专利名。',
+        message: '启动专利申请前需要先由 Agent 明确专利名并完成方案确认。',
       });
       return;
     }
@@ -1264,7 +1265,13 @@ function ChatPageContent() {
       setMessages((prev) => [...prev, processMsg]);
       void loadConversations();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '启动专利申请流程失败');
+      const message = err instanceof Error ? err.message : '启动专利申请流程失败';
+      setError(message);
+      addToast({
+        type: 'error',
+        title: '暂不能启动流程',
+        message,
+      });
     } finally {
       setIsStartingWorkflow(false);
     }
@@ -1804,8 +1811,8 @@ function ChatPageContent() {
                 <Sparkles className="w-5 h-5 text-green-600" />
                 <p className="text-sm text-green-800">
                   {suggestedTitle
-                    ? `技术方案已整理完毕，专利名称：「${suggestedTitle}」。确认后启动正式专利申请流程。`
-                    : '技术方案已基本清晰，但尚未明确专利名称。请先让 Agent 补充专利名称后再启动。'}
+                    ? `启动前方案已确认，专利名称：「${suggestedTitle}」。确认后进入正式专利申请流程。`
+                    : '启动前方案还未确认完整。请先让 Agent 补齐专利名称、保护主题、独权骨架、公开状态和附图需求。'}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">

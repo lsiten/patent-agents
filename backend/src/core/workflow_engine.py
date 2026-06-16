@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, TypeVar
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
@@ -223,6 +224,7 @@ class WorkflowContext:
         self.current_phase: WorkflowState = WorkflowState.INITIALIZED
         self.phase_history: List[PhaseResult] = []
         self.metadata: Dict[str, Any] = {}
+        self.shared_agent_context: Dict[str, Any] = {}
         self.is_paused: bool = False
 
         # 迭代修正反馈
@@ -241,6 +243,13 @@ class WorkflowContext:
             "timestamp": now.isoformat(),
             **kwargs,
         })
+        if role == "user" and content:
+            supplements = self.shared_agent_context.setdefault("user_supplements", [])
+            if isinstance(supplements, list):
+                supplements.append({
+                    "content": content[:4000],
+                    "timestamp": now.isoformat(),
+                })
         self.updated_at = now
 
     def add_phase_result(self, result: PhaseResult) -> None:
@@ -255,6 +264,10 @@ class WorkflowContext:
         if self.metadata.get("patent_type_preference"):
             parts.append(f"\n\n用户偏好的专利类型: {self.metadata['patent_type_preference']}")
 
+        shared_context_text = self.get_shared_agent_context_text()
+        if shared_context_text:
+            parts.append("\n\n已确认/共享公共信息:\n" + shared_context_text)
+
         if self.brainstorming_output and "summary" in self.brainstorming_output:
             parts.append("\n\n补充信息:\n" + self.brainstorming_output["summary"])
 
@@ -267,6 +280,19 @@ class WorkflowContext:
             parts.append("\n\n讨论摘要:\n" + "\n".join(key_messages[-5:]))
 
         return "\n".join(parts)
+
+    def get_shared_agent_context_text(self, limit: int = 10000) -> str:
+        """Format confirmed facts and shared stage outputs for every Agent prompt."""
+        if not self.shared_agent_context:
+            return ""
+        return json.dumps(self.shared_agent_context, ensure_ascii=False, indent=2)[:limit]
+
+    def merge_shared_agent_context(self, key: str, value: Any) -> None:
+        if value in (None, "", [], {}):
+            return
+        self.shared_agent_context[key] = value
+        self.metadata["shared_agent_context"] = self.shared_agent_context
+        self.updated_at = datetime.now()
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -312,6 +338,12 @@ _PHASE_DISPLAY_NAMES = {
     WorkflowState.QUALITY_REVIEW: "质量审查 Agent",
 }
 
+_DOWNSTREAM_CONTEXT_FIELDS = {
+    WorkflowState.REQUIREMENT_ANALYSIS: ("retrieval_report", "patent_draft", "review_report"),
+    WorkflowState.RETRIEVAL_ANALYSIS: ("patent_draft", "review_report"),
+    WorkflowState.PATENT_WRITING: ("review_report",),
+}
+
 
 # ============ 工作流引擎 ============
 
@@ -334,6 +366,54 @@ class PatentWorkflowEngine:
             WorkflowState.QUALITY_REVIEW,
         ]
 
+    def _invalidate_downstream_outputs(
+        self,
+        context: WorkflowContext,
+        phase_state: WorkflowState,
+        reason: str,
+    ) -> None:
+        """Clear current downstream artifacts after an upstream phase changes.
+
+        Phase history is preserved for per-round UI tabs. Only current context
+        fields are cleared, so an older draft/review cannot be treated as the
+        latest valid output after requirement or retrieval has changed.
+        """
+        fields = _DOWNSTREAM_CONTEXT_FIELDS.get(phase_state, ())
+        if not fields:
+            return
+        invalidated: List[str] = []
+        for field in fields:
+            if getattr(context, field, None):
+                setattr(context, field, {})
+                invalidated.append(field)
+        if invalidated:
+            context.metadata["stale_downstream_outputs"] = {
+                "phase": phase_state.value,
+                "fields": invalidated,
+                "reason": reason,
+                "invalidated_at": datetime.now().isoformat(),
+            }
+
+    def _update_shared_context_from_phase(
+        self,
+        context: WorkflowContext,
+        context_field: str,
+        data: Any,
+    ) -> None:
+        """Share confirmed phase facts with downstream Agents without hiding full artifacts."""
+        if not isinstance(data, dict) or not data:
+            return
+        phase_key = {
+            "requirement_analysis": "latest_requirement_analysis",
+            "retrieval_report": "latest_retrieval_report",
+            "patent_draft": "latest_patent_draft_summary",
+            "review_report": "latest_quality_review",
+        }.get(context_field, context_field)
+        compact = json.loads(json.dumps(data, ensure_ascii=False, default=str))
+        if context_field == "patent_draft":
+            compact = self._build_quality_review_draft_summary(data)
+        context.merge_shared_agent_context(phase_key, compact)
+
     def create_workflow(
         self,
         task_id: str,
@@ -342,6 +422,7 @@ class PatentWorkflowEngine:
         patent_type_preference: Optional[str] = None,
         skip_phases: Optional[List[WorkflowState]] = None,
         target_country: str = "中国",
+        confirmed_preflight: Optional[Dict[str, Any]] = None,
     ) -> WorkflowContext:
         """创建新的工作流"""
         context = WorkflowContext(task_id=task_id, user_id=user_id, target_country=target_country)
@@ -354,6 +435,10 @@ class PatentWorkflowEngine:
             "raw_disclosure": description,
             "disclosure_sanitized": cleaned_description != description,
         }
+        if confirmed_preflight:
+            context.title = str(confirmed_preflight.get("patent_title") or context.title)
+            context.merge_shared_agent_context("confirmed_preflight", confirmed_preflight)
+            context.metadata["confirmed_preflight"] = confirmed_preflight
         if patent_type_preference is not None:
             context.metadata = {
                 **context.metadata,
@@ -494,6 +579,7 @@ class PatentWorkflowEngine:
         phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None | Awaitable[None]]] = None,
         event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
         agent_event_callback: Optional[Callable[[Dict[str, Any]], None | Awaitable[None]]] = None,
+        force_start_from: Optional[WorkflowState] = None,
     ) -> WorkflowContext:
         """
         执行完整工作流 — 顺序调用各专业 Agent
@@ -521,6 +607,18 @@ class PatentWorkflowEngine:
                 ("patent_writer", "patent.writer.v1", "patent_draft", WorkflowState.PATENT_WRITING, WorkflowPhase.WRITING),
                 ("quality_reviewer", "patent.quality_reviewer.v1", "review_report", WorkflowState.QUALITY_REVIEW, WorkflowPhase.REVIEW),
             ]
+            if force_start_from:
+                start_index = next(
+                    (
+                        index
+                        for index, (_, _, _, phase_state, _) in enumerate(phases)
+                        if phase_state == force_start_from
+                    ),
+                    0,
+                )
+                phases = phases[start_index:]
+                context.current_phase = WorkflowState.ITERATION
+                context.iteration_count += 1
 
             for agent_id, profile_id, context_field, phase_state, phase_enum in phases:
                 if context.metadata.get("cancel_requested") or context.current_phase == WorkflowState.CANCELLED:
@@ -636,6 +734,20 @@ class PatentWorkflowEngine:
                         context_data = self._normalize_phase_output(context_field, context_data)
                         if context_field == "patent_draft":
                             context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
+                        contract_issues = self._validate_phase_contract(
+                            context_field,
+                            context_data,
+                        )
+                        if contract_issues:
+                            last_error = RuntimeError("；".join(contract_issues[:5]))
+                            if attempt >= max_retries:
+                                context_data = self._build_phase_contract_error(
+                                    context_field,
+                                    context_data,
+                                    contract_issues,
+                                )
+                                break
+                            raise last_error
                         if isinstance(context_data, dict) and context_data.get("_agent_failed") is True:
                             agent_error = str(
                                 context_data.get("_agent_error") or "Agent execution failed"
@@ -674,6 +786,7 @@ class PatentWorkflowEngine:
 
                 # 存储结果（适配前端期望的数据格式）
                 setattr(context, context_field, context_data)
+                self._update_shared_context_from_phase(context, context_field, context_data)
                 if agent_id == "patent_writer" and isinstance(context_data, dict):
                     context_data = await self._ensure_required_patent_drawings(
                         context,
@@ -692,6 +805,7 @@ class PatentWorkflowEngine:
                     )
                     context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
                     setattr(context, context_field, context_data)
+                    self._update_shared_context_from_phase(context, context_field, context_data)
 
                 agent_failed = (
                     isinstance(context_data, dict)
@@ -743,7 +857,6 @@ class PatentWorkflowEngine:
                         task_id=context.task_id,
                     )
                     if agent_id == "patent_writer":
-                        context.review_report = self._build_writer_failure_review(context_data)
                         break
                     if agent_id == "quality_reviewer":
                         break
@@ -753,6 +866,12 @@ class PatentWorkflowEngine:
                         event_callback,
                     )
                     return context
+
+                self._invalidate_downstream_outputs(
+                    context,
+                    phase_state,
+                    reason="upstream_phase_completed",
+                )
 
                 # 记录阶段完成
                 context.add_phase_result(PhaseResult(
@@ -862,27 +981,34 @@ class PatentWorkflowEngine:
 
                     if remediation_path == "NEEDS_USER_INPUT":
                         self._enter_quality_remediation_hold(context, context.review_report, remediation_path)
+                        context.current_phase = WorkflowState.AWAITING_USER_DECISION
                         if event_callback:
                             remediation = context.metadata.get("quality_remediation", {})
                             missing_information = remediation.get("missing_information", [])
                             detail = "；".join(str(item) for item in missing_information) if missing_information else "缺少额外信息"
-                            
+
                             event_callback(
                                 "CEO Agent",
-                                "agent.thinking",
-                                f"🔁 质量审查指出缺少信息，默认由 CEO 调度对应 Agent 补充并复审：{detail}",
+                                "agent.content",
+                                f"⏸️ 质量审查指出存在必须由用户确认的信息，流程已暂停：{detail}",
                                 {
                                     "agent_name": "CEO Agent",
-                                    "thought": "auto_remediation_missing_information",
+                                    "phase": "quality_review",
+                                    "content": detail,
                                     "missing_information": missing_information,
                                 },
                             )
-                        
-                        await self._execute_remediation_phase(
+                        await self._publish_progress_event(
                             context,
-                            self._resolve_remediation_resume_phase(remediation_path),
-                            event_callback=event_callback,
+                            WorkflowState.AWAITING_USER_DECISION,
+                            "waiting",
                         )
+                        await self._persist_loop_and_sediment_skills(
+                            context,
+                            "awaiting_user_decision",
+                            event_callback,
+                        )
+                        return context
 
                     if remediation_path == "ANALYZE_MORE":
                         if event_callback:
@@ -1018,6 +1144,13 @@ class PatentWorkflowEngine:
                             "docx_path": "",
                         }
                     context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
+                    contract_issues = self._validate_phase_contract("patent_draft", context_data)
+                    if contract_issues:
+                        context_data = self._build_phase_contract_error(
+                            "patent_draft",
+                            context_data,
+                            contract_issues,
+                        )
                     if isinstance(context_data, dict) and context_data.get("_agent_failed") is not True:
                         context_data = self._apply_review_suggestions_to_draft(
                             context,
@@ -1042,10 +1175,18 @@ class PatentWorkflowEngine:
                             event_callback=event_callback,
                         )
                         context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
+                        contract_issues = self._validate_phase_contract("patent_draft", context_data)
+                        if contract_issues:
+                            context_data = self._build_phase_contract_error(
+                                "patent_draft",
+                                context_data,
+                                contract_issues,
+                            )
                     revision_duration = time.perf_counter() - revision_started_at
                     if isinstance(context_data, dict):
                         context_data.setdefault("_phase_duration_seconds", revision_duration)
                     context.patent_draft = context_data
+                    self._update_shared_context_from_phase(context, "patent_draft", context_data)
                     # 持久化修正后的撰写结果
                     try:
                         _persist_phase_result(context.task_id, "patent_draft", context_data if isinstance(context_data, dict) else {"output": str(context_data)})
@@ -1089,10 +1230,18 @@ class PatentWorkflowEngine:
                             {"agent_name": "质量审查 Agent", "content": agent_text[:500] if agent_text else "", "phase": "quality_review"})
 
                     context_data = self._normalize_phase_output("review_report", context_data)
+                    contract_issues = self._validate_phase_contract("review_report", context_data)
+                    if contract_issues:
+                        context_data = self._build_phase_contract_error(
+                            "review_report",
+                            context_data,
+                            contract_issues,
+                        )
                     review_duration = time.perf_counter() - review_started_at
                     if isinstance(context_data, dict):
                         context_data.setdefault("_phase_duration_seconds", review_duration)
                     context.review_report = context_data
+                    self._update_shared_context_from_phase(context, "review_report", context_data)
                     # 持久化审查结果
                     try:
                         _persist_phase_result(context.task_id, "review_report", context_data if isinstance(context_data, dict) else {"output": str(context_data)})
@@ -1260,7 +1409,7 @@ class PatentWorkflowEngine:
 
                     docx_tool = PatentDocxGeneratorTool()
                     docx_result = await docx_tool.execute(
-                        title=context.title or "专利申请文件",
+                        title=draft.get("title") or draft.get("patent_title") or context.title,
                         claims=claims_data,
                         description=description_data,
                         abstract=abstract_text,
@@ -1320,81 +1469,6 @@ class PatentWorkflowEngine:
                 "failed",
                 event_callback,
             )
-            raise
-
-    async def resume_workflow(
-        self,
-        context: WorkflowContext,
-        phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None | Awaitable[None]]] = None,
-        force_start_from: Optional[WorkflowState] = None,
-    ) -> WorkflowContext:
-        """
-        恢复工作流 — 重新启动 CEO 编排
-
-        由于 CEO 是动态编排，恢复就是重新发起 CEO 对话，
-        并在 prompt 中注入已有阶段产出作为上下文。
-        """
-        self._logger.info(
-            "Resuming workflow via CEO",
-            task_id=context.task_id,
-            force_start_from=force_start_from.value if force_start_from else None,
-        )
-
-        if not force_start_from and context.current_phase == WorkflowState.AWAITING_USER_DECISION:
-            remediation = context.metadata.get("quality_remediation", {})
-            resume_phase = remediation.get("resume_phase")
-            if isinstance(resume_phase, str):
-                try:
-                    force_start_from = WorkflowState(resume_phase)
-                except ValueError:
-                    force_start_from = WorkflowState.REQUIREMENT_ANALYSIS
-            else:
-                force_start_from = WorkflowState.REQUIREMENT_ANALYSIS
-
-        if force_start_from:
-            context.current_phase = WorkflowState.ITERATION
-            context.iteration_count += 1
-
-        try:
-            service = _get_agent_factory()
-
-            # 构建带已有成果的恢复 prompt
-            prompt = self._build_ceo_resume_prompt(context, force_start_from)
-
-            result_text = await _run_agent_conversation("patent.ceo.v1", prompt)
-            if isinstance(result_text, dict):
-                result_text = result_text.get("final_response", "") or result_text.get("content", "") or json.dumps(result_text, ensure_ascii=False)
-            else:
-                result_text = str(result_text) if result_text else ""
-
-            self._parse_ceo_output(context, result_text)
-
-            context.current_phase = WorkflowState.COMPLETED
-            await self._publish_progress_event(context, WorkflowState.COMPLETED, "completed")
-            await self._persist_loop_and_sediment_skills(context, "completed")
-
-            if phase_callback:
-                result = PhaseResult(
-                    phase=WorkflowPhase.REVIEW,
-                    success=True,
-                    duration_seconds=(datetime.now() - context.updated_at).total_seconds(),
-                    output={"ceo_summary": result_text[:1000]},
-                )
-                if asyncio.iscoroutinefunction(phase_callback):
-                    await phase_callback(WorkflowState.COMPLETED, result)
-                else:
-                    phase_callback(WorkflowState.COMPLETED, result)
-
-            return context
-
-        except asyncio.CancelledError:
-            context.current_phase = WorkflowState.CANCELLED
-            raise
-
-        except Exception as e:
-            context.current_phase = WorkflowState.FAILED
-            self._logger.error("Workflow resume failed", error=str(e), exc_info=True)
-            await self._persist_loop_and_sediment_skills(context, "failed")
             raise
 
     async def execute_phase(
@@ -1516,69 +1590,6 @@ class PatentWorkflowEngine:
 
     # ============ 内部辅助方法 ============
 
-    def _build_ceo_workflow_prompt(self, context: WorkflowContext) -> str:
-        """构建 CEO 工作流 prompt — 引导 CEO 表达调度意图"""
-        patent_type = context.metadata.get("patent_type_preference", "未指定")
-        target_country = context.metadata.get("target_country", "中国")
-        return f"""执行完整的专利申请流程。你是调度者，通过指示我调用对应的专业Agent来完成各阶段工作。
-
-【你的指令格式】
-当你需要调度某个Agent时，请明确写出：
-  dispatch_specialist(agent_id="xxx", task="具体任务描述")
-
-可用的 agent_id：
-- requirement_analyst：需求分析（提取创新点、IPC分类）
-- retrieval_analyst：检索分析（先有技术检索、专利性评估）
-- patent_writer：专利撰写（权利要求书+说明书+摘要）
-- quality_reviewer：质量审查（形式+实质审查）
-
-【技术描述】
-{context.original_description}
-
-【目标申请国家/法域】{target_country}
-
-【用户偏好专利类型】{patent_type}
-
-请评估技术方案后，调度第一个Agent。输出格式示例：
-dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案进行结构化需求分析...")"""
-
-    def _build_ceo_resume_prompt(
-        self, context: WorkflowContext, force_start_from: Optional[WorkflowState]
-    ) -> str:
-        """构建 CEO 恢复工作流 prompt"""
-        existing_outputs = []
-        if context.requirement_analysis:
-            existing_outputs.append(f"需求分析已完成: {json.dumps(context.requirement_analysis, ensure_ascii=False)[:500]}")
-        if context.retrieval_report:
-            existing_outputs.append(f"检索报告已完成: {json.dumps(context.retrieval_report, ensure_ascii=False)[:500]}")
-        if context.patent_draft:
-            existing_outputs.append(f"专利草稿已完成: {json.dumps(context.patent_draft, ensure_ascii=False)[:500]}")
-        if context.review_report:
-            existing_outputs.append(f"审查报告已完成: {json.dumps(context.review_report, ensure_ascii=False)[:500]}")
-
-        existing_text = "\n".join(existing_outputs) if existing_outputs else "无"
-
-        start_hint = ""
-        if force_start_from:
-            start_hint = f"\n请从【{force_start_from.value}】阶段继续迭代修正（这是第{context.iteration_count}轮），必须基于已有成果和修正建议增量优化，不得无故从头重写。"
-
-        target_country = context.metadata.get("target_country", "中国")
-
-        return f"""继续执行专利申请流程。
-
-【技术描述】
-{context.original_description}
-
-【目标申请国家/法域】{target_country}
-
-【已有成果】
-{existing_text}
-
-【修正建议】
-{json.dumps(context.latest_revision_suggestions, ensure_ascii=False) if context.latest_revision_suggestions else "无"}
-{start_hint}
-请评估已有成果，根据修正建议使用 dispatch_specialist 继续推进流程直到完成。"""
-
     def _build_phase_prompt(self, context: WorkflowContext, phase: WorkflowState, content_only: bool = False) -> str:
         """为单个阶段构建 prompt
 
@@ -1597,6 +1608,7 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
 你必须先加载并遵守本 profile 的需求分析 skills，最终结论由你作为需求分析 Agent 的 LLM 判断。
 可调用 transcript_sanitizer、ipc_classifier、tech_feature_extractor、scenario_miner 获取客观信号；工具结果只能作为线索，不能替代技术领域、创新点、保护主题、专利类型和信息缺口判断。
 如果工具信号不足，必须在输出中如实标注 `tool_signal_insufficient`，不得用本地规则或工具空结果代替 Agent 结论。
+必须基于【已确认/共享公共信息】继续完善，不得忽略启动前确认的专利名称、保护主题、专利类型、公共事实和用户补充。
 最终 JSON 必须剔除逐字稿时间戳、说话人、寒暄和会议口语。
 ---
 
@@ -1608,12 +1620,14 @@ dispatch_specialist(agent_id="requirement_analyst", task="对以下技术方案�
 3. 接着调用 patentability_scorer 工具评估专利性
 4. 最后调用 risk_analyzer 工具识别风险
 只有在获得所有工具返回结果后，才能由你作为检索分析 Agent 通过 LLM 综合判断并生成最终JSON输出。
+必须基于【已确认/共享公共信息】和需求分析结果继续检索；如果证据不足，输出 evidence_gaps 和下一轮检索策略，不得编造检索结果。
 ---
 
 """,
             WorkflowState.PATENT_WRITING: """【专利撰写阶段输出契约】
 你必须先加载并遵守本 profile 的撰写、权利要求、附图和规范 skills；正式专利正文由你作为专利撰写 Agent 的 LLM 分段生成。
 claim_drafter、description_writer、terminology_normalizer、support_checker 只提供结构、约束和客观信号，不能替代正式权利要求、说明书和摘要。
+撰写前必须确认【已确认/共享公共信息】、需求分析和检索分析已经足够支持撰写；若不足，输出明确缺口并标注 responsible_phase，不得硬写。
 如果发明涉及结构、装置、系统、流程、空间关系或说明书包含附图说明，必须由你调用 patent_drawing_generator 为每一张附图分别生成真实附图，且绘图输入必须来自当前专利内容。
 注意：当前阶段只生成审查前的专利草稿和附图，不得调用 patent_docx_generator；最终 DOCX 必须在质量审查合格后由工作流统一生成。
 ---
@@ -1623,6 +1637,9 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 你必须先加载并遵守本 profile 的质量审查 skills；最终评分、是否通过、是否需要补正和修复路径必须由你作为质量审查 Agent 的 LLM 判断。
 可调用 compliance_checker、claim_quality_analyzer、support_verifier、oa_predictor 获取客观信号和审查线索；工具结果不能替代内容质量、创造性、充分公开、权利要求清楚性和附图一致性的专业判断。
 必须同时审查文本、权利要求、说明书、附图是否缺失/重复、图号和 DOCX 插图位置。发现问题时输出可由 CEO 调度的缺陷清单。
+所有 high/critical 问题必须包含 `responsible_phase`，取值只能是：requirement_analysis、retrieval_analysis、patent_writing、user_input、system_failure。
+如果 recommendation 为 revise/reject 或存在 high/critical 问题，顶层必须输出 `root_cause`，取值只能是：content_incomplete、requirement_unclear、evidence_missing、external_info_missing、system_failure。
+CEO 只会按这些字段路由，不会替你判断专业结论；因此必须把修复建议写成对应 Agent 可执行的反馈。
 ---
 
 """,
@@ -1633,6 +1650,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             WorkflowState.PATENT_WRITING: """【专利撰写阶段输出契约】
 你必须先加载并遵守本 profile 的撰写、权利要求、附图和规范 skills；正式专利正文由你作为专利撰写 Agent 的 LLM 分段生成。
 claim_drafter、description_writer、terminology_normalizer、support_checker 只提供结构、约束和客观信号，不能替代正式权利要求、说明书和摘要。
+撰写前必须确认【已确认/共享公共信息】、需求分析和检索分析已经足够支持撰写；若不足，输出明确缺口并标注 responsible_phase，不得硬写。
 如果发明涉及结构、装置、系统、流程、空间关系或说明书包含附图说明，必须由你调用 patent_drawing_generator 为每一张附图分别生成真实附图，且绘图输入必须来自当前专利内容。
 注意：工具不能替代你的专利撰写判断；不得调用 patent_docx_generator。
 ---
@@ -1792,95 +1810,6 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         }
         return json.dumps(summary, ensure_ascii=False)
 
-    def _build_quality_gate_prompt(self, gate_type: str, context: WorkflowContext, revision_issues: Optional[List[str]] = None) -> str:
-        """构建阶段质量门 prompt — 让 quality_reviewer 在不调用工具的情况下做质量评估
-
-        gate_type: "requirement" | "retrieval" | "draft"
-        """
-        base_instruction = """## 审查要求
-请严格输出JSON格式（不要调用任何工具，直接输出审查结论）：
-
-```json
-{
-  "gate_passed": true/false,
-  "issues": [
-    {"severity": "critical/high/medium/low", "description": "问题描述", "suggestion": "修改建议"}
-  ],
-  "summary": "总体评价"
-}
-```
-
-gate_passed为false的条件：存在任意 severity=critical 或 severity=high 的issue。
-如果没有严重或高级别问题，gate_passed必须为true。"""
-        revision_section = ""
-        if revision_issues:
-            revision_items = "\n".join(f"- {issue}" for issue in revision_issues)
-            revision_section = f"## 上一轮审查发现的问题（本轮需确认已修复）\n{revision_items}"
-
-        if gate_type == "requirement":
-            req = json.dumps(context.requirement_analysis, ensure_ascii=False)[:3000]
-            return f"""请对以下【需求分析结果】进行质量审查，检查分析是否完整、准确。
-
-【需求分析结果】
-{req}
-
-## 检查清单
-1. IPC分类是否合理？（tech_field 字段）
-2. 核心技术原理是否清晰描述？（core_principle 字段）
-3. 创新点提取是否完整？（key_innovative_features / key_features 字段）
-4. 应用场景是否明确？（application_scenarios 字段）
-5. 信息缺口是否已识别？（information_gaps 字段）
-6. 专利类型推荐是否合理？（patent_type_recommendation 字段）
-7. 有益效果是否充分描述？（beneficial_effects 字段）
-
-{base_instruction}
-
-{revision_section}"""
-
-        elif gate_type == "retrieval":
-            ret = json.dumps(context.retrieval_report, ensure_ascii=False)[:3000]
-            return f"""请对以下【检索分析结果】进行质量审查，检查分析是否全面、可信。
-
-【检索分析结果】
-{ret}
-
-## 检查清单
-1. 检索是否覆盖了关键数据源？（检索工具调用结果）
-2. 相似专利对比是否充分？（similarity_results / prior_art_references 字段）
-3. 新颖性评估是否合理？（novelty_assessment 字段）
-4. 创造性评估是否合理？（inventive_step_assessment 字段）
-5. 实用性评估是否合理？（utility_assessment 字段）
-6. 总体专利性评估是否可信？（overall_patentability 字段）
-7. 风险分析是否全面？（risk_analysis 字段）
-8. 若使用了网页补充证据，是否明确记录了 web_evidence / non_patent_prior_art / evidence_sources / evidence_gaps？
-9. 网页证据是否与专利性判断清晰区分，没有把网页文案直接当作专利结论？
-
-{base_instruction}
-
-{revision_section}"""
-
-        elif gate_type == "draft":
-            draft = json.dumps(context.patent_draft, ensure_ascii=False)[:3000]
-            return f"""请对以下【专利申请草稿】进行质量审查，检查文件是否完整、规范。
-
-【专利草稿内容】
-{draft}
-
-## 检查清单
-1. 权利要求书是否完整？（独立权利要求+从属权利要求）
-2. 权利要求是否清楚、简要？
-3. 说明书是否包含技术领域、背景技术、发明内容、具体实施方式？
-4. 权利要求与说明书是否一致（支持关系）？
-5. 说明书摘要是否完整？
-6. 技术术语使用是否规范？
-7. 文件格式是否符合中国专利法要求？
-
-{base_instruction}
-
-{revision_section}"""
-
-        return base_instruction
-
     def _check_review_needs_revision(self, review_report: Dict[str, Any]) -> bool:
         """检查质量审查报告是否有需要修正的严重/高级别问题
 
@@ -1979,6 +1908,26 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         if not isinstance(review_report, dict):
             return "TERMINAL_FAILURE"
 
+        route_mapping = {
+            "patent_writing": "WRITE_MORE",
+            "writing": "WRITE_MORE",
+            "requirement_analysis": "ANALYZE_MORE",
+            "requirements": "ANALYZE_MORE",
+            "retrieval_analysis": "SEARCH_MORE",
+            "retrieval": "SEARCH_MORE",
+            "user_input": "NEEDS_USER_INPUT",
+            "system_failure": "TERMINAL_FAILURE",
+        }
+        for issue in self._extract_review_issue_records(review_report):
+            responsible_phase = str(
+                issue.get("responsible_phase")
+                or issue.get("target_phase")
+                or issue.get("route_to")
+                or ""
+            ).strip().lower()
+            if responsible_phase in route_mapping:
+                return route_mapping[responsible_phase]
+
         root_cause = str(review_report.get("root_cause") or "").strip().lower()
         mapping = {
             "content_incomplete": "WRITE_MORE",
@@ -2012,13 +1961,6 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         ):
             return "WRITE_MORE"
 
-        review_issues = self._extract_review_issues(review_report)
-        combined_issue_text = "\n".join(review_issues).lower()
-        if any(keyword in combined_issue_text for keyword in ("参数", "术语", "场景", "需求", "不明确", "定义不清")):
-            return "ANALYZE_MORE"
-        if any(keyword in combined_issue_text for keyword in ("prior art", "现有技术", "检索", "证据", "novelty", "创造性")):
-            return "SEARCH_MORE"
-
         if self._needs_quality_remediation(review_report):
             return "WRITE_MORE"
         return "TERMINAL_FAILURE"
@@ -2051,10 +1993,37 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             "missing_information": [str(item).strip() for item in missing_information if str(item).strip()],
             "attempt_count": context.iteration_count,
             "recommended_next_action": (
-                "provide_info" if classification == "AUTO_REMEDIATION_LIMIT" else "continue_auto_fix"
+                "provide_info"
+                if classification in {"AUTO_REMEDIATION_LIMIT", "NEEDS_USER_INPUT"}
+                else "continue_auto_fix"
             ),
             "resume_phase": self._resolve_remediation_resume_phase(classification).value,
         }
+
+    def _prewriting_requires_user_input(self, blockers: List[Dict[str, str]]) -> bool:
+        """True when the writer gate found invention facts the Agents may need from user.
+
+        This is a classification signal, not an immediate stop condition. The CEO
+        still gets remediation rounds first so the responsible Agent can reuse the
+        prior result, apply feedback, search again, or infer what is reasonably
+        inferable. Only after the retry budget is exhausted should the workflow
+        pause for user discussion.
+        """
+        user_fact_markers = (
+            "信息缺口",
+            "仍需确认",
+            "需要用户",
+            "用户补充",
+            "genuinely_missing",
+            "external_info_missing",
+        )
+        for blocker in blockers:
+            if blocker.get("phase") == WorkflowState.RETRIEVAL_ANALYSIS.value:
+                continue
+            message = str(blocker.get("message") or "")
+            if any(marker in message for marker in user_fact_markers):
+                return True
+        return False
 
     def _iter_phase_text_values(self, value: Any) -> List[str]:
         texts: List[str] = []
@@ -2121,6 +2090,206 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     return True
         return False
 
+    def _unwrap_phase_payload(self, value: Any) -> Any:
+        """Extract the Agent's structured payload from the Hermes response envelope."""
+        if not isinstance(value, dict):
+            return value
+
+        metadata = {
+            key: value[key]
+            for key in (
+                "_agent_failed",
+                "_agent_error",
+                "_incomplete_output",
+                "tool_results",
+                "duration_seconds",
+            )
+            if key in value
+        }
+
+        structured = value.get("structured_result")
+        if isinstance(structured, dict) and structured:
+            merged = dict(structured)
+            for key, meta_value in metadata.items():
+                merged.setdefault(key, meta_value)
+            return merged
+
+        for key in ("final_response", "output", "content", "result"):
+            text = value.get(key)
+            if not isinstance(text, str) or not text.strip():
+                continue
+            parsed = self._try_parse_json(text)
+            if isinstance(parsed, dict) and parsed and "raw_output" not in parsed:
+                merged = dict(parsed)
+                for meta_key, meta_value in metadata.items():
+                    merged.setdefault(meta_key, meta_value)
+                return merged
+
+        return value
+
+    def _extract_retrieval_sources(self, report: Dict[str, Any]) -> List[str]:
+        """Return only sources backed by actual returned evidence."""
+        sources: set[str] = set()
+
+        actual_sources = report.get("actual_sources_used")
+        if isinstance(actual_sources, list):
+            sources.update(str(item).strip() for item in actual_sources if str(item).strip())
+
+        source_counts = report.get("source_result_counts")
+        if isinstance(source_counts, dict):
+            for source, count in source_counts.items():
+                try:
+                    numeric_count = int(count)
+                except (TypeError, ValueError):
+                    numeric_count = 0
+                if numeric_count > 0 and str(source).strip():
+                    sources.add(str(source).strip())
+
+        for field_name in ("similar_patents", "prior_art_references", "search_results", "patent_results"):
+            items = report.get(field_name)
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                source = (
+                    item.get("source")
+                    or item.get("database")
+                    or item.get("data_source")
+                    or item.get("provider")
+                )
+                if source and str(source).strip():
+                    sources.add(str(source).strip())
+
+        for field_name in ("web_evidence", "non_patent_prior_art", "evidence_sources"):
+            items = report.get(field_name)
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if isinstance(item, dict):
+                    url = str(item.get("url") or item.get("source_url") or "").strip()
+                    source = str(item.get("source") or item.get("site") or "").strip()
+                else:
+                    url = str(item).strip()
+                    source = ""
+                if source:
+                    sources.add(source)
+                elif "patents.google.com" in url:
+                    sources.add("google_patents")
+                elif "uspto.gov" in url:
+                    sources.add("uspto")
+                elif "epo.org" in url or "espacenet.com" in url:
+                    sources.add("epo")
+                elif "cnipa" in url or "cponline.cnipa" in url:
+                    sources.add("cnipa")
+
+        return sorted(sources)
+
+    def _uses_public_web_evidence(self, report: Dict[str, Any]) -> bool:
+        for field_name in ("web_evidence", "non_patent_prior_art", "evidence_sources"):
+            if self._as_nonempty_list(report.get(field_name)):
+                return True
+        return False
+
+    def _has_professional_or_official_verification(self, report: Dict[str, Any]) -> bool:
+        """Check public/web evidence has a professional, official, or patent-office verifier."""
+        professional_domains = (
+            "patents.google.com",
+            "uspto.gov",
+            "epo.org",
+            "espacenet.com",
+            "wipo.int",
+            "cnipa.gov.cn",
+            "cponline.cnipa.gov.cn",
+            "patentcenter.uspto.gov",
+            "ieee.org",
+            "acm.org",
+            "springer.com",
+            "sciencedirect.com",
+            "elsevier.com",
+            "nature.com",
+            "arxiv.org",
+            "iso.org",
+            "iec.ch",
+        )
+        verification_markers = (
+            "官方",
+            "专利局",
+            "专业",
+            "标准组织",
+            "论文",
+            "出版",
+            "patent office",
+            "official",
+            "standard",
+            "journal",
+            "conference",
+            "verified",
+            "cross-check",
+        )
+        for field_name in ("similar_patents", "prior_art_references", "search_results", "patent_results"):
+            if self._as_nonempty_list(report.get(field_name)):
+                return True
+        for field_name in ("web_evidence", "non_patent_prior_art", "evidence_sources"):
+            for item in self._as_nonempty_list(report.get(field_name)):
+                if isinstance(item, dict):
+                    text = json.dumps(item, ensure_ascii=False).lower()
+                    url = str(item.get("url") or item.get("source_url") or "").strip()
+                else:
+                    text = str(item).lower()
+                    url = str(item).strip()
+                if any(marker.lower() in text for marker in verification_markers):
+                    return True
+                host = urlparse(url).netloc.lower()
+                if host.startswith("www."):
+                    host = host[4:]
+                if any(host == domain or host.endswith("." + domain) for domain in professional_domains):
+                    return True
+        return False
+
+    def _latest_user_supplemental_text(self, context: WorkflowContext) -> str:
+        parts: List[str] = []
+        for msg in context.message_history:
+            if msg.get("role") == "user":
+                parts.append(str(msg.get("content") or ""))
+        supplies = context.metadata.get("user_supplemental_info")
+        if isinstance(supplies, list):
+            parts.extend(str(item) for item in supplies)
+        remediation = context.metadata.get("quality_remediation")
+        if isinstance(remediation, dict):
+            parts.append(str(remediation.get("user_supplied_info") or ""))
+        return "\n".join(part for part in parts if part.strip())
+
+    def _safety_motion_confirmed(self, context: WorkflowContext) -> bool:
+        text = self._latest_user_supplemental_text(context)
+        return bool(text and ("安全检测" in text or "防碰撞" in text or "限位开关" in text))
+
+    def _requirement_gap_belongs_to_retrieval(self, gap_text: str) -> bool:
+        """Requirement gaps that explicitly ask retrieval to verify evidence belong to retrieval."""
+        text = str(gap_text or "")
+        retrieval_markers = (
+            "检索分析阶段",
+            "检索阶段",
+            "补充检索",
+            "继续检索",
+            "中国专利",
+            "专利库",
+            "CNIPA",
+            "Google Patents",
+            "USPTO",
+            "EPO",
+            "WIPO",
+            "可核验证据",
+            "专业/官方",
+            "官方或专业",
+            "交叉核验",
+            "真伪",
+            "现有技术",
+            "对比文件",
+            "专利号",
+        )
+        return any(marker in text for marker in retrieval_markers)
+
     def _collect_prewriting_blockers(self, context: WorkflowContext) -> List[Dict[str, str]]:
         """Return blockers that must be resolved before the writer Agent runs.
 
@@ -2128,7 +2297,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         substance; unresolved items are routed back to the responsible Hermes Agent.
         """
         blockers: List[Dict[str, str]] = []
-        req = context.requirement_analysis
+        req = self._unwrap_phase_payload(context.requirement_analysis)
         if not isinstance(req, dict) or not req:
             return [{
                 "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
@@ -2180,20 +2349,40 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 })
 
         gaps = self._as_nonempty_list(req.get("information_gaps"))
-        if gaps:
+        filtered_gaps: List[str] = []
+        retrieval_gaps: List[str] = []
+        for gap in gaps:
+            gap_text = str(gap)
+            if "CPC" in gap_text and ("分类" in gap_text or "工具信号" in gap_text):
+                continue
+            if self._safety_motion_confirmed(context) and any(
+                marker in gap_text for marker in ("安全检测", "防碰撞", "运动前", "实体屏幕运动")
+            ):
+                continue
+            if self._requirement_gap_belongs_to_retrieval(gap_text):
+                retrieval_gaps.append(gap_text)
+                continue
+            filtered_gaps.append(gap_text)
+        if filtered_gaps:
             blockers.append({
                 "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
                 "severity": "high",
-                "message": "需求分析仍存在信息缺口，不能直接交给撰写 Agent：" + "；".join(str(item)[:120] for item in gaps[:5]),
+                "message": "需求分析仍存在信息缺口，不能直接交给撰写 Agent：" + "；".join(str(item)[:120] for item in filtered_gaps[:5]),
             })
-        if self._has_phase_signal(req, "tool_signal_insufficient", "knowledge_insufficient", "genuinely_missing"):
+        if retrieval_gaps:
+            blockers.append({
+                "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
+                "severity": "high",
+                "message": "需求分析指出仍需检索阶段补证/核验，不能进入撰写：" + "；".join(str(item)[:120] for item in retrieval_gaps[:5]),
+            })
+        if self._has_phase_signal(req, "knowledge_insufficient", "genuinely_missing"):
             blockers.append({
                 "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
                 "severity": "high",
                 "message": "需求分析标记了未解决的信息不足信号，必须先由 CEO 调度补齐或确认。",
             })
 
-        ret = context.retrieval_report
+        ret = self._unwrap_phase_payload(context.retrieval_report)
         if not isinstance(ret, dict) or not ret:
             blockers.append({
                 "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
@@ -2211,10 +2400,13 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         strategy = ret.get("retrieval_strategy")
         if isinstance(strategy, dict):
             keywords = self._as_nonempty_list(strategy.get("keywords") or ret.get("retrieval_keywords"))
-            databases = self._as_nonempty_list(strategy.get("databases_used") or ret.get("retrieval_databases"))
+            declared_databases = self._as_nonempty_list(strategy.get("databases_used") or ret.get("retrieval_databases"))
         else:
             keywords = self._as_nonempty_list(ret.get("retrieval_keywords"))
-            databases = self._as_nonempty_list(ret.get("retrieval_databases"))
+            declared_databases = self._as_nonempty_list(ret.get("retrieval_databases"))
+        databases = self._extract_retrieval_sources(ret)
+        if not databases and declared_databases and self._has_real_retrieval_evidence(ret):
+            databases = declared_databases
         if len(keywords) < 3:
             blockers.append({
                 "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
@@ -2233,6 +2425,12 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 "severity": "high",
                 "message": "检索报告没有可核验的专利或网页证据列表，不能进入撰写。",
             })
+        if self._uses_public_web_evidence(ret) and not self._has_professional_or_official_verification(ret):
+            blockers.append({
+                "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
+                "severity": "high",
+                "message": "检索报告使用了公开网页或 Google Patents 候选证据，但没有专业/官方来源交叉核验，必须继续核验真伪。",
+            })
         evidence_gaps = self._as_nonempty_list(ret.get("evidence_gaps"))
         if evidence_gaps:
             blockers.append({
@@ -2244,7 +2442,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             blockers.append({
                 "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
                 "severity": "high",
-                "message": "检索报告标记了数据源不可用、无结果或证据不足，必须先补充检索或明确风险。",
+                "message": "检索报告标记了数据源不可用、无结果或证据不足，必须继续调度检索 Agent 扩展检索。",
             })
 
         return blockers
@@ -2254,6 +2452,11 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         if WorkflowState.REQUIREMENT_ANALYSIS.value in phases:
             return WorkflowState.REQUIREMENT_ANALYSIS
         return WorkflowState.RETRIEVAL_ANALYSIS
+
+    def _prewriting_blockers_are_retrieval_only(self, blockers: List[Dict[str, str]]) -> bool:
+        return bool(blockers) and all(
+            item.get("phase") == WorkflowState.RETRIEVAL_ANALYSIS.value for item in blockers
+        )
 
     async def _ensure_prewriting_ready(
         self,
@@ -2302,15 +2505,46 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     },
                 )
 
-            if attempts >= max_attempts:
+            needs_user_input = self._prewriting_requires_user_input(blockers)
+            retrieval_only = self._prewriting_blockers_are_retrieval_only(blockers)
+            retrieval_max_attempts = max(max_attempts, 6)
+            effective_max_attempts = retrieval_max_attempts if retrieval_only else max_attempts
+            should_discuss_with_user = attempts >= effective_max_attempts
+            if should_discuss_with_user:
                 context.current_phase = WorkflowState.AWAITING_USER_DECISION
+                if retrieval_only and not needs_user_input:
+                    classification = "retrieval_evidence_discussion_required"
+                    hold_message = (
+                        "⏸️ 多轮补检后仍无法获得足够可核验证据，需要与用户讨论补充检索线索，"
+                        "之后再由 CEO 继续调度检索 Agent。"
+                    )
+                else:
+                    classification = (
+                        "prewriting_user_input_required"
+                        if needs_user_input
+                        else "prewriting_gate_blocked"
+                    )
+                    hold_message = "⏸️ 撰写前还缺少必须由用户确认的信息，已暂停自动流程。"
                 context.metadata["quality_remediation"] = {
-                    "classification": "prewriting_gate_blocked",
+                    "classification": classification,
                     "missing_information": [item["message"] for item in blockers],
                     "attempt_count": attempts,
                     "recommended_next_action": "provide_info",
                     "resume_phase": self._select_prewriting_remediation_phase(blockers).value,
                 }
+                if event_callback:
+                    event_callback(
+                        "CEO Agent",
+                        "agent.content",
+                        hold_message + "\n" + issue_text,
+                        {
+                            "agent_name": "CEO Agent",
+                            "phase": "prewriting_gate",
+                            "content": issue_text,
+                            "blockers": blockers,
+                            "attempt": attempts,
+                        },
+                    )
                 await self._publish_progress_event(
                     context,
                     WorkflowState.AWAITING_USER_DECISION,
@@ -2321,6 +2555,14 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             attempts += 1
             context.metadata["prewriting_gate_attempts"] = attempts
             phase = self._select_prewriting_remediation_phase(blockers)
+            dispatch_text = issue_text
+            if phase == WorkflowState.RETRIEVAL_ANALYSIS:
+                dispatch_text += (
+                    "\n\n检索补全要求：先分析为什么无结果或证据不足；"
+                    "然后更换检索条件，使用更宽/更窄、中文/英文、同义词和关键技术特征组合继续检索；"
+                    "必要时补充公开网页或 Google Patents 证据，并用专业信息网站或官方来源交叉确认真伪；"
+                    "禁止编造专利号、申请人、公开日或网页来源。"
+                )
             if event_callback:
                 event_callback(
                     "CEO Agent",
@@ -2330,10 +2572,11 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                         "from_agent": "CEO Agent",
                         "to_agent": _PHASE_DISPLAY_NAMES.get(phase, phase.value),
                         "phase": "prewriting_gate",
-                        "task_description": issue_text[:1000],
+                        "task_description": dispatch_text[:1200],
                         "attempt": attempts,
                     },
                 )
+            context.latest_revision_suggestions = [dispatch_text]
             await self._execute_remediation_phase(
                 context,
                 phase,
@@ -2360,53 +2603,6 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     WorkflowState.RETRIEVAL_ANALYSIS,
                     event_callback=event_callback,
                 )
-
-    def _build_writer_failure_review(self, patent_draft: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert an invalid writer result into a quality issue for CEO remediation."""
-        error = ""
-        if isinstance(patent_draft, dict):
-            error = str(patent_draft.get("_agent_error") or patent_draft.get("error") or "")
-        return {
-            "review_summary": {
-                "overall_score": 0.0,
-                "overall_rating": "poor",
-                "recommendation": "revise",
-                "reviewer_notes": "专利撰写结果为空、失败或不完整，需要重新撰写完整申请文件。",
-            },
-            "root_cause": "content_incomplete",
-            "missing_information": [],
-            "revision_priority": "critical",
-            "formal_compliance_review": {
-                "score": 0.0,
-                "passed": False,
-                "issues": [
-                    {
-                        "severity": "critical",
-                        "location": "专利申请文件",
-                        "description": "专利撰写阶段未生成可用于审查和提交的完整申请文件。",
-                        "suggestion": "由专利撰写 Agent 基于原始技术材料、需求分析和检索结果重新生成完整权利要求书、说明书、摘要及必要附图信息。",
-                    }
-                ],
-            },
-            "claims_review": {"issues": []},
-            "description_review": {"issues": []},
-            "consistency_review": {"issues": []},
-            "examination_risks": [
-                {
-                    "risk": "申请文件不完整",
-                    "likelihood": "critical",
-                    "impact": "无法形成合格专利申请文件",
-                    "mitigation": "重新生成完整专利申请文本",
-                }
-            ],
-            "detailed_revision_suggestions": [
-                {
-                    "section": "全文",
-                    "reason": error or "专利撰写结果不完整",
-                    "suggested_content": "重新生成完整的权利要求书、说明书、摘要和附图说明。",
-                }
-            ],
-        }
 
     async def _execute_remediation_phase(
         self,
@@ -2468,10 +2664,18 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 
         context_field = _PHASE_CONTEXT_FIELDS[phase_state]
         context_data = self._normalize_phase_output(context_field, context_data)
+        contract_issues = self._validate_phase_contract(context_field, context_data)
+        if contract_issues:
+            context_data = self._build_phase_contract_error(
+                context_field,
+                context_data,
+                contract_issues,
+            )
         phase_duration = time.perf_counter() - phase_started_at
         if isinstance(context_data, dict):
             context_data.setdefault("_phase_duration_seconds", phase_duration)
         setattr(context, context_field, context_data)
+        self._update_shared_context_from_phase(context, context_field, context_data)
 
         try:
             _persist_phase_result(
@@ -2484,6 +2688,12 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 
         phase_enum = _PHASE_TO_WORKFLOW_PHASE.get(phase_state, WorkflowPhase.BRAINSTORM)
         agent_failed = isinstance(context_data, dict) and context_data.get("_agent_failed") is True
+        if not agent_failed:
+            self._invalidate_downstream_outputs(
+                context,
+                phase_state,
+                reason="remediation_phase_completed",
+            )
         context.add_phase_result(
             PhaseResult(
                 phase=phase_enum,
@@ -2543,6 +2753,44 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 issues.append(f"[{section}] {reason}。建议修改为：{suggested[:200]}")
 
         return issues[:10]  # 最多取10个问题
+
+    def _extract_review_issue_records(self, review_report: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract structured review issues for CEO routing without judging quality."""
+        if not isinstance(review_report, dict):
+            return []
+
+        records: List[Dict[str, Any]] = []
+        for section_key in (
+            "formal_compliance_review",
+            "claims_review",
+            "description_review",
+            "consistency_review",
+            "drawing_review",
+            "drawings_review",
+            "figure_review",
+        ):
+            section = review_report.get(section_key, {})
+            if not isinstance(section, dict):
+                continue
+            for issue in section.get("issues", []):
+                if isinstance(issue, dict):
+                    record = dict(issue)
+                    record.setdefault("section", section_key)
+                    records.append(record)
+
+        for risk in review_report.get("examination_risks", []):
+            if isinstance(risk, dict):
+                record = dict(risk)
+                record.setdefault("section", "examination_risks")
+                records.append(record)
+
+        for suggestion in review_report.get("detailed_revision_suggestions", []):
+            if isinstance(suggestion, dict):
+                record = dict(suggestion)
+                record.setdefault("section", suggestion.get("section") or "revision_suggestions")
+                records.append(record)
+
+        return records
 
     def _extract_referenced_figure_numbers(self, draft: Dict[str, Any]) -> List[str]:
         """Return normalized figure numbers referenced by the draft text."""
@@ -2832,7 +3080,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             from src.agents.hermes.tools.patent_docx_generator import PatentDocxGeneratorTool
 
             docx_result = await PatentDocxGeneratorTool().execute(
-                title=context.title or "专利申请文件",
+                title=draft.get("title") or draft.get("patent_title") or context.title,
                 claims=draft.get("claims", {}),
                 description=draft.get("description", {}),
                 abstract=draft.get("abstract", ""),
@@ -2921,49 +3169,6 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             )
         return repaired
 
-    def _section_needs_repair(self, value: object) -> bool:
-        text = str(value or "").strip()
-        if len(text) < 120:
-            return True
-        return bool(re.search(r"(图\d+还|可以直接输|升降高度$|等$|包括但不限于$)", text))
-
-    def _extract_suggested_content_for_section(
-        self,
-        review_report: Dict[str, Any],
-        section_names: tuple[str, ...],
-    ) -> str:
-        suggestions = review_report.get("detailed_revision_suggestions", [])
-        if not isinstance(suggestions, list):
-            return ""
-        normalized_names = tuple(name.lower() for name in section_names)
-        for item in suggestions:
-            if not isinstance(item, dict):
-                continue
-            section = str(item.get("section") or "").lower()
-            if any(name in section for name in normalized_names):
-                content = str(item.get("suggested_content") or "").strip()
-                if content:
-                    return content
-        return ""
-
-    def _build_consistent_drawings_description(self, draft: Dict[str, Any]) -> str:
-        specs = self._planned_drawing_specs(draft)
-        if not specs:
-            description = draft.get("description", {}) if isinstance(draft, dict) else {}
-            if isinstance(description, dict):
-                return str(
-                    description.get("drawings_description")
-                    or description.get("description_of_drawings")
-                    or ""
-                ).strip()
-            return ""
-        lines = []
-        for spec in specs:
-            desc = str(spec.get("description") or "").strip()
-            if desc:
-                lines.append(desc if desc.endswith("。") else f"{desc}。")
-        return "\n".join(lines)
-
     def _normalize_drawing_metadata(
         self,
         drawings: object,
@@ -2998,7 +3203,10 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             drawing["figure_number"] = figure_number
             raw_title = str(drawing.get("title") or "").strip()
             raw_title = re.sub(rf"^{re.escape(figure_number)}\s*[:：、.．-]?\s*", "", raw_title).strip()
-            drawing["title"] = title_map.get(figure_number, raw_title or "专利附图")
+            final_title = title_map.get(figure_number) or raw_title
+            if not final_title:
+                continue
+            drawing["title"] = final_title
             drawing["description"] = description_map.get(figure_number) or str(drawing.get("description") or "").strip()
             normalized.append(drawing)
         return normalized
@@ -3214,6 +3422,8 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 "description": issue.get("issue") or issue.get("description", ""),
                 "suggestion": issue.get("suggestion", ""),
                 "target_agent": issue.get("target_agent", "patent_writer"),
+                "responsible_phase": "patent_writing",
+                "source": "deterministic_manual_gate",
             }
 
         claim_issues = [
@@ -3230,36 +3440,20 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             return review_report
 
         merged = dict(review_report)
-        merged["recommendation"] = "revise"
-        merged["revision_priority"] = "critical" if any(
-            issue.get("severity") == "critical" for issue in [*claim_issues, *doc_issues]
-        ) else "high"
-        summary = dict(merged.get("review_summary") or {})
-        summary["recommendation"] = "revise"
-        summary["overall_rating"] = "needs_revision"
-        score = summary.get("overall_score")
-        if not isinstance(score, (int, float)) or float(score) > 0.79:
-            summary["overall_score"] = 0.79
-        note = str(summary.get("reviewer_notes") or "").strip()
-        summary["reviewer_notes"] = (
-            (note + "；" if note else "")
-            + "确定性专利规范校验发现未解决的硬性格式/结构问题，必须修复后复审。"
-        )
-        merged["review_summary"] = summary
+        merged["_hard_rule_failed"] = True
+        merged["_hard_rule_route"] = "patent_writing"
+        merged.setdefault("root_cause", "content_incomplete")
 
         claims_review = dict(merged.get("claims_review") or {})
         claims_review.setdefault("issues", [])
         if isinstance(claims_review["issues"], list):
             claims_review["issues"].extend(claim_issues)
-        claims_review["overall_score"] = min(float(claims_review.get("overall_score", 1.0) or 1.0), 0.79)
         merged["claims_review"] = claims_review
 
         formal_review = dict(merged.get("formal_compliance_review") or {})
         formal_review.setdefault("issues", [])
         if isinstance(formal_review["issues"], list):
             formal_review["issues"].extend(doc_issues)
-        formal_review["passed"] = False
-        formal_review["score"] = min(float(formal_review.get("score", 1.0) or 1.0), 0.79)
         merged["formal_compliance_review"] = formal_review
 
         drawing_issues = [
@@ -3271,12 +3465,9 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             drawing_review.setdefault("issues", [])
             if isinstance(drawing_review["issues"], list):
                 drawing_review["issues"].extend(drawing_issues)
-            drawing_review["passed"] = False
-            drawing_review["score"] = 0.0
             merged["drawing_review"] = drawing_review
 
         merged["manual_compliance"] = manual
-        merged["root_cause"] = merged.get("root_cause") or "content_incomplete"
         return merged
 
     def _has_unresolved_critical_issues(self, context: WorkflowContext) -> bool:
@@ -3357,190 +3548,108 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         return writer_err[:100] == reviewer_err[:100]
 
     def _analyze_workflow_failure(self, context: WorkflowContext) -> Dict[str, Any]:
+        """Build a deterministic failure report for CEO routing.
+
+        CEO only reports contracts, Agent failures, and review Agent findings.
+        It does not create specialist patent conclusions or content advice.
         """
-        分析工作流失败的详细原因，返回失败阶段、具体问题和优化建议。
-        
-        Returns:
-            Dict 包含:
-                - phase: 失败阶段标识
-                - phase_display: 阶段显示名称
-                - main_reason: 主要失败原因
-                - issues: 具体问题列表 [{"type": str, "message": str, "severity": str}]
-                - suggestions: 优化建议列表 [str]
-        """
-        issues = []
-        suggestions = []
-        phase = None
-        phase_display = ""
-        
-        # 检查专利草稿问题
-        draft = context.patent_draft
-        draft_is_empty = False
-        
-        if not draft or not isinstance(draft, dict):
-            issues.append({
-                "type": "draft_missing",
-                "message": "专利草稿为空或格式不正确",
-                "severity": "critical"
-            })
-            draft_is_empty = True
-        else:
-            # 检查独立权利要求
-            claims = draft.get("claims", {})
-            if not claims.get("independent_claim", "").strip():
+        issues: List[Dict[str, str]] = []
+        suggestions: List[str] = []
+
+        draft_contract_issues = self._validate_phase_contract("patent_draft", context.patent_draft)
+        review_contract_issues = self._validate_phase_contract("review_report", context.review_report)
+
+        draft = context.patent_draft if isinstance(context.patent_draft, dict) else {}
+        review = context.review_report if isinstance(context.review_report, dict) else {}
+
+        if draft_contract_issues:
+            for issue in draft_contract_issues:
                 issues.append({
-                    "type": "independent_claim_missing",
-                    "message": "独立权利要求为空",
-                    "severity": "critical"
+                    "type": "patent_draft_contract",
+                    "message": issue,
+                    "severity": "critical",
                 })
-                draft_is_empty = True
-            
-            # 检查从属权利要求
-            dependent_claims = claims.get("dependent_claims", [])
-            if isinstance(dependent_claims, list):
-                has_valid_dependent = any(
-                    isinstance(c, str) and c.strip() for c in dependent_claims
+            suggestions.append("路由回专利撰写 Agent，基于上一轮草稿和反馈补齐专利草稿结构契约。")
+
+        if draft.get("_agent_failed") is True:
+            issues.append({
+                "type": "patent_writer_failed",
+                "message": str(draft.get("_agent_error") or "专利撰写 Agent 执行失败。")[:500],
+                "severity": "critical",
+            })
+            suggestions.append("路由回专利撰写 Agent，携带失败输出和错误信息继续修正。")
+
+        if review_contract_issues:
+            for issue in review_contract_issues:
+                issues.append({
+                    "type": "review_report_contract",
+                    "message": issue,
+                    "severity": "critical",
+                })
+            suggestions.append("路由回质量审查 Agent，要求按审查输出契约补齐 recommendation、review_summary、root_cause 和 responsible_phase。")
+
+        if review.get("_agent_failed") is True:
+            issues.append({
+                "type": "quality_reviewer_failed",
+                "message": str(review.get("_agent_error") or "质量审查 Agent 执行失败。")[:500],
+                "severity": "critical",
+            })
+            suggestions.append("路由回质量审查 Agent，携带专利草稿摘要重新审查。")
+
+        if self._needs_quality_remediation(review):
+            route = self._classify_remediation_path(review, context)
+            route_display = {
+                "WRITE_MORE": "专利撰写 Agent",
+                "ANALYZE_MORE": "需求分析 Agent",
+                "SEARCH_MORE": "检索分析 Agent",
+                "NEEDS_USER_INPUT": "用户补充信息",
+                "TERMINAL_FAILURE": "终止并展示不可自动恢复原因",
+            }.get(route, "专利撰写 Agent")
+            for issue in self._extract_review_issue_records(review)[:10]:
+                description = str(
+                    issue.get("description")
+                    or issue.get("reason")
+                    or issue.get("message")
+                    or issue.get("risk_type")
+                    or issue.get("section")
+                    or "质量审查 Agent 标记的问题"
                 )
-            elif isinstance(dependent_claims, str):
-                has_valid_dependent = bool(dependent_claims.strip())
-            else:
-                has_valid_dependent = False
-            
-            if not has_valid_dependent:
+                severity = str(issue.get("severity") or issue.get("likelihood") or "high")
                 issues.append({
-                    "type": "dependent_claims_missing",
-                    "message": "从属权利要求为空",
-                    "severity": "high"
+                    "type": str(issue.get("section") or "quality_review_issue"),
+                    "message": description[:500],
+                    "severity": severity if severity in {"low", "medium", "high", "critical"} else "high",
                 })
-            
-            # 检查说明书
-            description = draft.get("description", {})
-            if isinstance(description, dict):
-                required_sections = ["technical_field", "background_art", "summary_of_invention", "detailed_description"]
-                for section in required_sections:
-                    if not description.get(section, "").strip():
-                        issues.append({
-                            "type": f"description_{section}_missing",
-                            "message": f"说明书{self._get_description_section_name(section)}部分为空",
-                            "severity": "high"
-                        })
-                        draft_is_empty = True
-            
-            # 检查摘要
-            if not draft.get("abstract", "").strip():
-                issues.append({
-                    "type": "abstract_missing",
-                    "message": "摘要为空",
-                    "severity": "medium"
-                })
-            
-            # 检查 Agent 执行失败
-            if draft.get("_agent_failed") is True:
-                agent_error = draft.get("_agent_error", "未知错误")
-                issues.append({
-                    "type": "agent_failed",
-                    "message": f"专利撰写 Agent 执行失败: {agent_error}",
-                    "severity": "critical"
-                })
-        
-        # 检查审查报告问题
-        review = context.review_report
-        if not review or not isinstance(review, dict):
-            issues.append({
-                "type": "review_missing",
-                "message": "审查报告为空或格式不正确",
-                "severity": "high"
-            })
-        else:
-            if review.get("_agent_failed") is True:
-                agent_error = review.get("_agent_error", "未知错误")
-                issues.append({
-                    "type": "review_agent_failed",
-                    "message": f"质量审查 Agent 执行失败: {agent_error}",
-                    "severity": "critical"
-                })
-            
-            # 检查审查建议
-            if self._check_review_needs_revision(review):
-                recommendation = review.get("recommendation", "")
-                if recommendation == "reject":
-                    issues.append({
-                        "type": "review_reject",
-                        "message": f"审查建议拒绝: {review.get('review_summary', {}).get('reviewer_notes', '')}",
-                        "severity": "critical"
-                    })
-                elif recommendation == "revise":
-                    issues.append({
-                        "type": "review_revise",
-                        "message": f"审查建议修改: {review.get('review_summary', {}).get('reviewer_notes', '')}",
-                        "severity": "high"
-                    })
-        
-        # 判断失败阶段
-        if draft_is_empty or (isinstance(draft, dict) and draft.get("_agent_failed")):
+            suggestions.append(f"按质量审查 Agent 的 root_cause/responsible_phase 路由到：{route_display}。")
+
+        if draft_contract_issues or draft.get("_agent_failed") is True:
             phase = "patent_writing"
             phase_display = "专利撰写阶段"
-        elif review and isinstance(review, dict) and review.get("_agent_failed"):
+            main_reason = "专利撰写阶段输出未满足阶段契约"
+        elif review_contract_issues or review.get("_agent_failed") is True or self._needs_quality_remediation(review):
             phase = "quality_review"
             phase_display = "质量审查阶段"
-        elif self._check_review_needs_revision(review or {}):
-            phase = "quality_review"
-            phase_display = "质量审查阶段"
+            main_reason = "质量审查阶段输出未通过或未满足阶段契约"
         else:
             phase = "final_check"
             phase_display = "最终检查阶段"
-        
-        # 生成主要原因
-        if draft_is_empty:
-            main_reason = "专利撰写阶段未生成有效内容"
-        elif isinstance(draft, dict) and draft.get("_agent_failed"):
-            main_reason = "专利撰写 Agent 执行失败"
-        elif self._check_review_needs_revision(review or {}):
-            main_reason = "质量审查未通过，存在未解决的关键问题"
-        else:
-            main_reason = "最终检查发现关键问题未解决"
-        
-        # 生成优化建议
-        if draft_is_empty:
-            suggestions.append("请提供更详细的技术描述，包括技术方案、创新点、实施方式等")
-            suggestions.append("检查输入内容是否完整，避免过于简短的描述")
-            suggestions.append("确保技术描述包含足够的技术细节，以便生成有效的专利权利要求")
-        
-        if isinstance(draft, dict) and draft.get("_agent_failed"):
-            suggestions.append("检查 LLM 服务是否正常运行")
-            suggestions.append("验证 API 密钥和配置是否正确")
-            suggestions.append("稍后重试，可能是临时的服务问题")
-        
-        if self._check_review_needs_revision(review or {}):
-            suggestions.append("根据审查意见修改专利申请文件")
-            suggestions.append("关注审查报告中标记的高优先级问题")
-            suggestions.append("重新提交进行审查")
-        
-        if context.iteration_count > 0:
-            suggestions.append(f"已尝试 {context.iteration_count} 轮自动修正，建议手动检查输入内容")
-        
-        # 通用建议
-        suggestions.append("确保输入的技术描述清晰、完整、具有创新性")
-        suggestions.append("检查网络连接和服务状态")
-        
+            main_reason = "最终检查发现仍存在未解决契约问题"
+
+        if not issues:
+            issues.append({
+                "type": "unresolved_contract",
+                "message": "工作流存在未解决问题，但当前阶段未提供可路由的结构化缺陷。",
+                "severity": "critical",
+            })
+            suggestions.append("路由回质量审查 Agent，要求输出结构化缺陷和 responsible_phase。")
+
         return {
             "phase": phase,
             "phase_display": phase_display,
             "main_reason": main_reason,
             "issues": issues,
-            "suggestions": suggestions,
+            "suggestions": list(dict.fromkeys(suggestions)),
         }
-    
-    def _get_description_section_name(self, section_key: str) -> str:
-        """获取说明书章节的中文名称"""
-        mapping = {
-            "technical_field": "技术领域",
-            "background_art": "背景技术",
-            "summary_of_invention": "发明内容",
-            "detailed_description": "具体实施方式",
-            "drawings_description": "附图说明",
-        }
-        return mapping.get(section_key, section_key)
 
     def _build_revision_prompt(self, context: WorkflowContext, review_issues: List[str]) -> str:
         """构建修正撰写的prompt，包含审查问题和原有草稿"""
@@ -3585,60 +3694,6 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
 5. 修正后输出完整的JSON格式专利文件，而不是只输出修改片段
 6. 确保修改后权利要求与说明书、附图的一致性"""
 
-    def _parse_ceo_output(self, context: WorkflowContext, result_text: str) -> None:
-        """从 dispatch_specialist 缓存中读取各专业 Agent 的实际输出填入 context
-
-        每个阶段的输出来自对应的专业 Agent（而非 CEO 的总结），
-        确保数据的专业性和可追溯性。
-        """
-        from src.agents.hermes.tools.dispatch_specialist import (
-            get_dispatch_results,
-            get_latest_result_by_phase,
-        )
-
-        # 保存 CEO 的总结性回复
-        context.brainstorming_output = {
-            "summary": result_text[:500] if result_text else "",
-            "ceo_response": result_text,
-        }
-
-        # 从各专业 Agent 的实际输出填充 context
-        req_result = get_latest_result_by_phase("requirement_analysis")
-        if req_result and req_result.get("status") == "completed":
-            context.requirement_analysis = {
-                "agent": req_result.get("agent", ""),
-                "output": req_result.get("result", ""),
-                "summary": req_result.get("result", "")[:500],
-                "task": req_result.get("task", ""),
-            }
-
-        ret_result = get_latest_result_by_phase("retrieval_report")
-        if ret_result and ret_result.get("status") == "completed":
-            context.retrieval_report = {
-                "agent": ret_result.get("agent", ""),
-                "output": ret_result.get("result", ""),
-                "summary": ret_result.get("result", "")[:500],
-                "task": ret_result.get("task", ""),
-            }
-
-        draft_result = get_latest_result_by_phase("patent_draft")
-        if draft_result and draft_result.get("status") == "completed":
-            context.patent_draft = {
-                "agent": draft_result.get("agent", ""),
-                "output": draft_result.get("result", ""),
-                "summary": draft_result.get("result", "")[:500],
-                "task": draft_result.get("task", ""),
-            }
-
-        review_result = get_latest_result_by_phase("review_report")
-        if review_result and review_result.get("status") == "completed":
-            context.review_report = {
-                "agent": review_result.get("agent", ""),
-                "output": review_result.get("result", ""),
-                "summary": review_result.get("result", "")[:500],
-                "task": review_result.get("task", ""),
-            }
-
     async def _generate_patent_in_sections(
         self,
         service,
@@ -3665,6 +3720,9 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             part
             for part in [
                 f"当前撰写任务/修正要求：\n{task_context}" if task_context else "",
+                "已确认/共享公共信息：\n" + context.get_shared_agent_context_text(8000)
+                if context.get_shared_agent_context_text(8000)
+                else "",
                 context.original_description,
                 json.dumps(context.requirement_analysis or {}, ensure_ascii=False),
                 json.dumps(context.retrieval_report or {}, ensure_ascii=False),
@@ -3985,7 +4043,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                                 ]
                                 _emit_writer_section_result(
                                     "drawings",
-                                    "专利附图",
+                                    "附图清单",
                                     "、".join(title for title in titles if title),
                                     {"drawing_count": len(drawings_data)},
                                 )
@@ -4063,7 +4121,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     if drawings_data:
                         _emit_writer_section_result(
                             "drawings",
-                            "专利附图",
+                            "附图清单",
                             "、".join(
                                 str(item.get("figure_number") or item.get("title") or "").strip()
                                 for item in drawings_data
@@ -4213,44 +4271,29 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 "full_response": final_response,
             }
         
-        # 如果工具调用没有返回结构化数据，尝试从 final_response 解析
+        # 如果 Hermes 工具调用和 Agent 结构化 JSON 都没有返回专利内容，明确失败。
+        # 不再从文本中的 <tool_call> 片段伪造工具结果；工具必须由 Agent 真实调用。
         if not claims_data and not description_data:
-            self._logger.warning("No tool results found, trying to parse tool_call from text")
-            
-            # 首先尝试解析 <tool_call> 格式（Agent 可能输出了 tool_call JSON 而非真正调用工具）
-            tool_call_data = self._parse_tool_call_from_text(final_response)
-            if tool_call_data:
-                self._logger.info(f"Found tool_call in text: {tool_call_data.get('name')}")
-                # 提取 claims/description/abstract 数据（不生成 docx）
-                args = tool_call_data.get("arguments", {})
-                if "claims" in args:
-                    claims_data = args["claims"]
-                if "description" in args:
-                    description_data = args["description"]
-                if "abstract" in args:
-                    abstract_text = args["abstract"]
-            
-            if not claims_data and not description_data:
-                self._logger.warning(
-                    "Patent writer produced no structured tool or JSON result; marking draft incomplete"
-                )
-                return {
-                    "_agent_failed": True,
-                    "_incomplete_output": True,
-                    "_agent_error": "专利撰写 Agent 未返回可解析的结构化专利文件，不能由本地文本解析替代撰写结果。",
-                    "claims": {"independent_claim": "", "dependent_claims": []},
-                    "description": {
-                        "technical_field": "",
-                        "background_art": "",
-                        "summary_of_invention": "",
-                        "drawings_description": "",
-                        "detailed_description": "",
-                    },
-                    "abstract": "",
-                    "drawings": drawings_data,
-                    "docx_path": "",
-                    "full_response": final_response,
-                }
+            self._logger.warning(
+                "Patent writer produced no structured Hermes tool or JSON result; marking draft incomplete"
+            )
+            return {
+                "_agent_failed": True,
+                "_incomplete_output": True,
+                "_agent_error": "专利撰写 Agent 未返回可解析的结构化专利文件，不能由本地文本解析或伪造工具结果替代。",
+                "claims": {"independent_claim": "", "dependent_claims": []},
+                "description": {
+                    "technical_field": "",
+                    "background_art": "",
+                    "summary_of_invention": "",
+                    "drawings_description": "",
+                    "detailed_description": "",
+                },
+                "abstract": "",
+                "drawings": drawings_data,
+                "docx_path": "",
+                "full_response": final_response,
+            }
         
         # 组装为前端期望的结构化格式（不含 docx，待质量审查通过后生成）
         patent_result: Dict[str, Any] = {
@@ -4403,175 +4446,12 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             "abstract": repaired_abstract,
         }
     
-    def _parse_tool_call_from_text(self, text: str) -> Optional[Dict[str, Any]]:
-        """从 Agent 文本输出中解析 <tool_call> 格式的 JSON
-        
-        当 Agent 输出 <tool_call>{"name": "...", "arguments": {...}}</tool_call> 格式时，
-        解析并返回工具调用参数。支持多种格式变体。
-        
-        Returns:
-            {"name": "tool_name", "arguments": {...}} 或 None
-        """
-        import re
-        
-        if not text:
-            return None
-        
-        # 尝试多种 tool_call 格式
-        patterns = [
-            # 格式1: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
-            r'<tool_call>\s*(\{.+?\})\s*</tool_call>',
-            # 格式2: <tool_call>{"name": "...", "arguments": {...}} (无闭合标签)
-            r'<tool_call>\s*(\{.+?"arguments"\s*:\s*\{.+?\}\s*\})',
-            # 格式3: ```json\n{"name": "patent_docx_generator", ...}\n```
-            r'```json\s*(\{"name"\s*:\s*"patent_docx_generator".+?\})\s*```',
-            # 格式4: 直接的 JSON 对象（包含 patent_docx_generator）
-            r'(\{"name"\s*:\s*"patent_docx_generator",\s*"arguments"\s*:\s*\{.+?\}\s*\})',
-        ]
-        
-        for pattern in patterns:
-            matches = re.findall(pattern, text, re.DOTALL)
-            for match in matches:
-                try:
-                    # 尝试解析 JSON
-                    data = json.loads(match)
-                    if isinstance(data, dict) and "name" in data:
-                        # 确保 arguments 存在
-                        if "arguments" not in data:
-                            data["arguments"] = {}
-                        self._logger.info(f"Parsed tool_call: name={data['name']}, args_keys={list(data['arguments'].keys())}")
-                        return data
-                except json.JSONDecodeError as e:
-                    # JSON 可能不完整，尝试修复
-                    self._logger.debug(f"JSON parse failed for pattern, trying to fix: {e}")
-                    fixed = self._try_fix_json(match)
-                    if fixed:
-                        return fixed
-        
-        # 最后尝试：查找任何包含 patent_docx_generator 的大型 JSON 块
-        # 这处理 JSON 跨越多行且可能被截断的情况
-        docx_gen_match = re.search(
-            r'\{\s*"name"\s*:\s*"patent_docx_generator"\s*,\s*"arguments"\s*:\s*(\{.+)',
-            text,
-            re.DOTALL
-        )
-        if docx_gen_match:
-            args_text = docx_gen_match.group(1)
-            # 尝试找到匹配的闭合括号
-            args_data = self._extract_nested_json(args_text)
-            if args_data:
-                return {"name": "patent_docx_generator", "arguments": args_data}
-        
-        return None
-    
-    def _try_fix_json(self, text: str) -> Optional[Dict[str, Any]]:
-        """尝试修复不完整的 JSON"""
-        import re
-        
-        # 移除可能的尾部垃圾
-        text = text.strip()
-        
-        # 计算括号平衡
-        open_braces = text.count('{')
-        close_braces = text.count('}')
-        
-        # 添加缺失的闭合括号
-        if open_braces > close_braces:
-            text += '}' * (open_braces - close_braces)
-        
-        try:
-            data = json.loads(text)
-            if isinstance(data, dict) and "name" in data:
-                if "arguments" not in data:
-                    data["arguments"] = {}
-                return data
-        except json.JSONDecodeError:
-            pass
-        
-        return None
-    
-    def _extract_nested_json(self, text: str) -> Optional[Dict[str, Any]]:
-        """从文本中提取嵌套的 JSON 对象，处理括号匹配"""
-        depth = 0
-        start = 0
-        
-        for i, char in enumerate(text):
-            if char == '{':
-                if depth == 0:
-                    start = i
-                depth += 1
-            elif char == '}':
-                depth -= 1
-                if depth == 0:
-                    # 找到完整的 JSON 对象
-                    json_str = text[start:i+1]
-                    try:
-                        return json.loads(json_str)
-                    except json.JSONDecodeError:
-                        continue
-        
-        # 如果没有找到完整的 JSON，尝试修复
-        if depth > 0 and start < len(text):
-            json_str = text[start:] + '}' * depth
-            try:
-                return json.loads(json_str)
-            except json.JSONDecodeError:
-                pass
-        
-        return None
-
-    def _parse_patent_from_text(self, text: str) -> tuple:
-        """从文本解析专利内容（回退方案）"""
-        import re
-        
-        claims_data = {"independent_claim": "", "dependent_claims": []}
-        description_data = {}
-        abstract_text = ""
-        
-        # 尝试解析权利要求
-        all_claims = re.split(r'\n(?=权利要求\d+)', text)
-        for claim in all_claims:
-            claim = claim.strip()
-            if not claim:
-                continue
-            if "独立" in claim or claim.startswith("权利要求1"):
-                if not claims_data["independent_claim"]:
-                    claims_data["independent_claim"] = claim
-                else:
-                    claims_data["dependent_claims"].append(claim)
-            elif claim.startswith("权利要求"):
-                claims_data["dependent_claims"].append(claim)
-        
-        if not claims_data["independent_claim"] and all_claims:
-            claims_data["independent_claim"] = all_claims[0].strip() if all_claims[0].strip() else ""
-            claims_data["dependent_claims"] = [c.strip() for c in all_claims[1:] if c.strip()]
-        
-        # 尝试解析说明书章节
-        section_patterns = {
-            "technical_field": r"(?:技术领域|一、技术领域)[：:\s]*(.+?)(?=(?:背景技术|二、|$))",
-            "background_art": r"(?:背景技术|二、背景技术)[：:\s]*(.+?)(?=(?:发明内容|三、|$))",
-            "summary_of_invention": r"(?:发明内容|三、发明内容)[：:\s]*(.+?)(?=(?:附图说明|具体实施|四、|$))",
-            "detailed_description": r"(?:具体实施方式|五、具体实施方式)[：:\s]*(.+?)(?=$)",
-        }
-        
-        for key, pattern in section_patterns.items():
-            match = re.search(pattern, text, re.DOTALL)
-            if match:
-                description_data[key] = match.group(1).strip()
-        
-        # 尝试解析摘要
-        abstract_match = re.search(r"(?:说明书摘要|摘要)[：:\s]*(.+?)(?=(?:权利要求|$))", text, re.DOTALL)
-        if abstract_match:
-            abstract_text = abstract_match.group(1).strip()[:500]
-        
-        return claims_data, description_data, abstract_text
-
     def _normalize_claims_payload(
         self,
         payload: Any,
         raw_response: Any = None,
     ) -> Dict[str, Any]:
-        """Normalize claim_drafter output from tool data, wrapper JSON, or text."""
+        """Normalize claim_drafter output from structured tool data or wrapper JSON."""
         candidates: List[Any] = []
         if isinstance(payload, dict):
             candidates.append(payload)
@@ -4629,111 +4509,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                     "drafting_notes": candidate.get("drafting_notes", ""),
                 }
 
-        text_sources: List[str] = []
-        if isinstance(payload, str):
-            text_sources.append(payload)
-        if isinstance(raw_response, str):
-            text_sources.append(raw_response)
-        for text in text_sources:
-            parsed_claims, _, _ = self._parse_patent_from_text(text)
-            if parsed_claims.get("independent_claim"):
-                return parsed_claims
-
         return {"independent_claim": "", "dependent_claims": []}
-
-    async def _call_agent_with_continuation(self, service, profile_id: str, task: str, max_rounds: int = 3) -> str:
-        """调用 Agent 并让其自检输出完整性，不完整则补充直到满意
-
-        流程：
-        1. Agent 执行任务
-        2. 检测输出是否完整（JSON 闭合 + 内容完整性）
-        3. 如果不完整，让 Agent 自检并补充
-        4. Agent 确认完整后才返回
-        """
-        # 第一次调用
-        raw = await _run_agent_conversation(profile_id, task)
-        if isinstance(raw, dict):
-            text = raw.get("final_response", "") or raw.get("content", "") or json.dumps(raw, ensure_ascii=False)
-        else:
-            text = str(raw) if raw else ""
-
-        full_text = text
-
-        # 自检循环
-        for i in range(max_rounds):
-            # 检测是否被截断
-            is_truncated = self._is_output_truncated(full_text)
-
-            if not is_truncated:
-                break
-
-            self._logger.info(f"Agent output incomplete (round {i+1}), asking to continue")
-
-            # 让 Agent 自检并补充（不同于简单的"继续"，而是要求 Agent 确认完整性）
-            if i == 0:
-                continuation_prompt = (
-                    "你的输出被截断了，没有完成。请从截断处继续输出剩余内容。"
-                    "注意：\n"
-                    "1. 不要重复已输出的内容，直接从上次停止的地方继续\n"
-                    "2. 确保 JSON 格式完整闭合\n"
-                    "3. 确保所有必要字段都有实质内容\n"
-                    "4. 输出完成后确保以正确的 } 和 ``` 结尾"
-                )
-            else:
-                continuation_prompt = (
-                    "继续输出，确保完整闭合所有 JSON 括号。直接输出剩余内容。"
-                )
-
-            raw = await _run_agent_conversation(profile_id, continuation_prompt)
-            if isinstance(raw, dict):
-                cont_text = raw.get("final_response", "") or raw.get("content", "") or ""
-            else:
-                cont_text = str(raw) if raw else ""
-
-            if not cont_text or len(cont_text) < 10:
-                break
-
-            full_text += "\n" + cont_text
-
-        # 最终完整性验证
-        if self._is_output_truncated(full_text):
-            self._logger.warning(f"Agent output still incomplete after {max_rounds} rounds, using repair")
-            # 尝试修复
-            repaired = self._repair_truncated_json(self._extract_json_content(full_text))
-            if repaired:
-                full_text = repaired
-
-        return full_text
-
-    def _is_output_truncated(self, text: str) -> bool:
-        """检测输出是否被截断"""
-        if not text:
-            return False
-
-        # 检测 JSON 结构完整性
-        triple = chr(96) * 3
-        has_json_start = (triple + "json") in text or text.strip().startswith("{")
-
-        if not has_json_start:
-            return False  # 非 JSON 输出，不检测
-
-        open_braces = text.count("{") - text.count("}")
-        open_brackets = text.count("[") - text.count("]")
-
-        return open_braces > 0 or open_brackets > 0
-
-    def _extract_json_content(self, text: str) -> str:
-        """从文本中提取 JSON 内容（去掉 markdown 包装）"""
-        triple = chr(96) * 3
-        start_marker = triple + "json"
-        start_idx = text.find(start_marker)
-        if start_idx >= 0:
-            content = text[start_idx + len(start_marker):]
-            end_idx = content.find(triple)
-            if end_idx >= 0:
-                return content[:end_idx].strip()
-            return content.strip()
-        return text
 
     def _build_context_data_from_agent_response(
         self,
@@ -4757,6 +4533,125 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         if agent_tool_results:
             context_data["tool_results"] = agent_tool_results
         return context_data
+
+    def _has_contract_value(self, value: Any) -> bool:
+        if isinstance(value, dict):
+            return any(self._has_contract_value(v) for v in value.values())
+        if isinstance(value, list):
+            return any(self._has_contract_value(v) for v in value)
+        return bool(str(value or "").strip())
+
+    def _validate_phase_contract(self, context_field: str, data: Any) -> List[str]:
+        """Deterministic input/output contract gate for phase artifacts.
+
+        This only checks structure and artifact presence. It must not decide
+        patentability, creativity, claim scope, or writing quality.
+        """
+        if not isinstance(data, dict) or not data:
+            return [f"{context_field} 未返回结构化对象"]
+        if data.get("_agent_failed") is True:
+            return [str(data.get("_agent_error") or f"{context_field} Agent 执行失败")]
+
+        required_by_field = {
+            "requirement_analysis": [
+                "tech_field",
+                "core_principle",
+                "technical_problem",
+                "beneficial_effects",
+                "key_innovative_features",
+                "application_scenarios",
+                "patent_type_recommendation",
+                "claim_skeleton",
+            ],
+            "retrieval_report": [
+                "retrieval_strategy",
+            ],
+            "patent_draft": [
+                "claims",
+                "description",
+                "abstract",
+            ],
+            "review_report": [
+                "recommendation",
+                "review_summary",
+            ],
+        }
+        issues: List[str] = []
+        for field_name in required_by_field.get(context_field, []):
+            if not self._has_contract_value(data.get(field_name)):
+                issues.append(f"{context_field} 缺少必需字段：{field_name}")
+
+        if context_field == "retrieval_report":
+            strategy = data.get("retrieval_strategy")
+            keywords = data.get("retrieval_keywords")
+            if isinstance(strategy, dict):
+                keywords = strategy.get("keywords") or keywords
+            if not self._has_contract_value(keywords):
+                issues.append("retrieval_report 缺少实际检索关键词")
+
+        if context_field == "patent_draft":
+            claims = data.get("claims") if isinstance(data.get("claims"), dict) else {}
+            if not self._has_contract_value(claims.get("independent_claim")):
+                issues.append("patent_draft 缺少独立权利要求")
+            if not self._has_contract_value(claims.get("dependent_claims")):
+                issues.append("patent_draft 缺少从属权利要求")
+            description = data.get("description") if isinstance(data.get("description"), dict) else {}
+            for section in (
+                "technical_field",
+                "background_art",
+                "summary_of_invention",
+                "detailed_description",
+            ):
+                if not self._has_contract_value(description.get(section)):
+                    issues.append(f"patent_draft 说明书缺少章节：{section}")
+
+        if context_field == "review_report" and self._check_review_needs_revision(data):
+            root_cause = str(data.get("root_cause") or "").strip()
+            if root_cause not in {
+                "content_incomplete",
+                "requirement_unclear",
+                "evidence_missing",
+                "external_info_missing",
+                "system_failure",
+            }:
+                issues.append("review_report 未通过时必须包含合法 root_cause")
+            for issue in self._extract_review_issue_records(data):
+                severity = str(issue.get("severity") or issue.get("likelihood") or "").lower()
+                if severity not in {"high", "critical"}:
+                    continue
+                responsible_phase = str(
+                    issue.get("responsible_phase")
+                    or issue.get("target_phase")
+                    or issue.get("route_to")
+                    or ""
+                ).strip()
+                if responsible_phase not in {
+                    "requirement_analysis",
+                    "retrieval_analysis",
+                    "patent_writing",
+                    "user_input",
+                    "system_failure",
+                }:
+                    issues.append("review_report high/critical 问题缺少合法 responsible_phase")
+                    break
+
+        return issues
+
+    def _build_phase_contract_error(
+        self,
+        context_field: str,
+        data: Any,
+        issues: List[str],
+    ) -> Dict[str, Any]:
+        return {
+            "_agent_failed": True,
+            "_contract_failed": True,
+            "_context_field": context_field,
+            "_agent_error": "阶段输出不符合输入/输出契约：" + "；".join(issues[:8]),
+            "_contract_issues": issues,
+            "_raw_output": json.dumps(data, ensure_ascii=False, default=str)[:3000],
+            "responsible_phase": context_field,
+        }
 
     def _normalize_phase_output(self, context_field: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """将 Agent 输出规范化为前端期望的数据格式
@@ -4815,6 +4710,14 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 output_text=output_text,
                 reason=f"{context_field} Agent 输出无法解析为当前要求的结构化数据",
             )
+
+        if context_field == "patent_draft" and isinstance(data.get("tool_results"), list):
+            normalized_from_tools = self._normalize_patent_draft_tool_results(data["tool_results"])
+            if normalized_from_tools:
+                normalized_from_tools["full_response"] = str(
+                    data.get("final_response") or data.get("message") or data.get("text") or ""
+                )
+                return normalized_from_tools
 
         if context_field == "requirement_analysis":
             # tech_field: 如果是嵌套对象，提取 primary_domain 作为字符串
@@ -4896,19 +4799,6 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                             "rating": u.get("rating", "unknown"),
                             "rationale": u.get("details", "") or u.get("rationale", ""),
                         }
-                # overall_patentability 从 scores 整体评估
-                if "overall_patentability" not in data:
-                    ratings = [scores.get("novelty", {}).get("rating"), 
-                               scores.get("inventive_step", {}).get("rating"),
-                               scores.get("utility", {}).get("rating")]
-                    # 综合评估：如果有 high 且无 low，则 high；如有 low，则 low；否则 medium
-                    if "low" in ratings:
-                        data["overall_patentability"] = "low"
-                    elif all(r == "high" for r in ratings if r):
-                        data["overall_patentability"] = "high"
-                    else:
-                        data["overall_patentability"] = "medium"
-
             # ═══ similarity_results → prior_art_references / similar_patents ═══
             sim_results = data.get("similarity_results", [])
             if isinstance(sim_results, list) and sim_results and "prior_art_references" not in data:
@@ -5112,13 +5002,12 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                                 "title": "",
                                 "reference_id": pid.strip(),
                                 "source": "",
-                                "relevance": "medium",
+                                "relevance": "",
                                 "abstract": "",
                                 "differences": "",
-                                "url": self._build_patent_url(pid.strip(), ""),
+                                "url": "",
                                 "applicant": "",
                                 "publication_date": "",
-                                "similarity_score": 0,
                             })
                     if refs:
                         data["prior_art_references"] = refs
@@ -5160,13 +5049,12 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                             "title": patent_id,
                             "reference_id": patent_id,
                             "source": source,
-                            "relevance": "medium",
+                            "relevance": "",
                             "abstract": "",
                             "differences": "",
-                            "url": self._build_patent_url(patent_id, source),
+                            "url": self._build_patent_url(patent_id, source) if source else "",
                             "applicant": "",
                             "publication_date": "",
-                            "similarity_score": 0,
                         }
                     elif isinstance(item, dict):
                         patent_id = str(
@@ -5189,7 +5077,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                             elif isinstance(score, (int, float)) and score >= 0.4:
                                 risk = "medium"
                             else:
-                                risk = "low"
+                                risk = ""
                         differences = (
                             item.get("key_differences")
                             or item.get("differences")
@@ -5216,7 +5104,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                             "url": item.get("url") or self._build_patent_url(patent_id, source),
                             "applicant": applicant,
                             "publication_date": item.get("publication_date") or item.get("publicationDate") or "",
-                            "similarity_score": score if isinstance(score, (int, float)) else 0,
+                            **({"similarity_score": score} if isinstance(score, (int, float)) else {}),
                             "matching_features": item.get("matching_features") or item.get("key_features") or [],
                         }
                     else:
@@ -5254,6 +5142,87 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                         data["description_review"] = {"issues": desc}
 
         return data
+
+    def _normalize_patent_draft_tool_results(
+        self,
+        tool_results: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Build patent draft data from real Hermes tool results only."""
+        claims_data: Dict[str, Any] = {}
+        description_data: Dict[str, Any] = {}
+        abstract_text = ""
+        docx_path = ""
+        drawings_data: List[Dict[str, Any]] = []
+
+        for result in tool_results:
+            if not isinstance(result, dict):
+                continue
+            tool_name = str(result.get("tool") or result.get("name") or "")
+            payload = self._parse_tool_result_payload(
+                result.get("result")
+                or result.get("content")
+                or result.get("output")
+                or result
+            )
+            if not payload:
+                continue
+            if not tool_name:
+                tool_name = str(payload.get("tool") or "")
+            tool_data = payload.get("data", {})
+            if not isinstance(tool_data, dict):
+                tool_data = {}
+            if payload.get("success") is False:
+                continue
+
+            if tool_name == "claim_drafter":
+                candidate_claims = self._normalize_claims_payload(
+                    tool_data,
+                    raw_response=payload.get("raw_response"),
+                )
+                if candidate_claims.get("independent_claim"):
+                    claims_data = candidate_claims
+            elif tool_name == "description_writer":
+                section_type = str(tool_data.get("section_type") or "")
+                content = str(tool_data.get("content") or "").strip()
+                if not content:
+                    continue
+                if section_type == "technical_field":
+                    description_data["technical_field"] = content
+                elif section_type == "background":
+                    description_data["background_art"] = content
+                elif section_type == "summary":
+                    description_data["summary_of_invention"] = content
+                elif section_type in {"drawings", "drawings_description"}:
+                    description_data["drawings_description"] = content
+                elif section_type == "detailed":
+                    description_data["detailed_description"] = content
+            elif tool_name == "patent_drawing_generator":
+                drawings = tool_data.get("drawings", [])
+                if isinstance(drawings, list):
+                    drawings_data.extend(item for item in drawings if isinstance(item, dict))
+            elif tool_name == "patent_docx_generator":
+                docx_path = str(tool_data.get("file_path") or docx_path)
+                abstract_text = str(tool_data.get("abstract") or abstract_text)
+
+        if not (claims_data or description_data or abstract_text or drawings_data or docx_path):
+            return {}
+
+        return {
+            "claims": {
+                "independent_claim": claims_data.get("independent_claim", ""),
+                "dependent_claims": claims_data.get("dependent_claims", []),
+            },
+            "description": {
+                "technical_field": description_data.get("technical_field", ""),
+                "background_art": description_data.get("background_art", ""),
+                "summary_of_invention": description_data.get("summary_of_invention", ""),
+                "drawings_description": description_data.get("drawings_description", ""),
+                "detailed_description": description_data.get("detailed_description", ""),
+            },
+            "abstract": abstract_text,
+            "drawings": drawings_data,
+            "docx_path": docx_path,
+        }
 
     def _build_review_report_from_agent_envelope(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Recover a structured quality review from the Agent final response only.
@@ -5300,10 +5269,6 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
         if isinstance(tool_results, list) and tool_results:
             parsed["_agent_tool_results"] = tool_results
 
-        if not parsed.get("recommendation"):
-            parsed["recommendation"] = "reject" if self._check_review_needs_revision(parsed) else "approve"
-        if not parsed.get("revision_priority"):
-            parsed["revision_priority"] = "critical" if self._check_review_needs_revision(parsed) else "medium"
         parsed["_raw_final_response"] = raw_text[:2000] if raw_text else ""
         parsed["_agent_envelope_normalized"] = True
         return parsed
@@ -5370,9 +5335,7 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
             return f"https://arxiv.org/abs/{pid}"
         elif source_lower in ("wipo",):
             return f"https://patentscope.wipo.int/search/en/detail.jsf?docId={pid}"
-        else:
-            # 默认用 Google Patents
-            return f"https://patents.google.com/patent/{pid}" if pid else ""
+        return ""
 
     def _try_parse_json(self, text: Any) -> Dict[str, Any]:
         """尝试从文本中解析 JSON，支持处理截断的 JSON 和混合格式"""
@@ -5575,33 +5538,15 @@ gate_passed为false的条件：存在任意 severity=critical 或 severity=high 
                 },
             )
 
-        review = {
-            "_agent_failed": True,
+        review = self._build_agent_output_error(
+            context_field="review_report",
+            output_text="",
+            reason=reason,
+        )
+        review.update({
             "failed": True,
             "completed": False,
-            "_agent_error": reason,
-            "root_cause": "system_failure",
-            "recommendation": "revise",
-            "revision_priority": "critical",
-            "review_summary": {
-                "overall_score": 0.0,
-                "overall_rating": "needs_revision",
-                "recommendation": "revise",
-                "reviewer_notes": "质量审查 Agent 未返回可信审查结果，不能由本地规则替代通过。",
-            },
-            "formal_compliance_review": {"score": 0.0, "passed": False, "issues": []},
-            "claims_review": {"issues": []},
-            "description_review": {"issues": []},
-            "consistency_review": {"issues": []},
-            "drawing_review": {"issues": []},
-            "detailed_revision_suggestions": [
-                {
-                    "target": "quality_review",
-                    "issue": reason,
-                    "action": "重新调度质量审查 Agent；如连续失败，应暴露失败原因而不是生成最终 DOCX。",
-                }
-            ],
-        }
+        })
         return json.dumps(review, ensure_ascii=False)[:500], review
 
     async def _run_agent_stream(

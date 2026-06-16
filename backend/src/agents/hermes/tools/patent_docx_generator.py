@@ -20,7 +20,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -243,7 +242,10 @@ def _add_figure_picture(doc, fig_info: Dict[str, str], profile: _Profile, width_
         from docx.shared import Inches as _Inches
 
         figure_number = _coerce_text(fig_info.get("figure_number")) or ""
-        title = _normalize_figure_title(_coerce_text(fig_info.get("title")), figure_number) or "专利附图"
+        title = _normalize_figure_title(_coerce_text(fig_info.get("title")), figure_number)
+        if not title:
+            logger.warning(f"Skip figure {figure_number}: missing concrete figure title")
+            return False
         caption = f"{figure_number} {title}".strip()
         add_body_paragraph(doc, caption, profile, first_line_indent=False, bold=True)
         doc.add_picture(fig_info["path"], width=_Inches(width_inches))
@@ -366,87 +368,6 @@ def _strip_markdown(text: Any) -> str:
     return "\n".join(cleaned_lines)
 
 
-# ═══════════════════════════════════════════════════════════════════
-# 专利附图生成 — 委托到外部脚本 scripts/generate_patent_figures.py
-# ═══════════════════════════════════════════════════════════════════
-
-def _generate_patent_figures(
-    tech_description: str,
-    task_id: str,
-    output_dir: Optional[Path] = None,
-) -> List[Dict[str, str]]:
-    """
-    生成专利附图。委托到 scripts/generate_patent_figures.py。
-
-    支持两种策略（由外部脚本处理）：
-    1. matplotlib 绘制系统架构图/流程图（默认）
-    2. gen-img (gpt-image-2) AI 生成（设 IMAGE_GEN_* / LLM_* 环境变量）
-
-    Returns:
-        [{"path": "绝对路径", "title": "...", "figure_number": int}]
-    """
-    # 附图生成到对应专利 task 的 export 目录下
-    backend_dir = Path(__file__).resolve().parent.parent.parent.parent.parent
-    if output_dir is None:
-        output_dir = backend_dir / "exports" / (task_id or "default") / "figures"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    scripts_dir = backend_dir.parent / "scripts"
-    script_path = scripts_dir / "generate_patent_figures.py"
-    if not script_path.exists():
-        logger.warning(f"Patent figures script not found: {script_path}")
-        return []
-
-    cmd = [
-        sys.executable, str(script_path),
-        "--tech-desc", tech_description[:2000],
-        "--output-dir", str(output_dir),
-        "--json",
-    ]
-    # 检测 AI 配置：IMAGE_GEN_* > LLM_*
-    has_img_config = any(
-        k.startswith("IMAGE_GEN_") and k.endswith("_API_KEY")
-        for k in os.environ
-    )
-    has_llm_config = any(
-        k.startswith("LLM_") and k.endswith("_API_KEY")
-        for k in os.environ
-    )
-    if has_img_config or has_llm_config:
-        cmd.append("--ai")
-
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=180,
-        )
-        if result.returncode == 0:
-            marker = "--- JSON ---"
-            idx = result.stdout.find(marker)
-            if idx >= 0:
-                json_str = result.stdout[idx + len(marker):].strip()
-                figures = json.loads(json_str)
-                # 确保所有路径为绝对路径
-                for f in figures:
-                    fig_path = Path(f["path"])
-                    if not fig_path.is_absolute():
-                        # 相对路径基于 output_dir 解析
-                        resolved = output_dir / fig_path.name
-                        if resolved.exists():
-                            f["path"] = str(resolved)
-                        else:
-                            # 尝试基于 backend_dir 解析
-                            resolved = backend_dir / fig_path
-                            f["path"] = str(resolved)
-                    logger.info(f"Figure {f.get('figure_number')}: {f.get('title')} → {f.get('path')}")
-                return figures
-        else:
-            logger.warning(f"Figure script failed (rc={result.returncode}): {result.stderr[:500]}")
-    except Exception as e:
-        logger.warning(f"Figure generation failed: {e}")
-
-    return []
-
-
 def _normalize_provided_figures(drawings: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     """Convert patent_drawing_generator metadata into DOCX-ready figure entries."""
     figures: List[Dict[str, str]] = []
@@ -467,14 +388,16 @@ def _normalize_provided_figures(drawings: List[Dict[str, Any]]) -> List[Dict[str
         if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"}:
             logger.warning(f"Provided patent drawing is not directly supported by python-docx: {path}")
             continue
+        figure_number = _coerce_text(drawing.get("figure_number")) or f"图{index}"
+        title = _normalize_figure_title(drawing.get("title"), figure_number)
+        if not title:
+            logger.warning(f"Provided patent drawing skipped because title is missing: {path}")
+            continue
         figures.append(
             {
                 "path": str(path),
-                "figure_number": _coerce_text(drawing.get("figure_number")) or f"图{index}",
-                "title": _normalize_figure_title(
-                    drawing.get("title"),
-                    _coerce_text(drawing.get("figure_number")) or f"图{index}",
-                ) or f"专利附图{index}",
+                "figure_number": figure_number,
+                "title": title,
                 "description": _coerce_text(drawing.get("description")),
             }
         )
@@ -518,7 +441,7 @@ class PatentDocxGeneratorTool:
 
     async def execute(
         self,
-        title: Any = "专利申请文件",
+        title: Any = "",
         claims: Optional[Dict[str, Any]] = None,
         description: Optional[Dict[str, Any]] = None,
         abstract: Any = "",
@@ -565,9 +488,11 @@ class PatentDocxGeneratorTool:
             margins = _get_margins_for_section("摘要", profile)
             _set_section_margins(first_section, margins)
 
-            title = _strip_transcript_artifacts(title) or "专利申请文件"
+            title = _strip_transcript_artifacts(title)
+            if not title:
+                return {"success": False, "error": "缺少发明名称，不能生成最终 DOCX"}
             if re.search(r"(?:开个头|^\s*这个|那先写|那写吧|说话人|律师)|[\(（]\d{2}:\d{2}:\d{2}[\)）]", title):
-                title = "专利申请文件"
+                return {"success": False, "error": "发明名称疑似残留逐字稿或口语内容，不能生成最终 DOCX"}
             abstract = _coerce_text(abstract)
 
             # ── 说明书摘要 ── (仅在有内容时生成)
@@ -779,7 +704,7 @@ def main():
     """CLI: python patent_docx_generator.py --title "..." --claims-json '...' ..."""
     import argparse
     parser = argparse.ArgumentParser(description="Generate patent DOCX")
-    parser.add_argument("--title", default="专利申请文件")
+    parser.add_argument("--title", required=True)
     parser.add_argument("--claims-json", default="{}")
     parser.add_argument("--desc-json", default="{}")
     parser.add_argument("--abstract", default="")

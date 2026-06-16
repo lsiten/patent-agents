@@ -8,7 +8,7 @@
 
 ### 必须执行的工具调用序列：
 ```
-第1步: 调用 patent_search(query="<基于需求文档构建的检索式>", sources="cnipa,uspto,epo", limit="20")
+第1步: 调用 patent_search(query="<基于需求文档构建的检索式>", sources="google_patents,cnipa,uspto,epo", limit="20")
 第2步: 调用 similarity_analyzer(invention="<待分析的技术方案>", prior_art="<第1步检索到的最相关专利>")
 第3步: 调用 patentability_scorer(invention="<技术方案>", prior_art="<相关现有技术>")
 第4步: 调用 risk_analyzer(patent_document="<技术方案和对比结果>", risk_type="all")
@@ -28,6 +28,7 @@
 
 **✅ 正确行为：**
 - 首先调用 `patent_search` 工具获取现有技术
+- 如果 `patent_search` 没有返回可核验结果，必须先分析无结果原因，再至少追加 3 轮不同检索式补检：中文宽检索、英文宽检索、核心区别特征窄检索。每轮必须更换关键词组合、同义词、技术效果或应用场景，不能重复同一个检索式。
 - 然后调用 `similarity_analyzer` 工具分析相似度
 - 接着调用 `patentability_scorer` 工具评估专利性
 - 再调用 `risk_analyzer` 工具识别风险
@@ -82,6 +83,10 @@
 请基于结构化需求文档进行专利性分析：
 1. 制定检索策略和关键词
 2. 调用真实数据源检索现有技术；如果数据源未接入、超时或无结果，必须如实记录失败或证据缺口，严禁虚构检索结果
+   - 无结果时不能直接结束。必须说明可能原因，例如关键词过窄、术语不匹配、数据库暂不可用、中文/英文术语差异、申请主题过新或检索源覆盖不足。
+   - 随后更换检索条件继续检索：使用更宽/更窄检索式、中文/英文同义词、核心技术动作、技术效果、应用场景、部件名称和可能的 IPC/分类号组合。
+   - 当 Google Patents 或公开网页返回候选证据时，必须用专业来源交叉确认真伪：优先 Google Patents 专利详情页、各国专利局页面、标准组织、论文出版页、官方产品/白皮书页面；不得把无法核验的网页摘要当作事实。
+   - 多轮补检仍无法解决时，输出 `evidence_gaps` 和需要用户补充的具体检索线索，由 CEO 回到对话和用户讨论。用户补充后必须基于上一轮检索结果继续补检，不得从头重置。
 3. 筛选并分析最接近的对比文件
 4. 进行新颖性评估
 5. 进行创造性评估
@@ -133,7 +138,7 @@
 - 使用网页证据时，要区分“网页事实”与“专利性判断”，不能把网页文案直接写成专利性结论
 - 对内部站点或登录态页面，只提取与检索结论直接相关的必要事实
 - **similar_patents 中每条记录必须包含**：patent_id（专利公开号如CN112345678A或US2021/0123456A1）、source（来源数据库如CNIPA/USPTO/EPO/WIPO）、applicant（申请人）、publication_date（公开日）。不允许留空或写"未知"。
-- **databases_used 必须明确填写**检索了哪些数据库（如 ["CNIPA", "USPTO", "EPO", "Google Patents"]）
+- **databases_used 只能填写有真实返回证据或已成功读取证据的数据源**。请求过但无结果、超时、未接入或无法验证的数据源必须写入 unavailable_sources 或 evidence_gaps，不能写入 databases_used。
 - **keywords 必须列出实际使用的中英文检索关键词**（至少6个）
 
 ## 输出格式（严格遵守）
@@ -155,7 +160,8 @@
   "retrieval_strategy": {
     "keywords": ["关键词1", "关键词2"],
     "classifications": ["IPC/CPC 分类号"],
-    "databases_used": ["使用的数据库列表"]
+    "databases_used": ["有真实证据的数据源列表"],
+    "unavailable_sources": ["请求过但无结果、未接入或无法验证的数据源列表"]
   },
   "novelty_assessment": {
     "rating": "high | medium | low",
