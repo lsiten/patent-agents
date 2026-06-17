@@ -9,6 +9,7 @@ import httpx
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from src.core.config import settings
 from ..models.domain import PriorArtReference, SearchQuery, DataSourceConfig
 
 
@@ -479,11 +480,19 @@ class DataSourceManager:
     def __init__(self):
         self.sources: Dict[str, DataSource] = {
             "uspto": UsptoSource(),
-            "epo": EpoSource(),
-            "cnipa": CNIPASource(),
-            "google_patents": GooglePatentsSource(),
-            "arxiv": ArxivSource(),
         }
+        if settings.patent_db.enable_google_patents:
+            self.sources["google_patents"] = GooglePatentsSource()
+        if settings.patent_db.cnipa_api_token:
+            self.sources["cnipa"] = CNIPASource()
+        else:
+            logger.info("CNIPA data source disabled: CNIPA_API_TOKEN is not configured")
+        if settings.patent_db.epo_consumer_key and settings.patent_db.epo_consumer_secret:
+            self.sources["epo"] = EpoSource()
+        else:
+            logger.info("EPO data source disabled: EPO_CONSUMER_KEY/EPO_CONSUMER_SECRET not configured")
+        if settings.patent_db.enable_arxiv:
+            self.sources["arxiv"] = ArxivSource()
         self.web_fetcher = WebFetchSource()
         self.last_search_status: Dict[str, Dict[str, Any]] = {}
         logger.info(f"数据源管理器初始化完成，可用数据源: {list(self.sources.keys())}")

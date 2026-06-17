@@ -42,7 +42,7 @@ PATENT_LOOP_POLICY = AgentLoopPolicy(
         "final DOCX exists when workflow completes",
     ],
     guardrails={
-        "quality_score_threshold": 0.8,
+        "quality_score_threshold": 0.9,
         "quality_remediation_safety_limit": 12,
         "no_progress_detection": True,
         "phase_artifacts_required": True,

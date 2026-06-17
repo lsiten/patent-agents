@@ -200,7 +200,7 @@ function restoreConversationUiState(messages: ChatMessage[], convId: string, has
   const lastAssistant = assistantMessages.at(-1);
   const lastRecommendation = [...assistantMessages]
     .reverse()
-    .find((message) => message.metadata?.recommend_create_patent === true && isRecord(message.metadata?.patent_preflight));
+    .find((message) => isWorkflowStartRecommendation(message));
   const pendingConfirmation = !hasWorkflow && lastAssistant?.metadata?.confirmation && isRecord(lastAssistant.metadata.confirmation)
     ? {
         question: typeof lastAssistant.metadata.confirmation.question === 'string'
@@ -215,9 +215,7 @@ function restoreConversationUiState(messages: ChatMessage[], convId: string, has
 
   return {
     recommendStartWorkflow: !hasWorkflow && Boolean(lastRecommendation),
-    suggestedTitle: typeof lastRecommendation?.metadata?.suggested_title === 'string'
-      ? lastRecommendation.metadata.suggested_title
-      : null,
+    suggestedTitle: getSuggestedPatentTitle(lastRecommendation),
     pendingConfirmation: pendingConfirmation?.question ? pendingConfirmation : null,
   };
 }
@@ -259,9 +257,24 @@ function resolveAgentName(data: unknown, defaultAgent = 'patent.ceo.v1'): string
 }
 
 function getSuggestedPatentTitle(message?: ChatMessage | null): string | null {
-  if (!isRecord(message?.metadata?.patent_preflight)) return null;
-  const title = message?.metadata?.suggested_title;
-  return typeof title === 'string' && title.trim() ? title.trim() : null;
+  if (isRecord(message?.metadata?.patent_preflight)) {
+    const title = message?.metadata?.suggested_title;
+    if (typeof title === 'string' && title.trim()) return title.trim();
+  }
+
+  const content = message?.content ?? '';
+  const titleMatch = content.match(/专利名称[：:]\s*([^\n。；;]+)/);
+  const quotedTitleMatch = content.match(/建议名称为[“"]([^”"]+)[”"]/);
+  const title = (titleMatch?.[1] ?? quotedTitleMatch?.[1] ?? '').trim();
+  return title || null;
+}
+
+function isWorkflowStartRecommendation(message?: ChatMessage | null): boolean {
+  if (!message || message.role !== 'assistant') return false;
+  if (message.metadata?.recommend_create_patent === true) return true;
+  const content = message.content ?? '';
+  return /已具备启动正式流程条件|启动前方案已确认|确认后进入正式专利申请流程/.test(content)
+    && Boolean(getSuggestedPatentTitle(message));
 }
 
 function conversationWorkflowState(conversation: ConversationSummary): string {

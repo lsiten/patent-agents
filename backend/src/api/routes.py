@@ -193,6 +193,19 @@ def _cancel_workflow_background_task(task_id: str) -> bool:
     task.cancel()
     return True
 
+
+def _workflow_background_task_running(task_id: str) -> bool:
+    task = workflow_background_tasks.get(task_id)
+    return bool(task and not task.done())
+
+
+def _mark_workflow_resume_running(context: WorkflowContext) -> None:
+    """Normalize a paused or orphaned workflow before scheduling real resume work."""
+    context.current_phase = EngineWorkflowState.ITERATION
+    remediation = context.metadata.get("quality_remediation")
+    if isinstance(remediation, dict):
+        remediation["resumed_at"] = datetime.now().isoformat()
+
 # ── Agent Override Store (真实持久化) ──
 from ..core.override_store import get_override_store
 
@@ -409,13 +422,68 @@ async def _persist_workflow(task_id: str) -> None:
     if context is None:
         return
     try:
+        if isinstance(context.shared_agent_context, dict):
+            context.metadata["shared_agent_context"] = context.shared_agent_context
         data = _workflow_context_to_response(context).model_dump(mode="json")
+        confirmed_preflight = context.metadata.get("confirmed_preflight")
+        if isinstance(confirmed_preflight, dict):
+            patent_title = str(confirmed_preflight.get("patent_title") or "").strip()
+            if patent_title and (not data.get("title") or data.get("title") == "未命名专利"):
+                context.title = patent_title
+                data["title"] = patent_title
         data["original_description"] = context.original_description
         data["message_history"] = context.message_history
         data["metadata"] = context.metadata
         await _get_persist_store().save("workflows", task_id, data)
     except Exception as e:
         logger.warning(f"保存工作流 {task_id} 到数据库失败: {e}")
+
+
+def _restore_workflow_phase_history(context: WorkflowContext, value: Dict[str, Any]) -> None:
+    """Restore durable phase history and latest phase outputs into runtime context."""
+    restored: List[PhaseResult] = []
+    for item in value.get("phase_history") or []:
+        if not isinstance(item, dict):
+            continue
+        phase_value = item.get("phase")
+        try:
+            phase = WorkflowPhase(phase_value)
+        except Exception:
+            continue
+        output = item.get("output")
+        if not isinstance(output, dict):
+            output = {}
+        try:
+            duration_seconds = float(item.get("duration_seconds") or 0)
+        except (TypeError, ValueError):
+            duration_seconds = 0.0
+        restored.append(
+            PhaseResult(
+                phase=phase,
+                success=bool(item.get("success", True)),
+                duration_seconds=duration_seconds,
+                output=output,
+                issues=item.get("issues") if isinstance(item.get("issues"), list) else [],
+                warnings=item.get("warnings") if isinstance(item.get("warnings"), list) else [],
+            )
+        )
+
+    if restored:
+        context.phase_history = restored
+
+    phase_field_map = {
+        WorkflowPhase.REQUIREMENT: "requirement_analysis",
+        WorkflowPhase.RETRIEVAL: "retrieval_report",
+        WorkflowPhase.WRITING: "patent_draft",
+        WorkflowPhase.REVIEW: "review_report",
+    }
+    for result in restored:
+        if not result.success or not isinstance(result.output, dict) or not result.output:
+            continue
+        field_name = phase_field_map.get(result.phase)
+        if not field_name:
+            continue
+        setattr(context, field_name, result.output)
 
 
 def _linked_workflow_conversation(task_id: str) -> Optional[dict]:
@@ -521,7 +589,20 @@ async def restore_stores_from_db() -> None:
                         target_country=value.get("target_country", "中国"),
                     )
                     # 恢复标题
-                    ctx.title = value.get("title", "未命名专利")
+                    persisted_title = str(value.get("title") or "").strip()
+                    metadata = value.get("metadata")
+                    confirmed_preflight = (
+                        metadata.get("confirmed_preflight")
+                        if isinstance(metadata, dict)
+                        and isinstance(metadata.get("confirmed_preflight"), dict)
+                        else {}
+                    )
+                    preflight_title = str(confirmed_preflight.get("patent_title") or "").strip()
+                    ctx.title = (
+                        persisted_title
+                        if persisted_title and persisted_title != "未命名专利"
+                        else preflight_title or "未命名专利"
+                    )
                     # 恢复状态
                     current_state = value.get("current_state", "initialized")
                     
@@ -571,6 +652,23 @@ async def restore_stores_from_db() -> None:
                     ctx.brainstorming_output = outputs.get("brainstorming", {})
                     ctx.message_history = value.get("message_history", [])
                     ctx.metadata = {**ctx.metadata, **value.get("metadata", {})}
+                    _restore_workflow_phase_history(ctx, value)
+                    restored_shared = ctx.metadata.get("shared_agent_context")
+                    if isinstance(restored_shared, dict):
+                        ctx.shared_agent_context = restored_shared
+                    else:
+                        for field_name, field_value in (
+                            ("requirement_analysis", ctx.requirement_analysis),
+                            ("retrieval_report", ctx.retrieval_report),
+                            ("patent_draft", ctx.patent_draft),
+                            ("review_report", ctx.review_report),
+                        ):
+                            if isinstance(field_value, dict) and field_value:
+                                workflow_engine._update_shared_context_from_phase(
+                                    ctx,
+                                    field_name,
+                                    field_value,
+                                )
                     restored_workflows += 1
             except Exception as e:
                 logger.warning(f"恢复工作流 {key} 失败: {e}")
@@ -792,7 +890,9 @@ def _phase_has_real_result(context: WorkflowContext, phase: WorkflowPhase) -> bo
 def _last_phase_history_index(context: WorkflowContext, phase: WorkflowPhase) -> int:
     latest = -1
     for index, result in enumerate(context.phase_history or []):
-        if result.phase == phase:
+        result_phase = getattr(result.phase, "value", result.phase)
+        expected_phase = getattr(phase, "value", phase)
+        if result_phase == expected_phase:
             latest = index
     return latest
 
@@ -1650,9 +1750,23 @@ async def _execute_full_workflow_compat(
     phase_callback=None,
     event_callback=None,
     agent_event_callback=None,
+    checkpoint_callback=None,
     force_start_from=None,
 ):
     import inspect as _inspect
+
+    async def _default_checkpoint_callback(ctx: WorkflowContext, reason: str):
+        ctx.metadata.setdefault("durable_checkpoints", []).append({
+            "reason": reason,
+            "phase": str(getattr(ctx.current_phase, "value", ctx.current_phase)),
+            "iteration_count": ctx.iteration_count,
+            "timestamp": datetime.now().isoformat(),
+        })
+        # Keep only recent checkpoint metadata; phase_history carries durable outputs.
+        checkpoints = ctx.metadata.get("durable_checkpoints")
+        if isinstance(checkpoints, list) and len(checkpoints) > 50:
+            ctx.metadata["durable_checkpoints"] = checkpoints[-50:]
+        await _persist_workflow(ctx.task_id)
 
     params = _inspect.signature(workflow_engine.execute_full_workflow).parameters
     kwargs = {}
@@ -1662,6 +1776,8 @@ async def _execute_full_workflow_compat(
         kwargs["event_callback"] = event_callback
     if "agent_event_callback" in params:
         kwargs["agent_event_callback"] = agent_event_callback
+    if "checkpoint_callback" in params:
+        kwargs["checkpoint_callback"] = checkpoint_callback or _default_checkpoint_callback
     if "force_start_from" in params:
         kwargs["force_start_from"] = force_start_from
     return await workflow_engine.execute_full_workflow(context, **kwargs)
@@ -1729,6 +1845,36 @@ def _phase_result_has_output(context: WorkflowContext, phase_name: str) -> bool:
     return False
 
 
+def _review_allows_drafting_for_resume(requirement_payload: Dict[str, Any]) -> bool:
+    review = requirement_payload.get("retrieval_feedback_review")
+    if not isinstance(review, dict):
+        return False
+    text = json.dumps(review, ensure_ascii=False)
+    markers = (
+        "具备预撰写基础",
+        "可进入预撰写",
+        "可启动预撰写",
+        "启动预撰写",
+        "可启动预撰写草案",
+        "可进入预撰写草案",
+        "可以进入预撰写",
+        "可以启动预撰写",
+        "可以进入预撰写或内部草案",
+        "可以进入预撰写或内部方案草案",
+        "可进入撰写",
+        "可进入草案",
+        "可启动草案",
+        "可以进入草案",
+        "可以启动预撰写",
+        "可以启动预撰写或内部方案草案",
+        "技术方案层面已具备预撰写基础",
+        "已具备预撰写基础",
+        "足以支撑预撰写",
+        "足以提示撰写",
+    )
+    return any(marker in text for marker in markers)
+
+
 def _infer_workflow_resume_phase(context: WorkflowContext) -> EngineWorkflowState:
     """Infer a safe resume phase for older persisted workflows without metadata.
 
@@ -1736,6 +1882,23 @@ def _infer_workflow_resume_phase(context: WorkflowContext) -> EngineWorkflowStat
     but before drafting, continue retrieval so evidence gaps are rechecked before
     writing; after drafting, resume quality review.
     """
+    # Prefer actual completed artifacts/history over stale current_phase values.
+    # Older persisted workflows may keep current_phase=requirement_analysis even
+    # after retrieval finished, especially if the service was restarted during a
+    # pre-writing gate loop.
+    latest_requirement = _last_phase_history_index(context, WorkflowPhase.REQUIREMENT)
+    latest_retrieval = _last_phase_history_index(context, WorkflowPhase.RETRIEVAL)
+    latest_writing = _last_phase_history_index(context, WorkflowPhase.WRITING)
+    requirement_payload = context.requirement_analysis if isinstance(context.requirement_analysis, dict) else {}
+    if latest_writing >= 0:
+        return EngineWorkflowState.QUALITY_REVIEW
+    if (
+        latest_requirement >= 0
+        and latest_retrieval >= 0
+        and _review_allows_drafting_for_resume(requirement_payload)
+    ):
+        return EngineWorkflowState.PATENT_WRITING
+
     remediation = context.metadata.get("quality_remediation")
     if isinstance(remediation, dict):
         resume_phase = _coerce_engine_workflow_state(remediation.get("resume_phase"))
@@ -1745,14 +1908,17 @@ def _infer_workflow_resume_phase(context: WorkflowContext) -> EngineWorkflowStat
         if interrupted_state:
             return interrupted_state
 
-        interrupted_state = _coerce_engine_workflow_state(context.metadata.get("interrupted_state"))
+    interrupted_state = _coerce_engine_workflow_state(context.metadata.get("interrupted_state"))
     if interrupted_state:
         return interrupted_state
 
-    # Prefer actual completed artifacts/history over stale current_phase values.
-    # Older persisted workflows may keep current_phase=requirement_analysis even
-    # after retrieval finished, especially if the service was restarted during a
-    # pre-writing gate loop.
+    if latest_retrieval >= 0 and latest_retrieval > latest_requirement:
+        return EngineWorkflowState.REQUIREMENT_ANALYSIS
+    if latest_requirement >= 0 and latest_requirement > latest_retrieval:
+        return EngineWorkflowState.PATENT_WRITING if latest_retrieval >= 0 else EngineWorkflowState.RETRIEVAL_ANALYSIS
+    if context.retrieval_report and isinstance(requirement_payload.get("retrieval_feedback_review"), dict):
+        return EngineWorkflowState.PATENT_WRITING
+
     if _phase_result_has_output(context, EngineWorkflowState.PATENT_WRITING.value):
         return EngineWorkflowState.QUALITY_REVIEW
     if _phase_result_has_output(context, EngineWorkflowState.RETRIEVAL_ANALYSIS.value):
@@ -2114,16 +2280,19 @@ async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
         remediation.setdefault("recommended_next_action", "continue_auto_fix")
         remediation["resume_phase"] = resume_phase.value
 
-    _track_workflow_background_task(task_id, run_resume())
     async with workflow_lock:
+        previous_phase = context.current_phase.value
+        _mark_workflow_resume_running(context)
         _append_workflow_event(
             task_id=task_id,
             agent="workflow_engine",
-            message=f"工作流已从 {context.current_phase.value} 阶段恢复，继续阶段：{resume_phase.value}",
+            message=f"工作流已从 {previous_phase} 阶段恢复，继续阶段：{resume_phase.value}",
             event_type="workflow.resumed",
-            data={"current_phase": context.current_phase.value, "resume_phase": resume_phase.value},
+            data={"current_phase": previous_phase, "resume_phase": resume_phase.value},
         )
+    _track_workflow_background_task(task_id, run_resume())
     await _persist_events(task_id)
+    await _persist_workflow(task_id)
     return {
         "task_id": task_id,
         "status": "resumed",
@@ -2144,10 +2313,24 @@ async def workflow_decision(
     if not context:
         raise HTTPException(status_code=404, detail="工作流不存在")
 
-    if context.current_phase != EngineWorkflowState.AWAITING_USER_DECISION:
+    remediation = context.metadata.get("quality_remediation")
+    has_remediation_context = isinstance(remediation, dict)
+    orphaned_remediation_state = (
+        has_remediation_context
+        and not _workflow_background_task_running(task_id)
+        and context.current_phase
+        not in {
+            EngineWorkflowState.COMPLETED,
+            EngineWorkflowState.FAILED,
+            EngineWorkflowState.CANCELLED,
+        }
+    )
+    if (
+        context.current_phase != EngineWorkflowState.AWAITING_USER_DECISION
+        and not orphaned_remediation_state
+    ):
         raise HTTPException(status_code=400, detail="当前工作流不处于等待用户决策状态")
 
-    remediation = context.metadata.get("quality_remediation")
     if not isinstance(remediation, dict):
         raise HTTPException(status_code=400, detail="当前工作流缺少补救上下文，无法继续")
 
@@ -2225,8 +2408,13 @@ async def workflow_decision(
             await _persist_events(task_id)
             logger.exception("工作流决策恢复后台任务失败", exc_info=e)
 
-    _track_workflow_background_task(task_id, run_decision_resume())
     async with workflow_lock:
+        previous_phase = (
+            context.current_phase.value
+            if hasattr(context.current_phase, "value")
+            else str(context.current_phase)
+        )
+        _mark_workflow_resume_running(context)
         _append_workflow_event(
             task_id=task_id,
             agent="workflow_engine",
@@ -2238,11 +2426,14 @@ async def workflow_decision(
             event_type="workflow.remediation.decision",
             data={
                 "action": payload.action,
+                "previous_phase": previous_phase,
                 "resume_phase": resume_phase.value,
                 "has_supplemental_info": bool(supplemental_info),
             },
         )
+    _track_workflow_background_task(task_id, run_decision_resume())
     await _persist_events(task_id)
+    await _persist_workflow(task_id)
     return {
         "task_id": task_id,
         "status": "resumed",
@@ -4254,37 +4445,122 @@ def _extract_patent_preflight_summary(response_text: str) -> Optional[Dict[str, 
     }
 
 
+def _normalized_patent_title(value: str) -> str:
+    return re.sub(r"\s+", "", value or "")
+
+
+def _has_any_keyword(text: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
+def _extract_patent_preflight_from_message(
+    message: dict, patent_title: str
+) -> Optional[Dict[str, Any]]:
+    """Extract strict preflight facts from either metadata or the assistant confirmation body.
+
+    Older conversations can lack structured metadata when the agent produced a complete
+    confirmation message before the backend marker contract existed. This fallback still
+    requires every startup fact to be present in the assistant message and match the title.
+    """
+    if message.get("role") != "assistant":
+        return None
+
+    normalized_title = _normalized_patent_title(patent_title)
+    metadata = message.get("metadata") or {}
+    preflight = metadata.get("patent_preflight")
+    if isinstance(preflight, dict):
+        ready_title = _normalized_patent_title(str(preflight.get("patent_title") or ""))
+        if metadata.get("recommend_create_patent") and ready_title == normalized_title:
+            return dict(preflight)
+
+    content = str(message.get("content") or "")
+    if not content.strip():
+        return None
+
+    title = _extract_recommended_patent_title(content)
+    if _normalized_patent_title(title or "") != normalized_title:
+        return None
+
+    readiness_phrases = (
+        "已具备启动正式流程条件",
+        "启动前方案已确认",
+        "确认后进入正式专利申请流程",
+        "头脑风暴复核认为已具备启动正式流程条件",
+    )
+    if not _has_any_keyword(content, readiness_phrases):
+        return None
+
+    field_checks: Dict[str, bool] = {
+        "patent_title": bool(title),
+        "protection_theme": _has_any_keyword(
+            content, ("保护主题", "核心保护主题", "保护主线", "核心保护")
+        ),
+        "patent_type": _has_any_keyword(
+            content, ("专利类型", "保护类型", "申请类型", "发明专利", "实用新型")
+        ),
+        "claim_skeleton": _has_any_keyword(
+            content, ("独权骨架", "独立权利要求骨架", "三步", "四步", "3步", "4步")
+        ),
+        "technical_facts": _has_any_keyword(
+            content, ("关键技术事实", "必要技术事实", "技术事实")
+        ),
+        "public_status": _has_any_keyword(
+            content, ("公开状态", "是否公开", "尚未公开", "未公开", "已经公开")
+        ),
+        "drawing_plan": _has_any_keyword(
+            content, ("附图需求", "附图规划", "附图方案", "附图建议", "附图")
+        ),
+    }
+    missing_fields = [field for field, present in field_checks.items() if not present]
+    if missing_fields:
+        return None
+
+    unresolved_hits = [
+        pattern for pattern in _PATENT_PREFLIGHT_UNRESOLVED_PATTERNS if pattern in content
+    ]
+    # Allow the final confirmation to mention the words "确认/已确认"; block only unresolved
+    # wording that says facts are still absent or user-exclusive.
+    unresolved_hits = [
+        pattern
+        for pattern in unresolved_hits
+        if pattern not in {"待确认", "继续确认"} or "还差" in content or "不能启动" in content
+    ]
+    if unresolved_hits:
+        return None
+
+    claim_steps_match = re.search(r"(?:独权骨架|独立权利要求骨架)[^。\n]*(3|4|三|四)\s*步", content)
+    claim_steps = claim_steps_match.group(1) if claim_steps_match else None
+    if claim_steps in {"三", "3"}:
+        independent_step_count = 3
+    elif claim_steps in {"四", "4"}:
+        independent_step_count = 4
+    else:
+        independent_step_count = None
+
+    return {
+        "patent_title": title,
+        "source": "assistant_confirmation_body",
+        "required_fields": sorted(_PATENT_PREFLIGHT_REQUIRED_FIELDS.keys()),
+        "field_checks": field_checks,
+        "independent_step_count": independent_step_count,
+        "summary_text": content[:6000],
+    }
+
+
 def _conversation_has_patent_preflight_ready(conv: dict, patent_title: str) -> bool:
     """Server-side gate: frontend confirmation cannot start a workflow without preflight."""
-    normalized_title = re.sub(r"\s+", "", patent_title or "")
     for message in reversed(conv.get("messages", [])):
-        if message.get("role") != "assistant":
-            continue
-        metadata = message.get("metadata") or {}
-        preflight = metadata.get("patent_preflight")
-        if not isinstance(preflight, dict):
-            continue
-        if not metadata.get("recommend_create_patent"):
-            continue
-        ready_title = re.sub(r"\s+", "", str(preflight.get("patent_title") or ""))
-        if ready_title and ready_title == normalized_title:
+        if _extract_patent_preflight_from_message(message, patent_title):
             return True
     return False
 
 
 def _extract_latest_patent_preflight(conv: dict, patent_title: str) -> Dict[str, Any]:
     """Get the latest confirmed preflight package for workflow shared context."""
-    normalized_title = re.sub(r"\s+", "", patent_title or "")
     for message in reversed(conv.get("messages", [])):
-        if message.get("role") != "assistant":
-            continue
-        metadata = message.get("metadata") or {}
-        preflight = metadata.get("patent_preflight")
-        if not isinstance(preflight, dict):
-            continue
-        ready_title = re.sub(r"\s+", "", str(preflight.get("patent_title") or ""))
-        if ready_title and ready_title == normalized_title:
-            return dict(preflight)
+        preflight = _extract_patent_preflight_from_message(message, patent_title)
+        if preflight:
+            return preflight
     return {}
 
 

@@ -124,7 +124,7 @@ async def _run_agent_conversation(profile_id: str, prompt: str, session_id: str 
 logger = get_logger("workflow_engine")
 T = TypeVar("T", bound=BaseModel)
 
-QUALITY_REMEDIATION_THRESHOLD = 0.8
+QUALITY_REMEDIATION_THRESHOLD = 0.9
 QUALITY_REMEDIATION_SAFETY_LIMIT = 12
 SPECIALIST_AGENT_NAMES = {
     "requirement_analyst": "需求分析师",
@@ -579,6 +579,7 @@ class PatentWorkflowEngine:
         phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None | Awaitable[None]]] = None,
         event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
         agent_event_callback: Optional[Callable[[Dict[str, Any]], None | Awaitable[None]]] = None,
+        checkpoint_callback: Optional[Callable[[WorkflowContext, str], None | Awaitable[None]]] = None,
         force_start_from: Optional[WorkflowState] = None,
     ) -> WorkflowContext:
         """
@@ -595,6 +596,19 @@ class PatentWorkflowEngine:
             event.setdefault("task_id", context.task_id)
             event.setdefault("timestamp", datetime.now().isoformat())
             result = agent_event_callback(event)
+            if asyncio.iscoroutine(result):
+                await result
+
+        async def checkpoint(reason: str) -> None:
+            context.metadata["latest_checkpoint"] = {
+                "reason": reason,
+                "phase": str(getattr(context.current_phase, "value", context.current_phase)),
+                "iteration_count": context.iteration_count,
+                "timestamp": datetime.now().isoformat(),
+            }
+            if checkpoint_callback is None:
+                return
+            result = checkpoint_callback(context, reason)
             if asyncio.iscoroutine(result):
                 await result
 
@@ -627,6 +641,8 @@ class PatentWorkflowEngine:
                     ready_to_write = await self._ensure_prewriting_ready(
                         context,
                         event_callback=event_callback,
+                        phase_callback=phase_callback,
+                        checkpoint_callback=checkpoint_callback,
                     )
                     if not ready_to_write:
                         await self._persist_loop_and_sediment_skills(
@@ -634,10 +650,12 @@ class PatentWorkflowEngine:
                             "awaiting_user_decision",
                             event_callback,
                         )
+                        await checkpoint("prewriting_gate_waiting")
                         return context
                 phase_started_at = time.perf_counter()
                 context.current_phase = phase_state
                 await self._publish_progress_event(context, phase_state, "running")
+                await checkpoint(f"{phase_state.value}_running")
 
                 # Agent 显示名映射
                 agent_display_name = SPECIALIST_AGENT_NAMES.get(agent_id, agent_id)
@@ -842,6 +860,7 @@ class PatentWorkflowEngine:
                     await self._publish_progress_event(context, phase_state, "failed")
                     context.current_phase = WorkflowState.FAILED
                     await self._publish_progress_event(context, WorkflowState.FAILED, "failed")
+                    await checkpoint(f"{phase_state.value}_failed")
                     await emit_agent_work_event({
                         "event_type": "agent.work.failed",
                         "agent_id": agent_id,
@@ -881,6 +900,7 @@ class PatentWorkflowEngine:
                     output=context_data if isinstance(context_data, dict) else {},
                 ))
                 await self._publish_progress_event(context, phase_state, "completed")
+                await checkpoint(f"{phase_state.value}_completed")
                 await emit_agent_work_event({
                     "event_type": "agent.work.completed",
                     "agent_id": agent_id,
@@ -1027,6 +1047,8 @@ class PatentWorkflowEngine:
                             context,
                             WorkflowState.REQUIREMENT_ANALYSIS,
                             event_callback=event_callback,
+                            phase_callback=phase_callback,
+                            checkpoint_callback=checkpoint_callback,
                         )
                     elif remediation_path == "SEARCH_MORE":
                         if event_callback:
@@ -1045,12 +1067,15 @@ class PatentWorkflowEngine:
                             context,
                             WorkflowState.RETRIEVAL_ANALYSIS,
                             event_callback=event_callback,
+                            phase_callback=phase_callback,
+                            checkpoint_callback=checkpoint_callback,
                         )
 
                     ready_to_write = await self._ensure_prewriting_ready(
                         context,
                         event_callback=event_callback,
-                        max_attempts=2,
+                        phase_callback=phase_callback,
+                        checkpoint_callback=checkpoint_callback,
                     )
                     if not ready_to_write:
                         await self._persist_loop_and_sediment_skills(
@@ -1058,6 +1083,7 @@ class PatentWorkflowEngine:
                             "awaiting_user_decision",
                             event_callback,
                         )
+                        await checkpoint("quality_remediation_waiting")
                         return context
 
                     # ── 修正撰写 ──
@@ -1202,6 +1228,13 @@ class PatentWorkflowEngine:
                         ] if isinstance(context_data, dict) and context_data.get("_agent_failed") is True else [],
                     ))
                     await self._publish_progress_event(context, WorkflowState.PATENT_WRITING, "completed")
+                    if phase_callback:
+                        last_result = context.phase_history[-1]
+                        if asyncio.iscoroutinefunction(phase_callback):
+                            await phase_callback(WorkflowState.PATENT_WRITING, last_result)
+                        else:
+                            phase_callback(WorkflowState.PATENT_WRITING, last_result)
+                    await checkpoint(f"quality_revision_writing_round_{context.iteration_count}_completed")
 
                     # ── 重新审查 ──
                     review_started_at = time.perf_counter()
@@ -1257,6 +1290,13 @@ class PatentWorkflowEngine:
                         ] if isinstance(context_data, dict) and context_data.get("_agent_failed") is True else [],
                     ))
                     await self._publish_progress_event(context, WorkflowState.QUALITY_REVIEW, "completed")
+                    if phase_callback:
+                        last_result = context.phase_history[-1]
+                        if asyncio.iscoroutinefunction(phase_callback):
+                            await phase_callback(WorkflowState.QUALITY_REVIEW, last_result)
+                        else:
+                            phase_callback(WorkflowState.QUALITY_REVIEW, last_result)
+                    await checkpoint(f"quality_review_round_{context.iteration_count + 1}_completed")
 
                 # 检查审查是否通过
                 needs_remediation = self._needs_quality_remediation(context.review_report)
@@ -1309,6 +1349,7 @@ class PatentWorkflowEngine:
                     "awaiting_user_decision",
                     event_callback,
                 )
+                await checkpoint("awaiting_user_decision_before_final_docx")
                 return context
 
             if self._has_unresolved_critical_issues(context):
@@ -1449,6 +1490,7 @@ class PatentWorkflowEngine:
             # 完成
             context.current_phase = WorkflowState.COMPLETED
             await self._publish_progress_event(context, WorkflowState.COMPLETED, "completed")
+            await checkpoint("workflow_completed")
             await self._persist_loop_and_sediment_skills(
                 context,
                 "completed",
@@ -1590,6 +1632,27 @@ class PatentWorkflowEngine:
 
     # ============ 内部辅助方法 ============
 
+    def _latest_phase_output(
+        self,
+        context: WorkflowContext,
+        phase: WorkflowPhase,
+        fallback_field: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return latest successful phase output from history, falling back to context field."""
+        expected = getattr(phase, "value", phase)
+        for result in reversed(context.phase_history or []):
+            result_phase = getattr(result.phase, "value", result.phase)
+            if result_phase != expected or not result.success:
+                continue
+            output = self._unwrap_phase_payload(result.output)
+            if isinstance(output, dict) and output:
+                return output
+        if fallback_field:
+            fallback = self._unwrap_phase_payload(getattr(context, fallback_field, {}))
+            if isinstance(fallback, dict) and fallback:
+                return fallback
+        return {}
+
     def _build_phase_prompt(self, context: WorkflowContext, phase: WorkflowState, content_only: bool = False) -> str:
         """为单个阶段构建 prompt
 
@@ -1609,18 +1672,25 @@ class PatentWorkflowEngine:
 可调用 transcript_sanitizer、ipc_classifier、tech_feature_extractor、scenario_miner 获取客观信号；工具结果只能作为线索，不能替代技术领域、创新点、保护主题、专利类型和信息缺口判断。
 如果工具信号不足，必须在输出中如实标注 `tool_signal_insufficient`，不得用本地规则或工具空结果代替 Agent 结论。
 必须基于【已确认/共享公共信息】继续完善，不得忽略启动前确认的专利名称、保护主题、专利类型、公共事实和用户补充。
+如果【已确认/共享公共信息】中已有检索分析结果或本轮反馈来自检索阶段，你必须复核检索证据是否已经解决需求分析指出的缺口，并输出 `retrieval_feedback_review`：
+- `all_requirement_gaps_closed`: true/false
+- `remaining_requirement_gaps`: 仍未补齐的需求/证据缺口数组
+- `search_feedback_for_retrieval`: 需要检索 Agent 下一轮继续解决的问题数组
+- `ready_for_writing`: true/false，只有需求和检索均足以支撑完整专利撰写时才能为 true
+如果仍有缺口，你必须把每个缺口归属到 requirement_analysis 或 retrieval_analysis：需求/方案细节缺口由你基于上一轮内容继续补齐；证据/现有技术/真伪核验缺口写入 `search_feedback_for_retrieval` 交给检索 Agent。
+不得因为检索暂时失败就要求用户补充，除非缺口是用户专属事实（例如内部产品参数、尚未公开资料、明确业务选择）。
 最终 JSON 必须剔除逐字稿时间戳、说话人、寒暄和会议口语。
 ---
 
 """,
-            WorkflowState.RETRIEVAL_ANALYSIS: """【强制工具调用指令 - 必须严格执行】
-在输出任何检索结论之前，你必须按以下顺序调用工具：
-1. 首先调用 patent_search 工具检索现有技术
-2. 然后调用 similarity_analyzer 工具分析相似度
-3. 接着调用 patentability_scorer 工具评估专利性
-4. 最后调用 risk_analyzer 工具识别风险
-只有在获得所有工具返回结果后，才能由你作为检索分析 Agent 通过 LLM 综合判断并生成最终JSON输出。
-必须基于【已确认/共享公共信息】和需求分析结果继续检索；如果证据不足，输出 evidence_gaps 和下一轮检索策略，不得编造检索结果。
+            WorkflowState.RETRIEVAL_ANALYSIS: """【检索分析阶段输出契约】
+你必须先加载并遵守本 profile 的检索 skills，最终检索策略、相似性、专利性和风险结论由你作为检索分析 Agent 的 LLM 判断。
+patent_search、similarity_analyzer、patentability_scorer、risk_analyzer、web_access_* 都是 Hermes 工具，只提供真实检索证据、客观信号或网页取证能力；工具不能替你下结论，也不能为了满足固定顺序而空跑。
+应根据需求分析提出的缺口选择必要工具：需要专利证据时调用 patent_search；已有对比文件时再调用 similarity_analyzer / patentability_scorer；需要风险线索时调用 risk_analyzer；需要非专利公开或动态页面证据时调用 web_access_*。
+必须基于【已确认/共享公共信息】、需求分析结果和需求分析提出的 `information_gaps` / `search_feedback_for_retrieval` 继续检索；你的职责是为需求分析缺口补充可核验证据和可写入专利的解决方案。
+如果证据不足，必须先分析为什么无结果或证据不足，再更换检索条件继续搜索；最终输出 evidence_gaps 和下一轮检索策略，不得编造检索结果。
+每轮检索必须继承上一轮可用证据，新增或替换无效检索式，并说明“本轮新增证据/本轮仍未解决证据缺口/下一轮检索建议”。
+检索完成后，结果必须交回需求分析 Agent 复核缺口是否关闭；你不能直接判断进入撰写。
 ---
 
 """,
@@ -1682,10 +1752,25 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 请梳理这项技术发明的专利申请思路：\n\n{base}{country_hint_map[phase]}"""
 
         elif phase == WorkflowState.REQUIREMENT_ANALYSIS:
-            return f"{tool_prefix}对以下技术方案进行结构化需求分析，提取创新点和技术特征：\n\n{base}{country_hint_map[phase]}"
+            retrieval_output = self._latest_phase_output(
+                context, WorkflowPhase.RETRIEVAL, "retrieval_report"
+            )
+            retrieval_section = (
+                "\n\n【最新检索分析结果，必须复核其是否关闭需求缺口】\n"
+                + json.dumps(retrieval_output, ensure_ascii=False)[:6000]
+                if retrieval_output
+                else ""
+            )
+            return (
+                f"{tool_prefix}对以下技术方案进行结构化需求分析，提取创新点和技术特征：\n\n"
+                f"{base}{retrieval_section}{country_hint_map[phase]}"
+            )
 
         elif phase == WorkflowState.RETRIEVAL_ANALYSIS:
-            req = json.dumps(context.requirement_analysis, ensure_ascii=False)[:1000]
+            requirement_output = self._latest_phase_output(
+                context, WorkflowPhase.REQUIREMENT, "requirement_analysis"
+            )
+            req = json.dumps(requirement_output, ensure_ascii=False)[:1000]
             return f"""{tool_prefix}基于以下需求分析结果进行先有技术检索和专利性评估：
 
 {req}
@@ -1708,8 +1793,14 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 """
 
         elif phase == WorkflowState.PATENT_WRITING:
-            req = json.dumps(context.requirement_analysis, ensure_ascii=False)[:500]
-            ret = json.dumps(context.retrieval_report, ensure_ascii=False)[:500]
+            requirement_output = self._latest_phase_output(
+                context, WorkflowPhase.REQUIREMENT, "requirement_analysis"
+            )
+            retrieval_output = self._latest_phase_output(
+                context, WorkflowPhase.RETRIEVAL, "retrieval_report"
+            )
+            req = json.dumps(requirement_output, ensure_ascii=False)[:500]
+            ret = json.dumps(retrieval_output, ensure_ascii=False)[:500]
             return f"{tool_prefix}基于需求分析和检索结果撰写专利申请文件：\n\n需求：{req}\n\n检索：{ret}{country_hint_map[phase]}"
 
         elif phase == WorkflowState.QUALITY_REVIEW:
@@ -1893,11 +1984,24 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 
     def _needs_quality_remediation(self, review_report: Dict[str, Any]) -> bool:
         """统一判断质量问题是否还需要补救。"""
+        if not isinstance(review_report, dict) or not review_report:
+            return True
+        recommendation = str(
+            review_report.get("recommendation")
+            or (
+                review_report.get("review_summary", {}).get("recommendation")
+                if isinstance(review_report.get("review_summary"), dict)
+                else ""
+            )
+            or ""
+        ).strip().lower()
+        if recommendation not in {"approve", "pass", "accept", "revise", "reject"}:
+            return True
         if self._check_review_needs_revision(review_report):
             return True
         normalized_score = self._extract_normalized_review_score(review_report)
         if normalized_score is None:
-            return False
+            return True
         return normalized_score < QUALITY_REMEDIATION_THRESHOLD
 
     def _classify_remediation_path(self, review_report: Dict[str, Any], context: WorkflowContext) -> str:
@@ -2010,17 +2114,49 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         pause for user discussion.
         """
         user_fact_markers = (
-            "信息缺口",
-            "仍需确认",
-            "需要用户",
+            "必须由用户",
+            "需要用户提供",
+            "请用户提供",
+            "用户提供",
             "用户补充",
+            "用户确认",
+            "产品名",
+            "展厅名",
+            "供应商",
+            "公开链接",
             "genuinely_missing",
             "external_info_missing",
+        )
+        agent_resolvable_markers = (
+            "检索",
+            "现有技术",
+            "对比文件",
+            "证据",
+            "可核验",
+            "Google Patents",
+            "CNIPA",
+            "USPTO",
+            "EPO",
+            "WIPO",
+            "专业/官方",
+            "交叉核验",
+            "技术问题",
+            "技术方案",
+            "保护主题",
+            "创新点",
+            "权利要求骨架",
+            "实施方式",
+            "映射关系",
+            "补偿",
+            "裁切",
+            "算法",
         )
         for blocker in blockers:
             if blocker.get("phase") == WorkflowState.RETRIEVAL_ANALYSIS.value:
                 continue
             message = str(blocker.get("message") or "")
+            if any(marker in message for marker in agent_resolvable_markers):
+                continue
             if any(marker in message for marker in user_fact_markers):
                 return True
         return False
@@ -2048,6 +2184,232 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         if isinstance(value, str) and value.strip():
             return [value.strip()]
         return []
+
+    def _is_nonblocking_prewriting_gap(
+        self, gap_text: Any, retrieval_report: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """Return True for limitations that should be carried as risk, not block writing.
+
+        A single unavailable retrieval source is not a hard failure when other
+        verifiable sources exist. Likewise, implementation values that can be
+        expressed as ranges or alternatives should be handled by the writer and
+        reviewer instead of trapping the workflow before DOCX generation.
+        """
+        if isinstance(gap_text, (dict, list)):
+            text = "\n".join(self._iter_phase_text_values(gap_text))
+        else:
+            text = str(gap_text or "")
+        if not text.strip():
+            return True
+        has_evidence = (
+            isinstance(retrieval_report, dict)
+            and self._has_real_retrieval_evidence(retrieval_report)
+        )
+        unavailable_source_markers = (
+            "未配置",
+            "未启用",
+            "不可用",
+            "无法访问",
+            "HTTP 503",
+            "解析失败",
+            "未取得直接检索结果",
+            "数据库覆盖",
+            "覆盖不足",
+            "未完成系统性直接检索",
+            "尚未完成系统性直接检索",
+            "未完成系统性检索",
+            "系统性直接检索",
+            "系统性结果",
+            "稳定可核验结果",
+            "直接检索",
+            "宽检索",
+            "英文专利宽检索",
+            "继续英文专利检索",
+            "商业专利库",
+            "数据源",
+            "不应要求用户补充",
+        )
+        if has_evidence and any(marker in text for marker in unavailable_source_markers):
+            return True
+
+        implementation_detail_markers = (
+            "最大/最小转角",
+            "最大转角",
+            "最小转角",
+            "安全限位",
+            "驱动机构型号",
+            "姿态检测精度",
+            "控制延迟",
+            "刷新率",
+            "具体数值",
+            "可公开范围",
+            "尚未量化",
+            "参数仍需",
+            "需研发侧确认",
+            "生成规则是离线标定",
+            "生成规则",
+            "表生成规则",
+            "角度—画面映射",
+            "角度-画面映射",
+            "映射关系",
+            "数学关系",
+            "表项结构",
+            "标定方法",
+            "重投影参数",
+            "实时计算",
+            "查表",
+            "插值",
+            "视锥重投影",
+            "触发条件",
+            "外转补充",
+            "内转删除",
+            "裁切/重构",
+            "裁切",
+            "重构",
+            "量化",
+            "算法化",
+            "工程参数",
+            "研发内部",
+            "不影响核心发明构思",
+            "范围化",
+            "可选化",
+            "实施例示例化",
+            "客观信号不足",
+            "应用场景",
+            "场景信号",
+            "最接近",
+            "核心组合",
+            "尚未检索到",
+            "缺少关于",
+            "可核验专利对比文件",
+            "可移动或可转动显示墙",
+            "动态投影映射",
+            "论文级来源",
+            "官方或论文级来源",
+            "Wikipedia",
+            "初步背景",
+            "背景起点",
+            "未调用",
+            "similarity_analyzer",
+            "patentability_scorer",
+            "risk_analyzer",
+            "客观分数",
+            "客观评分",
+            "风险量化",
+            "工具调用达到上限",
+            "固定顺序",
+            "空跑工具",
+            "全文",
+            "权利要求全文",
+            "说明书关键段落",
+            "附图实施方式",
+            "逐项核验",
+            "下载PDF",
+            "详情页",
+            "完整打开",
+            "形成逐项特征对照表",
+            "商业产品",
+            "学术论文",
+            "行业白皮书",
+            "标准规范",
+            "非专利公开",
+            "补充非专利公开",
+            "重点核验",
+            "完整组合",
+            "逐项核验",
+            "完整抽取",
+            "权利要求全文",
+            "说明书关键段落",
+            "附图实施方式",
+            "正文尚未成功读取",
+            "搜索结果线索",
+            "不能作为确定性公开事实",
+            "商业产品",
+            "行业白皮书",
+            "标准规范",
+        )
+        if any(marker in text for marker in implementation_detail_markers):
+            return True
+        return False
+
+    def _filter_hard_prewriting_gaps(
+        self,
+        gaps: List[Any],
+        retrieval_report: Optional[Dict[str, Any]] = None,
+    ) -> List[str]:
+        return [
+            "\n".join(self._iter_phase_text_values(item))
+            if isinstance(item, (dict, list))
+            else str(item)
+            for item in gaps
+            if not self._is_nonblocking_prewriting_gap(item, retrieval_report)
+        ]
+
+    def _workflow_confirms_public_status(self, context: WorkflowContext) -> bool:
+        """Return whether startup discussion already captured the invention public status."""
+        confirmed = context.metadata.get("confirmed_preflight")
+        if isinstance(confirmed, dict) and str(confirmed.get("public_status") or "").strip():
+            return True
+        shared = context.metadata.get("shared_agent_context")
+        if isinstance(shared, dict):
+            preflight = shared.get("confirmed_preflight")
+            if isinstance(preflight, dict) and str(preflight.get("public_status") or "").strip():
+                return True
+
+        text_parts = [context.original_description]
+        text_parts.extend(str(item.get("content") or "") for item in context.message_history)
+        combined = "\n".join(part for part in text_parts if part).strip()
+        public_status_markers = (
+            "尚未公开",
+            "未公开",
+            "未对外公开",
+            "已公开",
+            "公开状态",
+            "是否公开",
+            "申请日前",
+        )
+        return any(marker in combined for marker in public_status_markers)
+
+    def _gap_closed_by_confirmed_context(self, gap_text: Any, context: WorkflowContext) -> bool:
+        text = "\n".join(self._iter_phase_text_values(gap_text)) if isinstance(gap_text, (dict, list)) else str(gap_text or "")
+        if not text.strip():
+            return True
+        public_status_gap_markers = (
+            "产品公开时间",
+            "首次公开",
+            "对外展示",
+            "销售情况",
+            "公开状态",
+            "申请日前是否存在公开",
+        )
+        if any(marker in text for marker in public_status_gap_markers):
+            return self._workflow_confirms_public_status(context)
+        return False
+
+    def _requirement_review_allows_drafting(self, retrieval_review: Dict[str, Any]) -> bool:
+        """Agent-owned signal that the file can move to drafting with risks carried forward."""
+        text = "\n".join(self._iter_phase_text_values(retrieval_review))
+        allow_markers = (
+            "具备预撰写基础",
+            "可进入预撰写",
+            "可启动预撰写",
+            "启动预撰写",
+            "可启动预撰写草案",
+            "可进入预撰写草案",
+            "可以进入预撰写",
+            "可以启动预撰写",
+            "可以进入预撰写或内部草案",
+            "可以进入预撰写或内部方案草案",
+            "可进入撰写",
+            "可进入草案",
+            "可启动草案",
+            "可以进入草案",
+            "技术方案层面已具备预撰写基础",
+            "已具备预撰写基础",
+            "足以支撑预撰写",
+            "足以提示撰写",
+        )
+        return any(marker in text for marker in allow_markers)
 
     def _has_real_retrieval_evidence(self, report: Dict[str, Any]) -> bool:
         candidate_fields = (
@@ -2260,10 +2622,6 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             parts.append(str(remediation.get("user_supplied_info") or ""))
         return "\n".join(part for part in parts if part.strip())
 
-    def _safety_motion_confirmed(self, context: WorkflowContext) -> bool:
-        text = self._latest_user_supplemental_text(context)
-        return bool(text and ("安全检测" in text or "防碰撞" in text or "限位开关" in text))
-
     def _requirement_gap_belongs_to_retrieval(self, gap_text: str) -> bool:
         """Requirement gaps that explicitly ask retrieval to verify evidence belong to retrieval."""
         text = str(gap_text or "")
@@ -2297,7 +2655,9 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         substance; unresolved items are routed back to the responsible Hermes Agent.
         """
         blockers: List[Dict[str, str]] = []
-        req = self._unwrap_phase_payload(context.requirement_analysis)
+        req = self._latest_phase_output(
+            context, WorkflowPhase.REQUIREMENT, "requirement_analysis"
+        )
         if not isinstance(req, dict) or not req:
             return [{
                 "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
@@ -2348,21 +2708,41 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                     "message": "需求分析中的独权骨架不是3步或4步，必须先修正保护方案再撰写。",
                 })
 
-        gaps = self._as_nonempty_list(req.get("information_gaps"))
+        ret_preview = self._latest_phase_output(
+            context, WorkflowPhase.RETRIEVAL, "retrieval_report"
+        )
+        if not isinstance(ret_preview, dict) or not ret_preview:
+            ret_preview = None
+        retrieval_review = req.get("retrieval_feedback_review")
+        review_allows_drafting = (
+            self._requirement_review_allows_drafting(retrieval_review)
+            if isinstance(retrieval_review, dict)
+            else False
+        )
+        has_real_retrieval_evidence = self._has_real_retrieval_evidence(ret_preview or {})
+
+        raw_information_gaps = [
+            item
+            for item in self._as_nonempty_list(req.get("information_gaps"))
+            if not self._gap_closed_by_confirmed_context(item, context)
+        ]
+        gaps = self._filter_hard_prewriting_gaps(raw_information_gaps, ret_preview)
         filtered_gaps: List[str] = []
         retrieval_gaps: List[str] = []
         for gap in gaps:
             gap_text = str(gap)
-            if "CPC" in gap_text and ("分类" in gap_text or "工具信号" in gap_text):
-                continue
-            if self._safety_motion_confirmed(context) and any(
-                marker in gap_text for marker in ("安全检测", "防碰撞", "运动前", "实体屏幕运动")
-            ):
-                continue
             if self._requirement_gap_belongs_to_retrieval(gap_text):
                 retrieval_gaps.append(gap_text)
                 continue
             filtered_gaps.append(gap_text)
+        if review_allows_drafting and has_real_retrieval_evidence:
+            carried = context.metadata.setdefault("prewriting_carried_risks", {})
+            if filtered_gaps:
+                carried["requirement_information_gaps"] = filtered_gaps
+            if retrieval_gaps:
+                carried["retrieval_information_gaps"] = retrieval_gaps
+            filtered_gaps = []
+            retrieval_gaps = []
         if filtered_gaps:
             blockers.append({
                 "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
@@ -2381,8 +2761,67 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 "severity": "high",
                 "message": "需求分析标记了未解决的信息不足信号，必须先由 CEO 调度补齐或确认。",
             })
+        if self._retrieval_has_requirement_review(context) and not isinstance(retrieval_review, dict):
+            blockers.append({
+                "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
+                "severity": "high",
+                "message": "需求分析已在检索后更新，但未输出 retrieval_feedback_review，必须由需求分析 Agent 明确复核检索是否关闭缺口。",
+            })
+        if isinstance(retrieval_review, dict):
+            ready_for_writing = retrieval_review.get("ready_for_writing")
+            all_gaps_closed = retrieval_review.get("all_requirement_gaps_closed")
+            remaining = self._filter_hard_prewriting_gaps(
+                [
+                    item
+                    for item in self._as_nonempty_list(
+                        retrieval_review.get("remaining_requirement_gaps")
+                    )
+                    if not self._gap_closed_by_confirmed_context(item, context)
+                ],
+                ret_preview,
+            )
+            search_feedback = self._filter_hard_prewriting_gaps(
+                self._as_nonempty_list(retrieval_review.get("search_feedback_for_retrieval")),
+                ret_preview,
+            )
+            if review_allows_drafting:
+                context.metadata["prewriting_carried_risks"] = {
+                    "remaining_requirement_gaps": remaining,
+                    "search_feedback_for_retrieval": search_feedback,
+                    "review_conclusion": retrieval_review.get("review_conclusion"),
+                }
+                remaining = []
+                search_feedback = []
+            hard_review_blocked = bool(remaining or search_feedback)
+            soft_review_flag_only = (
+                (review_allows_drafting or not hard_review_blocked)
+                and has_real_retrieval_evidence
+                and (ready_for_writing is not True or all_gaps_closed is not True)
+            )
+            if (
+                (ready_for_writing is not True or all_gaps_closed is not True or hard_review_blocked)
+                and not soft_review_flag_only
+            ):
+                target_phase = (
+                    WorkflowState.RETRIEVAL_ANALYSIS.value
+                    if search_feedback or any(self._requirement_gap_belongs_to_retrieval(str(item)) for item in remaining)
+                    else WorkflowState.REQUIREMENT_ANALYSIS.value
+                )
+                detail = "；".join(str(item)[:120] for item in (search_feedback or remaining)[:5])
+                if not detail:
+                    detail = (
+                        "需求分析复核未明确 ready_for_writing=true 且 "
+                        "all_requirement_gaps_closed=true，不能进入撰写。"
+                    )
+                blockers.append({
+                    "phase": target_phase,
+                    "severity": "high",
+                    "message": "需求分析复核认为检索/需求缺口尚未关闭：" + detail,
+                })
 
-        ret = self._unwrap_phase_payload(context.retrieval_report)
+        ret = self._latest_phase_output(
+            context, WorkflowPhase.RETRIEVAL, "retrieval_report"
+        )
         if not isinstance(ret, dict) or not ret:
             blockers.append({
                 "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
@@ -2425,30 +2864,74 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 "severity": "high",
                 "message": "检索报告没有可核验的专利或网页证据列表，不能进入撰写。",
             })
+        else:
+            skipped_sources = self._as_nonempty_list(ret.get("skipped_sources"))
+            empty_sources = self._as_nonempty_list(ret.get("empty_sources"))
+            unavailable_sources = self._as_nonempty_list(
+                ret.get("unavailable_sources")
+                or (strategy.get("unavailable_sources") if isinstance(strategy, dict) else [])
+            )
+            if skipped_sources or empty_sources or unavailable_sources:
+                context.metadata.setdefault("prewriting_carried_risks", {})[
+                    "retrieval_source_limitations"
+                ] = {
+                    "skipped_sources": skipped_sources,
+                    "empty_sources": empty_sources,
+                    "unavailable_sources": unavailable_sources,
+                    "policy": (
+                        "单个或部分检索源不可用/无结果时跳过并记录；"
+                        "只要其他真实来源已有可核验证据，不作为进入撰写的硬阻断。"
+                    ),
+                }
         if self._uses_public_web_evidence(ret) and not self._has_professional_or_official_verification(ret):
             blockers.append({
                 "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
                 "severity": "high",
                 "message": "检索报告使用了公开网页或 Google Patents 候选证据，但没有专业/官方来源交叉核验，必须继续核验真伪。",
             })
-        evidence_gaps = self._as_nonempty_list(ret.get("evidence_gaps"))
-        if evidence_gaps:
+        retrieval_has_newer_requirement_review = self._retrieval_has_requirement_review(context)
+        evidence_gaps = self._filter_hard_prewriting_gaps(
+            self._as_nonempty_list(ret.get("evidence_gaps")),
+            ret,
+        )
+        if evidence_gaps and not retrieval_has_newer_requirement_review:
             blockers.append({
                 "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
                 "severity": "high",
                 "message": "检索报告仍存在证据缺口：" + "；".join(str(item)[:120] for item in evidence_gaps[:5]),
             })
-        if self._has_phase_signal(ret, "data_source_unavailable", "insufficient_evidence", "no_results"):
+        has_retrieval_signal = self._has_phase_signal(
+            ret,
+            "data_source_unavailable",
+            "insufficient_evidence",
+            "no_results",
+        )
+        if (
+            has_retrieval_signal
+            and not retrieval_has_newer_requirement_review
+            and (not self._has_real_retrieval_evidence(ret) or evidence_gaps)
+        ):
             blockers.append({
                 "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
                 "severity": "high",
                 "message": "检索报告标记了数据源不可用、无结果或证据不足，必须继续调度检索 Agent 扩展检索。",
             })
+        if not retrieval_has_newer_requirement_review:
+            blockers.append({
+                "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
+                "severity": "high",
+                "code": "retrieval_needs_requirement_review",
+                "message": "检索分析已更新，但尚未交回需求分析 Agent 复核需求缺口是否全部关闭，不能进入撰写。",
+            })
 
         return blockers
 
     def _select_prewriting_remediation_phase(self, blockers: List[Dict[str, str]]) -> WorkflowState:
+        if any(item.get("code") == "retrieval_needs_requirement_review" for item in blockers):
+            return WorkflowState.REQUIREMENT_ANALYSIS
         phases = {item.get("phase") for item in blockers}
+        if WorkflowState.RETRIEVAL_ANALYSIS.value in phases:
+            return WorkflowState.RETRIEVAL_ANALYSIS
         if WorkflowState.REQUIREMENT_ANALYSIS.value in phases:
             return WorkflowState.REQUIREMENT_ANALYSIS
         return WorkflowState.RETRIEVAL_ANALYSIS
@@ -2458,11 +2941,44 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             item.get("phase") == WorkflowState.RETRIEVAL_ANALYSIS.value for item in blockers
         )
 
+    def _latest_phase_history_index(self, context: WorkflowContext, phase: WorkflowPhase) -> int:
+        """Return latest successful phase index in history, or -1 when absent."""
+        latest = -1
+        expected_phase = getattr(phase, "value", phase)
+        for index, result in enumerate(context.phase_history):
+            result_phase = getattr(result.phase, "value", result.phase)
+            if result_phase == expected_phase and result.success:
+                latest = index
+        return latest
+
+    def _retrieval_has_requirement_review(self, context: WorkflowContext) -> bool:
+        """A retrieval report may feed writing only after requirement Agent reviews it.
+
+        This enforces the domain collaboration loop:
+        requirement gaps -> retrieval evidence -> requirement confirmation -> writing.
+        The workflow engine does not decide whether the evidence is enough; it only
+        requires that the responsible requirement Agent has produced a newer round
+        after the latest retrieval round.
+        """
+        latest_retrieval = self._latest_phase_history_index(context, WorkflowPhase.RETRIEVAL)
+        if latest_retrieval < 0:
+            return False
+        latest_requirement = self._latest_phase_history_index(context, WorkflowPhase.REQUIREMENT)
+        return latest_requirement > latest_retrieval
+
+    def _blockers_only_require_retrieval_review(self, blockers: List[Dict[str, str]]) -> bool:
+        return bool(blockers) and all(
+            item.get("code") == "retrieval_needs_requirement_review"
+            for item in blockers
+        )
+
     async def _ensure_prewriting_ready(
         self,
         context: WorkflowContext,
         event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
-        max_attempts: int = 3,
+        phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None | Awaitable[None]]] = None,
+        checkpoint_callback: Optional[Callable[[WorkflowContext, str], None | Awaitable[None]]] = None,
+        max_attempts: int = 8,
     ) -> bool:
         attempts = int(context.metadata.get("prewriting_gate_attempts", 0) or 0)
 
@@ -2470,6 +2986,11 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             blockers = self._collect_prewriting_blockers(context)
             if not blockers:
                 context.metadata.pop("prewriting_gate_blockers", None)
+                remediation = context.metadata.get("quality_remediation")
+                if isinstance(remediation, dict) and str(
+                    remediation.get("classification") or ""
+                ).startswith("prewriting_"):
+                    context.metadata.pop("quality_remediation", None)
                 context.metadata["prewriting_gate_passed"] = True
                 if attempts and event_callback:
                     event_callback(
@@ -2505,11 +3026,53 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                     },
                 )
 
+            needs_requirement_review = any(
+                item.get("code") == "retrieval_needs_requirement_review"
+                for item in blockers
+            )
+            if needs_requirement_review:
+                if event_callback:
+                    event_callback(
+                        "CEO Agent",
+                        "agent.dispatch",
+                        "🎯 检索结果已更新，先交回 → 需求分析 Agent 复核缺口关闭情况",
+                        {
+                            "from_agent": "CEO Agent",
+                            "to_agent": _PHASE_DISPLAY_NAMES.get(
+                                WorkflowState.REQUIREMENT_ANALYSIS,
+                                "需求分析 Agent",
+                            ),
+                            "phase": "prewriting_gate",
+                            "task_description": issue_text[:1200],
+                            "attempt": attempts,
+                        },
+                    )
+                context.latest_revision_suggestions = [issue_text]
+                await self._execute_remediation_phase(
+                    context,
+                    WorkflowState.REQUIREMENT_ANALYSIS,
+                    event_callback=event_callback,
+                    phase_callback=phase_callback,
+                    checkpoint_callback=checkpoint_callback,
+                )
+                continue
+
             needs_user_input = self._prewriting_requires_user_input(blockers)
             retrieval_only = self._prewriting_blockers_are_retrieval_only(blockers)
-            retrieval_max_attempts = max(max_attempts, 6)
+            retrieval_max_attempts = max(max_attempts, 10)
             effective_max_attempts = retrieval_max_attempts if retrieval_only else max_attempts
             should_discuss_with_user = attempts >= effective_max_attempts
+            if should_discuss_with_user and not needs_user_input and not retrieval_only:
+                has_requirement_blocker = any(
+                    item.get("phase") == WorkflowState.REQUIREMENT_ANALYSIS.value
+                    for item in blockers
+                )
+                if has_requirement_blocker:
+                    # Requirement-stage gaps such as implementation variants,
+                    # feature mappings, and interaction details should be
+                    # refined by the requirement Agent before asking the user.
+                    effective_max_attempts = max(effective_max_attempts, 12)
+                    should_discuss_with_user = attempts >= effective_max_attempts
             if should_discuss_with_user:
                 context.current_phase = WorkflowState.AWAITING_USER_DECISION
                 if retrieval_only and not needs_user_input:
@@ -2524,7 +3087,11 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                         if needs_user_input
                         else "prewriting_gate_blocked"
                     )
-                    hold_message = "⏸️ 撰写前还缺少必须由用户确认的信息，已暂停自动流程。"
+                    hold_message = (
+                        "⏸️ 撰写前置闭环已达到自动处理上限，需要与用户讨论后继续。"
+                        if not needs_user_input
+                        else "⏸️ 撰写前还缺少必须由用户确认的信息，已暂停自动流程。"
+                    )
                 context.metadata["quality_remediation"] = {
                     "classification": classification,
                     "missing_information": [item["message"] for item in blockers],
@@ -2550,6 +3117,10 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                     WorkflowState.AWAITING_USER_DECISION,
                     "waiting",
                 )
+                if checkpoint_callback:
+                    result = checkpoint_callback(context, "prewriting_gate_waiting")
+                    if asyncio.iscoroutine(result):
+                        await result
                 return False
 
             attempts += 1
@@ -2581,8 +3152,13 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 context,
                 phase,
                 event_callback=event_callback,
+                phase_callback=phase_callback,
+                checkpoint_callback=checkpoint_callback,
             )
-            if phase == WorkflowState.REQUIREMENT_ANALYSIS:
+            if (
+                phase == WorkflowState.REQUIREMENT_ANALYSIS
+                and not self._blockers_only_require_retrieval_review(blockers)
+            ):
                 if event_callback:
                     event_callback(
                         "CEO Agent",
@@ -2602,6 +3178,8 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                     context,
                     WorkflowState.RETRIEVAL_ANALYSIS,
                     event_callback=event_callback,
+                    phase_callback=phase_callback,
+                    checkpoint_callback=checkpoint_callback,
                 )
 
     async def _execute_remediation_phase(
@@ -2609,6 +3187,8 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         context: WorkflowContext,
         phase_state: WorkflowState,
         event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
+        phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None | Awaitable[None]]] = None,
+        checkpoint_callback: Optional[Callable[[WorkflowContext, str], None | Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         """复用现有 phase prompt/normalize 逻辑执行单个补救阶段。"""
         if phase_state not in _PHASE_TO_PROFILE or phase_state not in _PHASE_CONTEXT_FIELDS:
@@ -2618,6 +3198,10 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         service = _get_agent_factory()
         context.current_phase = phase_state
         await self._publish_progress_event(context, phase_state, "running")
+        if checkpoint_callback:
+            result = checkpoint_callback(context, f"{phase_state.value}_remediation_running")
+            if asyncio.iscoroutine(result):
+                await result
 
         task_desc = self._build_phase_continuation_prompt(
             context,
@@ -2654,13 +3238,17 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             )
             agent_text = agent_result.get("text", "")
             agent_tool_results = agent_result.get("tool_results", [])
-            parsed = self._try_parse_json(agent_text)
-            if "raw_output" not in parsed:
-                context_data = parsed
-            else:
-                context_data = {"agent": phase_state.value, "output": agent_text, "summary": agent_text[:500]}
-            if agent_tool_results:
-                context_data["tool_results"] = agent_tool_results
+            agent_profile_id = {
+                WorkflowState.REQUIREMENT_ANALYSIS: "requirement_analyst",
+                WorkflowState.RETRIEVAL_ANALYSIS: "retrieval_analyst",
+                WorkflowState.QUALITY_REVIEW: "quality_reviewer",
+            }.get(phase_state, phase_state.value)
+            context_data = self._build_context_data_from_agent_response(
+                agent_profile_id,
+                agent_text,
+                agent_tool_results,
+                agent_result.get("structured_result"),
+            )
 
         context_field = _PHASE_CONTEXT_FIELDS[phase_state]
         context_data = self._normalize_phase_output(context_field, context_data)
@@ -2694,15 +3282,14 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 phase_state,
                 reason="remediation_phase_completed",
             )
-        context.add_phase_result(
-            PhaseResult(
-                phase=phase_enum,
-                success=not agent_failed,
-                duration_seconds=phase_duration,
-                output=context_data if isinstance(context_data, dict) else {},
-                issues=[str(context_data.get("_agent_error", ""))] if agent_failed and isinstance(context_data, dict) else [],
-            )
+        phase_result = PhaseResult(
+            phase=phase_enum,
+            success=not agent_failed,
+            duration_seconds=phase_duration,
+            output=context_data if isinstance(context_data, dict) else {},
+            issues=[str(context_data.get("_agent_error", ""))] if agent_failed and isinstance(context_data, dict) else [],
         )
+        context.add_phase_result(phase_result)
 
         if event_callback:
             event_callback(
@@ -2713,6 +3300,17 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             )
 
         await self._publish_progress_event(context, phase_state, "failed" if agent_failed else "completed")
+        if phase_callback:
+            result = phase_callback(phase_state, phase_result)
+            if asyncio.iscoroutine(result):
+                await result
+        if checkpoint_callback:
+            result = checkpoint_callback(
+                context,
+                f"{phase_state.value}_remediation_{'failed' if agent_failed else 'completed'}",
+            )
+            if asyncio.iscoroutine(result):
+                await result
         return context_data if isinstance(context_data, dict) else {}
 
     def _extract_review_issues(self, review_report: Dict[str, Any]) -> List[str]:
@@ -3653,9 +4251,16 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 
     def _build_revision_prompt(self, context: WorkflowContext, review_issues: List[str]) -> str:
         """构建修正撰写的prompt，包含审查问题和原有草稿"""
-        draft_summary = json.dumps(context.patent_draft, ensure_ascii=False)[:2000]
-        requirement_summary = json.dumps(context.requirement_analysis, ensure_ascii=False)[:3000]
-        retrieval_summary = json.dumps(context.retrieval_report, ensure_ascii=False)[:2000]
+        draft_output = self._latest_phase_output(context, WorkflowPhase.WRITING, "patent_draft")
+        requirement_output = self._latest_phase_output(
+            context, WorkflowPhase.REQUIREMENT, "requirement_analysis"
+        )
+        retrieval_output = self._latest_phase_output(
+            context, WorkflowPhase.RETRIEVAL, "retrieval_report"
+        )
+        draft_summary = json.dumps(draft_output or context.patent_draft, ensure_ascii=False)[:2000]
+        requirement_summary = json.dumps(requirement_output, ensure_ascii=False)[:3000]
+        retrieval_summary = json.dumps(retrieval_output, ensure_ascii=False)[:2000]
         issues_text = "\n".join(f"  {i+1}. {issue}" for i, issue in enumerate(review_issues))
         draft_failed = (
             not isinstance(context.patent_draft, dict)
@@ -3713,8 +4318,14 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         
         返回前端期望的结构化 dict。
         """
-        req_data = json.dumps(context.requirement_analysis, ensure_ascii=False)[:2000] if context.requirement_analysis else ""
-        ret_data = json.dumps(context.retrieval_report, ensure_ascii=False)[:1500] if context.retrieval_report else ""
+        requirement_output = self._latest_phase_output(
+            context, WorkflowPhase.REQUIREMENT, "requirement_analysis"
+        )
+        retrieval_output = self._latest_phase_output(
+            context, WorkflowPhase.RETRIEVAL, "retrieval_report"
+        )
+        req_data = json.dumps(requirement_output, ensure_ascii=False)[:2000] if requirement_output else ""
+        ret_data = json.dumps(retrieval_output, ensure_ascii=False)[:1500] if retrieval_output else ""
         task_context = str(base_task or "").strip()
         tech_content = "\n\n".join(
             part
@@ -3724,8 +4335,8 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 if context.get_shared_agent_context_text(8000)
                 else "",
                 context.original_description,
-                json.dumps(context.requirement_analysis or {}, ensure_ascii=False),
-                json.dumps(context.retrieval_report or {}, ensure_ascii=False),
+                json.dumps(requirement_output or {}, ensure_ascii=False),
+                json.dumps(retrieval_output or {}, ensure_ascii=False),
             ]
             if part
         )
@@ -4358,6 +4969,12 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 missing_items.append(label)
         if not str(abstract_text or "").strip():
             missing_items.append("说明书摘要")
+        requirement_output = self._latest_phase_output(
+            context, WorkflowPhase.REQUIREMENT, "requirement_analysis"
+        )
+        retrieval_output = self._latest_phase_output(
+            context, WorkflowPhase.RETRIEVAL, "retrieval_report"
+        )
 
         repair_prompt = f"""上一轮专利撰写输出不完整，请作为专利撰写 Agent 继续补齐，不要从头重写。
 
@@ -4365,10 +4982,10 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 {context.original_description[:8000]}
 
 【需求分析】
-{json.dumps(context.requirement_analysis or {}, ensure_ascii=False)[:3000]}
+{json.dumps(requirement_output or {}, ensure_ascii=False)[:3000]}
 
 【检索报告】
-{json.dumps(context.retrieval_report or {}, ensure_ascii=False)[:3000]}
+{json.dumps(retrieval_output or {}, ensure_ascii=False)[:3000]}
 
 【已完成权利要求】
 {json.dumps(claims_data or {}, ensure_ascii=False)[:6000]}
@@ -4532,7 +5149,46 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 
         if agent_tool_results:
             context_data["tool_results"] = agent_tool_results
-        return context_data
+        return self._unwrap_agent_envelope(context_field="", data=context_data)
+
+    def _unwrap_agent_envelope(self, context_field: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract structured JSON from Hermes Agent response envelopes.
+
+        Hermes returns the Agent's natural final answer inside fields such as
+        final_response/message/content. The workflow contract must validate that
+        inner answer, while preserving tool traces for the UI. This is parsing
+        only; it never invents missing phase fields.
+        """
+        if not isinstance(data, dict) or not data:
+            return data
+        if data.get("failed") is True or data.get("_agent_failed") is True:
+            return data
+
+        envelope_keys = ("final_response", "message", "content", "text", "output")
+        for key in envelope_keys:
+            raw_value = data.get(key)
+            if not isinstance(raw_value, str) or not raw_value.strip():
+                continue
+            parsed = self._try_parse_json(raw_value.strip())
+            if not parsed or "raw_output" in parsed:
+                continue
+            normalized = dict(parsed)
+            for preserve_key in (
+                "tool_results",
+                "_agent_tool_results",
+                "events",
+                "steps",
+                "agent",
+            ):
+                if preserve_key in data and preserve_key not in normalized:
+                    normalized[preserve_key] = data[preserve_key]
+            normalized["_agent_envelope_normalized"] = True
+            normalized["_raw_final_response"] = raw_value[:2000]
+            if context_field:
+                normalized["_context_field"] = context_field
+            return normalized
+
+        return data
 
     def _has_contract_value(self, value: Any) -> bool:
         if isinstance(value, dict):
@@ -4665,6 +5321,8 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         """
         if not isinstance(data, dict):
             return data
+
+        data = self._unwrap_agent_envelope(context_field, data)
 
         if context_field == "review_report" and (
             isinstance(data.get("final_response"), str)
@@ -5684,7 +6342,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 configured_timeout = int(getattr(settings.workflow, "agent_timeout", 600) or 600)
             except Exception:
                 configured_timeout = 600
-            AGENT_TIMEOUT_SECONDS = max(configured_timeout, 900)
+            AGENT_TIMEOUT_SECONDS = max(60, configured_timeout)
             deadline = asyncio.get_event_loop().time() + AGENT_TIMEOUT_SECONDS
             while not result_holder["done"] or events:
                 if asyncio.get_event_loop().time() > deadline:

@@ -2,8 +2,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T12:06:39.656134",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:41:39.913086",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -18,8 +18,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T12:07:40.216520",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:41:42.913534",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -34,8 +34,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T12:13:46.009088",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:41:45.912962",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -50,8 +50,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:33:33.682397",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:41:48.915512",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -66,8 +66,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:33:33.696519",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:41:51.916002",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -82,8 +82,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:33:36.672741",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:41:54.914060",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -98,8 +98,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:33:39.674621",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:41:57.917979",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -114,8 +114,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:33:42.678435",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:00.918929",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -130,8 +130,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:33:45.672996",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:03.917016",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -146,8 +146,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:33:48.673937",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:06.917134",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -162,8 +162,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:33:51.672357",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:09.916126",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -178,8 +178,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:33:54.674997",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:12.915622",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -194,8 +194,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:33:57.674762",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:15.908288",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -210,8 +210,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:34:00.676747",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:18.913651",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -226,8 +226,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:34:03.674752",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:21.916539",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -242,8 +242,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:34:06.678639",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:24.917588",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -258,8 +258,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:34:09.673002",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:27.918049",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -274,8 +274,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:34:12.674861",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:30.917075",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -290,8 +290,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:34:15.674549",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:33.913303",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -306,8 +306,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:34:18.674431",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:36.915540",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -322,8 +322,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:34:21.674814",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:39.916667",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -338,8 +338,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T21:34:24.678251",
-    "iteration_count": 2,
+    "generated_at": "2026-06-17T21:42:42.917039",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -354,8 +354,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T22:06:38.562206",
-    "iteration_count": 0,
+    "generated_at": "2026-06-17T21:42:45.916688",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -370,8 +370,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T22:06:38.799928",
-    "iteration_count": 0,
+    "generated_at": "2026-06-17T21:42:48.918337",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -386,8 +386,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T22:06:41.483392",
-    "iteration_count": 0,
+    "generated_at": "2026-06-17T21:42:51.918240",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -402,8 +402,8 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-16T22:06:44.479314",
-    "iteration_count": 0,
+    "generated_at": "2026-06-17T21:42:54.918608",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -417,9 +417,9 @@
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-17T01:05:37.874622",
-    "iteration_count": 0,
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-17T21:42:57.914944",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -429,13 +429,13 @@
       "generate-verifier",
       "feedback-remediation-loop"
     ],
-    "quality_remediation_required": false
+    "quality_remediation_required": true
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-17T01:05:37.892260",
-    "iteration_count": 0,
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-17T21:43:00.914465",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -445,13 +445,13 @@
       "generate-verifier",
       "feedback-remediation-loop"
     ],
-    "quality_remediation_required": false
+    "quality_remediation_required": true
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-17T01:12:36.370835",
-    "iteration_count": 0,
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-17T21:43:03.907961",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -461,13 +461,13 @@
       "generate-verifier",
       "feedback-remediation-loop"
     ],
-    "quality_remediation_required": false
+    "quality_remediation_required": true
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-17T01:12:36.384052",
-    "iteration_count": 0,
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-17T21:43:06.915147",
+    "iteration_count": 8,
     "review_recommendation": "",
     "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
@@ -477,6 +477,6 @@
       "generate-verifier",
       "feedback-remediation-loop"
     ],
-    "quality_remediation_required": false
+    "quality_remediation_required": true
   }
 ]

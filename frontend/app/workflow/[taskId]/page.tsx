@@ -122,6 +122,10 @@ function getAgentStatus(
   if (phaseResult) {
     return phaseResult.success ? 'completed' : 'error';
   }
+
+  if (workflow.current_state === 'awaiting_user_decision') {
+    return 'idle';
+  }
   
   // 如果工作流已终止且没有该阶段记录，返回 idle
   if (terminalStates.has(workflow.current_state)) {
@@ -134,6 +138,38 @@ function getAgentStatus(
   if (agentIndex < currentIndex || currentState === 'completed') return 'completed';
   if (agentIndex === currentIndex) return 'working';
   return 'idle';
+}
+
+function getCompletedWorkflowStepStates(workflow: WorkflowResponse | null): Set<WorkflowState> {
+  const completed = new Set<WorkflowState>();
+  if (!workflow) return completed;
+
+  const phaseToState: Record<string, WorkflowState> = {
+    brainstorming: 'initial',
+    brainstorm: 'initial',
+    requirement: 'requirement',
+    requirement_analysis: 'requirement',
+    retrieval: 'retrieval',
+    retrieval_analysis: 'retrieval',
+    writing: 'writing',
+    patent_writing: 'writing',
+    review: 'reviewing',
+    reviewing: 'reviewing',
+    quality_review: 'reviewing',
+    iteration: 'reviewing',
+  };
+
+  workflow.phase_history.forEach((phase) => {
+    if (!phase.success) return;
+    const stepState = phaseToState[phase.phase];
+    if (stepState) completed.add(stepState);
+  });
+  return completed;
+}
+
+function getQualityRemediationClassification(workflow: WorkflowResponse | null): string {
+  const classification = workflow?.quality_remediation?.classification;
+  return typeof classification === 'string' ? classification : '';
 }
 
 function createAgents(currentState: WorkflowState, workflow: WorkflowResponse | null): AgentInfo[] {
@@ -665,6 +701,10 @@ export default function WorkflowPage() {
     return workflowSteps.findIndex((step) => step.state === currentState);
   }, [currentState, workflow]);
   const agents = useMemo(() => createAgents(currentState, workflow), [currentState, workflow]);
+  const completedWorkflowStepStates = useMemo(
+    () => getCompletedWorkflowStepStates(workflow),
+    [workflow]
+  );
   const historyLogs = useMemo(() => (taskId ? createHistoryLogs(workflow, taskId) : []), [workflow, taskId]);
   // SSE事件优先；如果有实时事件则只用SSE数据（更详细），否则用历史回放
   const allLogs = useMemo(
@@ -675,6 +715,13 @@ export default function WorkflowPage() {
   const isTerminal = workflow ? terminalStates.has(workflow.current_state) : false;
   const isRunning = Boolean(workflow && !isInitialized && !isTerminal);
   const canRestart = Boolean(workflow && workflow.current_state !== 'completed');
+  const qualityRemediationClassification = getQualityRemediationClassification(workflow);
+  const isPrewritingBlocked =
+    workflow?.current_state === 'awaiting_user_decision' &&
+    qualityRemediationClassification.startsWith('prewriting');
+  const isRetrievalDiscussionBlocked =
+    workflow?.current_state === 'awaiting_user_decision' &&
+    qualityRemediationClassification === 'retrieval_evidence_discussion_required';
 
   const loadWorkflow = useCallback(async (showLoading = false) => {
     if (!taskId) {
@@ -1009,9 +1056,19 @@ export default function WorkflowPage() {
           <Card className="mb-xl border-purple-200 bg-purple-50" data-testid="quality-remediation-card">
             <CardContent className="pt-lg space-y-md">
               <div>
-                <h2 className="text-body-md-medium font-medium text-purple-900">质量未达标，等待补充信息</h2>
+                <h2 className="text-body-md-medium font-medium text-purple-900">
+                  {isRetrievalDiscussionBlocked
+                    ? '检索证据不足，等待补充线索'
+                    : isPrewritingBlocked
+                      ? '撰写前信息不足，等待补充确认'
+                      : '质量未达标，等待补充信息'}
+                </h2>
                 <p className="text-body-sm text-purple-800 mt-xs">
-                  当前流程没有失败，但还缺少继续自动修复所需的信息。你可以直接继续自动修复，或先补充信息再继续。
+                  {isRetrievalDiscussionBlocked
+                    ? '多轮补检后仍缺少可核验证据。请补充检索线索或继续自动补检，系统会从上一轮结果继续推进。'
+                    : isPrewritingBlocked
+                      ? '需求分析或检索缺口尚未关闭，系统不会直接进入撰写。请补充技术事实或继续自动修复。'
+                      : '当前流程没有失败，但还缺少继续自动修复所需的信息。你可以直接继续自动修复，或先补充信息再继续。'}
                 </p>
               </div>
               {Array.isArray(workflow.quality_remediation?.missing_information) && workflow.quality_remediation.missing_information.length > 0 && (
@@ -1076,8 +1133,13 @@ export default function WorkflowPage() {
             <div className="flex w-full min-w-0 items-center gap-lg overflow-x-auto overflow-y-hidden pb-md">
               {workflowSteps.map((step, index) => {
                 const Icon = step.icon;
-                const isCompleted = index < currentStepIndex || currentState === 'completed';
-                const isCurrent = index === currentStepIndex && currentState !== 'completed';
+                const isAwaitingDecision = workflow?.current_state === 'awaiting_user_decision';
+                const isCompleted = isAwaitingDecision
+                  ? completedWorkflowStepStates.has(step.state)
+                  : index < currentStepIndex || currentState === 'completed';
+                const isCurrent = isAwaitingDecision
+                  ? step.state === 'awaiting_user_decision'
+                  : index === currentStepIndex && currentState !== 'completed';
 
                 return (
                   <div key={step.state} className="flex flex-none items-center">
