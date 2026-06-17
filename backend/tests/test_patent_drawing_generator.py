@@ -32,8 +32,9 @@ async def test_patent_drawing_generator_uses_system_image_config(monkeypatch, tm
     tool = PatentDrawingGeneratorTool(exports_root=tmp_path)
     result = await tool.execute(
         task_id="drawing-task",
-        tech_description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
-        title="Cave折幕空间视频补偿系统结构示意图",
+        tech_description="一种根据传感器数据调节多显示面姿态并保持画面连续性的显示处理方法。",
+        title="多显示面姿态协同处理系统结构示意图",
+        description="示出传感器、姿态控制模块、画面映射模块、显示面阵列以及处理控制单元之间的连接关系。",
     )
 
     assert result["success"] is True
@@ -46,11 +47,13 @@ async def test_patent_drawing_generator_uses_system_image_config(monkeypatch, tm
     assert result["data"]["drawings"] == [
         {
             "figure_number": "图1",
-            "title": "Cave折幕空间视频补偿系统结构示意图",
-            "description": "一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+            "title": "多显示面姿态协同处理系统结构示意图",
+            "description": "示出传感器、姿态控制模块、画面映射模块、显示面阵列以及处理控制单元之间的连接关系。",
             "file_path": str(tmp_path / "drawing-task" / "draft" / "drawings" / "fig1.png"),
             "artifact_url": "/api/v1/workflows/drawing-task/artifacts/draft/drawings/fig1.png",
             "mime_type": "image/png",
+            "prompt_version": "patent_drawing_v3",
+            "layout": "figure_1",
         }
     ]
 
@@ -82,6 +85,8 @@ async def test_patent_drawing_generator_uses_resolved_image_config(monkeypatch, 
     result = await tool.execute(
         task_id="llm-config-task",
         tech_description="一种基于传感器检测身高并调整屏幕姿态的系统。",
+        title="姿态调节显示系统结构示意图",
+        description="示出身高检测传感器、姿态驱动组件、显示控制器和显示屏之间的信号连接关系。",
     )
 
     assert result["success"] is True

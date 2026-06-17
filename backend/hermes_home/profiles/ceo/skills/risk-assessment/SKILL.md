@@ -21,4 +21,4 @@ metadata:
 
 ## 工具使用
 
-- `risk_analyzer` - 分析专利风险因素
+- `risk_analyzer` - 提取专利风险客观信号

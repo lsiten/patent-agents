@@ -103,5 +103,5 @@ class PatentService:
                 {"name": "质量审查Agent", "description": "合规性检查", "status": "idle"},
             ],
             "knowledge_base_count": kb_count,
-            "data_sources": ["uspto", "epo", "cnipa", "google_patents", "arxiv"],
+            "data_sources": ["google_patents", "uspto", "arxiv"],
         }

@@ -15,7 +15,7 @@
 |------|------|
 | 🤖 **多智能体协作** | 5个专业Agent各司其职，CEO Agent全局协调 |
 | 📚 **专业知识库** | 内置定稿专利知识库，写作风格参考与一致性保证 |
-| 🔍 **多源检索** | 对接USPTO、EPO、CNIPA、Google Patents、arXiv等 |
+| 🔍 **多源检索** | 按真实配置接入 Google Patents、USPTO、arXiv；不可用来源跳过并记录 |
 | ✅ **智能审查** | 形式+实质双重审查，降低审查意见风险 |
 | 🎨 **现代UI** | MongoDB Design System 设计语言，流畅用户体验 |
 | 🔄 **实时监控** | SSE事件流推送，工作流进度可视化 |
@@ -52,8 +52,8 @@
 ├──────────────────┬──────────────────┬───────────────────────────┤
 │  定稿专利知识库  │  多源专利数据库  │    向量检索引擎 (可选)     │
 │  • 风格参考      │  • USPTO         │    • FAISS / Milvus        │
-│  • 写作范例      │  • EPO           │    • 相似专利匹配          │
-│  • 质量评分      │  • CNIPA         │    • 现有技术比对          │
+│  • 写作范例      │  • USPTO         │    • 相似专利匹配          │
+│  • 质量评分      │  • Google Patents│    • 现有技术比对          │
 │                  │  • Google Patents│                           │
 │                  │  • arXiv          │                           │
 └──────────────────┴──────────────────┴───────────────────────────┘
@@ -132,7 +132,7 @@ patent-agents/
 │   │   │   ├── patent_writer.py      # 专利撰写 Agent
 │   │   │   └── quality_reviewer.py   # 质量审查 Agent
 │   │   ├── core/                     # 🔧 核心组件
-│   │   │   └── workflow.py           # 状态机与工作流引擎
+│   │   │   └── workflow_engine.py    # Hermes Agent 工作流引擎
 │   │   ├── models/                   # 📊 数据模型
 │   │   │   ├── domain.py             # 领域模型
 │   │   │   ├── enums.py              # 枚举定义
@@ -242,11 +242,9 @@ patent-agents/
 **支持的数据源**:
 | 数据源 | 状态 | 说明 |
 |--------|------|------|
+| Google Patents | ✅ | 公开专利检索 |
 | USPTO | ✅ | 美国专利商标局开放API |
-| EPO | ✅ | 欧洲专利局OPS服务 |
-| Google Patents | ✅ | 浏览器自动化检索 |
 | arXiv | ✅ | 学术论文检索 |
-| CNIPA | 🚧 | 中国国家知识产权局 |
 
 ---
 
@@ -375,8 +373,6 @@ LLM_MODEL=gpt-4-turbo-preview
 
 # 数据源配置
 USPTO_API_KEY=xxx
-EPO_CONSUMER_KEY=xxx
-EPO_CONSUMER_SECRET=xxx
 
 # 工作流配置
 MAX_ITERATIONS=3
@@ -495,7 +491,7 @@ vercel --prod
 |------|------|------|
 | v1.0 | 核心多智能体框架 + 前端界面 | ✅ 完成 |
 | v1.1 | 接入真实 LLM API + 向量检索 | 🚧 进行中 |
-| v1.2 | CNIPA中文专利数据库对接 | 📅 计划 |
+| v1.2 | 更多官方/专业专利源真实连接器 | 📅 计划 |
 | v1.3 | PDF/DOCX 专业格式导出 | 📅 计划 |
 | v1.4 | 电子申请系统对接 | 📅 计划 |
 | v2.0 | Agent 自学习与知识库进化 | 📅 规划 |

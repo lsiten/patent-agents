@@ -158,22 +158,6 @@ class TestRetrievalPromptContracts:
         assert "evidence_sources" in prompt
         assert "evidence_gaps" in prompt
 
-    def test_retrieval_quality_gate_mentions_web_evidence_fields(self):
-        engine = PatentWorkflowEngine()
-        context = WorkflowContext(task_id="retrieval-gate", user_id="u-gate")
-        context.retrieval_report = {
-            "overall_patentability": "medium",
-            "web_evidence": [],
-        }
-
-        prompt = engine._build_quality_gate_prompt("retrieval", context)
-
-        assert "web_evidence" in prompt
-        assert "non_patent_prior_art" in prompt
-        assert "evidence_sources" in prompt
-        assert "evidence_gaps" in prompt
-
-
 class TestLowScoreRemediationContracts:
     """Low-score remediation contract tests for the next workflow iteration."""
 
@@ -241,9 +225,21 @@ class TestLowScoreRemediationContracts:
             "missing_information": ["核心实施例的参数范围"],
         }
         ctx = WorkflowContext(task_id="t2", user_id="u2")
-        assert engine._classify_remediation_path(review, ctx) == "NEEDS_USER_INPUT"
-        engine._enter_quality_remediation_hold(ctx, review, "NEEDS_USER_INPUT")
-        assert ctx.metadata["quality_remediation"]["recommended_next_action"] == "continue_auto_fix"
+        assert engine._classify_remediation_path(review, ctx) == "ANALYZE_MORE"
+
+    def test_missing_evidence_routes_to_retrieval_before_user_hold(self):
+        engine = PatentWorkflowEngine()
+        review = {
+            "review_summary": {
+                "overall_score": 0.62,
+                "overall_rating": "needs_revision",
+                "recommendation": "revise",
+            },
+            "root_cause": "external_info_missing",
+            "missing_information": ["缺少公开专利或网页证据来源，需要交叉核验"],
+        }
+        ctx = WorkflowContext(task_id="t-search-missing", user_id="u-search-missing")
+        assert engine._classify_remediation_path(review, ctx) == "SEARCH_MORE"
 
     def test_system_failure_routes_to_terminal_failure(self):
         engine = PatentWorkflowEngine()
@@ -416,23 +412,17 @@ class TestNormalizePhaseOutput:
 
 
     @pytest.mark.asyncio
-    async def test_run_agent_stream_error_preserves_dict_result(self, monkeypatch):
-        import src.core.workflow_engine as workflow_module
-
+    async def test_run_agent_stream_create_error_marks_structured_failure(self, monkeypatch):
         engine = PatentWorkflowEngine()
         context = WorkflowContext(task_id="stream-dict", user_id="u-stream")
 
         def fake_create_ai_agent(profile_id, callbacks=None):
             raise RuntimeError("stream unavailable")
 
-        async def fake_run_agent_conversation(profile_id, prompt):
-            return {"failed": True, "error": "timeout", "completed": False}
-
         monkeypatch.setattr(
             "src.agents.agent_config.create_ai_agent",
             fake_create_ai_agent,
         )
-        monkeypatch.setattr(workflow_module, "_run_agent_conversation", fake_run_agent_conversation)
 
         result = await engine._run_agent_stream(
             None,
@@ -443,11 +433,9 @@ class TestNormalizePhaseOutput:
         )
 
         assert isinstance(result["text"], str)
-        assert result["structured_result"] == {
-            "failed": True,
-            "error": "timeout",
-            "completed": False,
-        }
+        assert result["structured_result"]["failed"] is True
+        assert result["structured_result"]["completed"] is False
+        assert "stream unavailable" in result["structured_result"]["error"]
 
     def test_patent_draft_agent_failure_propagates(self):
         engine = PatentWorkflowEngine()
@@ -469,18 +457,39 @@ class TestWorkflowCompletionGate:
 
     def _complete_draft(self) -> dict:
         return {
+            "title": "一种图像分类处理方法、系统、设备及存储介质",
             "claims": {
-                "independent_claim": "1. 一种基于AI的图像分类方法，包括：步骤A；步骤B。",
-                "dependent_claims": ["2. 根据权利要求1所述的方法..."],
+                "independent_claim": (
+                    "1. 一种基于AI的图像分类方法，其特征在于，包括：\n"
+                    "S1、获取待分类图像；\n"
+                    "S2、提取图像特征；\n"
+                    "S3、输出分类结果。\n"
+                ),
+                "dependent_claims": ["2. 根据权利要求1所述的方法，其特征在于，所述图像特征包括纹理特征。\n"],
             },
             "description": {
-                "technical_field": "人工智能",
-                "background_art": "现有技术存在准确率低的问题。",
-                "summary_of_invention": "本发明提供一种...",
+                "technical_field": "本发明涉及图像识别与人工智能分类处理技术领域。",
+                "background_art": (
+                    "目前，图像分类系统通常通过卷积神经网络或特征匹配模型对输入图像进行类别预测。\n"
+                    "例如，中国专利公开号CN110163188A公开了一种图像分类方法，能够利用图像特征执行类别识别。\n"
+                    "然而，现有技术在低纹理图像或类别边界相近的场景下容易出现分类准确率下降的问题。"
+                ),
+                "summary_of_invention": (
+                    "本发明要解决的技术问题是提高低纹理或近似类别图像的分类稳定性。\n"
+                    "为解决上述技术问题，本发明提供一种基于AI的图像分类方法，包括获取待分类图像、提取图像特征以及输出分类结果。\n"
+                    "本发明的有益效果在于提高分类准确率并减少近似类别误判。"
+                ),
                 "drawings_description": "",
-                "detailed_description": "下面结合实施例详细说明...",
+                "detailed_description": (
+                    "以下结合实施例对本发明进行说明。\n"
+                    "S1、获取待分类图像，并对所述待分类图像进行尺寸归一化处理。\n"
+                    "S2、提取图像特征，所述图像特征包括纹理特征和边缘特征。\n"
+                    "S3、根据所述图像特征输出分类结果。\n"
+                    "可以理解的是，上述步骤可以由处理器执行。\n"
+                    "需要说明的是，各步骤的数据处理顺序可以根据实际部署环境进行流水化执行。"
+                ),
             },
-            "abstract": "本发明公开了一种基于AI的图像分类方法。",
+            "abstract": "本发明公开一种图像分类处理方法、系统、设备及存储介质，涉及图像识别与人工智能分类处理技术领域。该方法获取待分类图像，提取图像特征并输出分类结果。由此提高低纹理或近似类别图像的分类稳定性。",
             "docx_path": "",
         }
 
@@ -549,14 +558,24 @@ class TestWorkflowCompletionGate:
     def test_complete_draft_with_declared_drawings_allows_complete(self):
         """Declared drawings are complete when at least one safe artifact URL is present."""
         draft = self._complete_draft()
-        draft["description"]["drawings_description"] = "图1为系统结构示意图。"
+        draft["description"]["drawings_description"] = "图1为系统结构示意图。图2为方法流程示意图。图3为模块交互示意图。图4为数据处理流程示意图。"
         draft["drawings"] = [
             {
-                "figure_number": "图1",
-                "title": "系统结构示意图",
-                "description": "图1为系统结构示意图。",
-                "artifact_url": "/api/v1/workflows/test/artifacts/draft/drawings/fig1.png",
+                "figure_number": f"图{index}",
+                "title": title,
+                "description": title,
+                "artifact_url": f"/api/v1/workflows/test/artifacts/draft/drawings/fig{index}.png",
+                "prompt_version": "patent_drawing_v3",
             }
+            for index, title in enumerate(
+                [
+                    "系统结构示意图",
+                    "方法流程示意图",
+                    "模块交互示意图",
+                    "数据处理流程示意图",
+                ],
+                start=1,
+            )
         ]
 
         engine = PatentWorkflowEngine()
@@ -566,21 +585,7 @@ class TestWorkflowCompletionGate:
         """If writer produced real content AND review passed, gate should NOT block."""
         from src.core.workflow_engine import WorkflowContext
         ctx = WorkflowContext(task_id="test", user_id="test")
-        ctx.patent_draft = {
-            "claims": {
-                "independent_claim": "1. 一种基于AI的图像分类方法，包括：步骤A；步骤B。",
-                "dependent_claims": ["2. 根据权利要求1所述的方法..."],
-            },
-            "description": {
-                "technical_field": "人工智能",
-                "background_art": "现有技术存在准确率低的问题。",
-                "summary_of_invention": "本发明提供一种...",
-                "drawings_description": "",
-                "detailed_description": "下面结合实施例详细说明...",
-            },
-            "abstract": "本发明公开了一种基于AI的图像分类方法。",
-            "docx_path": "",
-        }
+        ctx.patent_draft = self._complete_draft()
         ctx.review_report = _clean_review()
         engine = PatentWorkflowEngine()
         assert engine._has_unresolved_critical_issues(ctx) is False

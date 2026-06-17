@@ -52,37 +52,6 @@ class DataSource(ABC):
 
 # ==================== 专利数据库数据源 ====================
 
-class CNIPASource(DataSource):
-    """中国国家知识产权局 (CNIPA) 数据源"""
-
-    def __init__(self, config: Optional[DataSourceConfig] = None):
-        default_config = DataSourceConfig(
-            source_id="cnipa",
-            name="中国国家知识产权局",
-            source_type="patent",
-            base_url="http://pss-system.cnipa.gov.cn",
-            enabled=True,
-            rate_limit=30,
-        )
-        super().__init__(config or default_config)
-
-    async def search(self, query: SearchQuery) -> List[PriorArtReference]:
-        """检索中国专利"""
-        await self._rate_limit()
-        logger.info(f"CNIPA检索: {query.query}")
-
-        # TODO: 实现真实的CNIPA API调用
-        # 注意: CNIPA有反爬机制，需要使用浏览器自动化
-        # 参考: playwright 实现
-        self.last_error = "CNIPA真实检索尚未接入，跳过该数据源，不返回结果"
-        logger.warning(self.last_error)
-        return []
-
-    async def get_details(self, reference_id: str) -> Optional[PriorArtReference]:
-        await self._rate_limit()
-        return None
-
-
 class UsptoSource(DataSource):
     """美国专利商标局 (USPTO) 数据源"""
 
@@ -146,34 +115,6 @@ class UsptoSource(DataSource):
             except Exception as e:
                 logger.debug(f"解析USPTO专利失败: {e}")
         return results
-
-    async def get_details(self, reference_id: str) -> Optional[PriorArtReference]:
-        await self._rate_limit()
-        return None
-
-
-class EpoSource(DataSource):
-    """欧洲专利局 (EPO) 数据源"""
-
-    def __init__(self, config: Optional[DataSourceConfig] = None):
-        default_config = DataSourceConfig(
-            source_id="epo",
-            name="欧洲专利局",
-            source_type="patent",
-            base_url="https://ops.epo.org",
-            enabled=True,
-            rate_limit=100,
-            auth_required=True,
-            credentials_env={"consumer_key": "EPO_CONSUMER_KEY", "consumer_secret": "EPO_CONSUMER_SECRET"},
-        )
-        super().__init__(config or default_config)
-
-    async def search(self, query: SearchQuery) -> List[PriorArtReference]:
-        await self._rate_limit()
-        logger.info(f"EPO检索: {query.query}")
-        # TODO: 实现EPO OPS API调用
-        self.last_error = "EPO OPS真实检索尚未接入或未配置认证，跳过该数据源"
-        return []
 
     async def get_details(self, reference_id: str) -> Optional[PriorArtReference]:
         await self._rate_limit()
@@ -483,14 +424,6 @@ class DataSourceManager:
         }
         if settings.patent_db.enable_google_patents:
             self.sources["google_patents"] = GooglePatentsSource()
-        if settings.patent_db.cnipa_api_token:
-            self.sources["cnipa"] = CNIPASource()
-        else:
-            logger.info("CNIPA data source disabled: CNIPA_API_TOKEN is not configured")
-        if settings.patent_db.epo_consumer_key and settings.patent_db.epo_consumer_secret:
-            self.sources["epo"] = EpoSource()
-        else:
-            logger.info("EPO data source disabled: EPO_CONSUMER_KEY/EPO_CONSUMER_SECRET not configured")
         if settings.patent_db.enable_arxiv:
             self.sources["arxiv"] = ArxivSource()
         self.web_fetcher = WebFetchSource()

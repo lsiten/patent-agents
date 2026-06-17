@@ -398,16 +398,6 @@ class PatentDBSettings(BaseSettings):
         alias="USPTO_API_URL"
     )
 
-    # EPO
-    epo_consumer_key: Optional[str] = Field(default=None, alias="EPO_CONSUMER_KEY")
-    epo_consumer_secret: Optional[str] = Field(
-        default=None,
-        alias="EPO_CONSUMER_SECRET"
-    )
-
-    # CNIPA
-    cnipa_api_token: Optional[str] = Field(default=None, alias="CNIPA_API_TOKEN")
-
     # Google Patents
     enable_google_patents: bool = Field(default=True, alias="ENABLE_GOOGLE_PATENTS")
 

@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 class PatentSearchTool(HermesTool):
     """专利检索工具 - 对接多源数据库"""
     name = "patent_search"
-    description = "在多源专利数据库(USPTO/EPO/CNIPA/Google Patents)中检索相关现有技术"
+    description = "在真实可用的多源专利数据库和公开资料源中检索相关现有技术"
 
     def _build_definition(self) -> HermesToolDefinition:
         return HermesToolDefinition(
@@ -30,7 +30,7 @@ class PatentSearchTool(HermesTool):
                 ),
                 "sources": HermesToolParameter(
                     type="string",
-                    description="数据源，逗号分隔: uspto,epo,cnipa,google_patents",
+                    description="数据源，逗号分隔: google_patents,uspto,arxiv；留空则使用全部可用真实数据源",
                     required=False,
                 ),
                 "limit": HermesToolParameter(
@@ -56,7 +56,7 @@ class PatentSearchTool(HermesTool):
                 if source.strip()
             ]
             if not source_list:
-                preferred_order = ["google_patents", "uspto", "epo", "cnipa", "arxiv"]
+                preferred_order = ["google_patents", "uspto", "arxiv"]
                 source_list = [
                     source_id
                     for source_id in preferred_order

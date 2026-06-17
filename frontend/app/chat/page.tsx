@@ -258,23 +258,15 @@ function resolveAgentName(data: unknown, defaultAgent = 'patent.ceo.v1'): string
 
 function getSuggestedPatentTitle(message?: ChatMessage | null): string | null {
   if (isRecord(message?.metadata?.patent_preflight)) {
-    const title = message?.metadata?.suggested_title;
+    const title = message.metadata.patent_preflight.patent_title;
     if (typeof title === 'string' && title.trim()) return title.trim();
   }
-
-  const content = message?.content ?? '';
-  const titleMatch = content.match(/专利名称[：:]\s*([^\n。；;]+)/);
-  const quotedTitleMatch = content.match(/建议名称为[“"]([^”"]+)[”"]/);
-  const title = (titleMatch?.[1] ?? quotedTitleMatch?.[1] ?? '').trim();
-  return title || null;
+  return null;
 }
 
 function isWorkflowStartRecommendation(message?: ChatMessage | null): boolean {
   if (!message || message.role !== 'assistant') return false;
-  if (message.metadata?.recommend_create_patent === true) return true;
-  const content = message.content ?? '';
-  return /已具备启动正式流程条件|启动前方案已确认|确认后进入正式专利申请流程/.test(content)
-    && Boolean(getSuggestedPatentTitle(message));
+  return message.metadata?.recommend_create_patent === true && Boolean(getSuggestedPatentTitle(message));
 }
 
 function conversationWorkflowState(conversation: ConversationSummary): string {
@@ -1126,8 +1118,9 @@ function ChatPageContent() {
           setIsLoading(false);
           sendingRef.current = false;
           if (data.has_recommendation) {
-            setSuggestedTitle(getSuggestedPatentTitle(data.message));
-            setRecommendStartWorkflow(true);
+            const title = getSuggestedPatentTitle(data.message);
+            setSuggestedTitle(title);
+            setRecommendStartWorkflow(Boolean(title));
           }
           void loadConversations();
         },

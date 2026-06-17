@@ -3,21 +3,14 @@
 Celery集成Redis broker，支持异步任务与定时任务
 """
 import asyncio
-from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, Optional, TypeVar
 from functools import wraps
 
 from celery import Celery, Task
-from celery.schedules import crontab
 from celery.signals import task_postrun, task_prerun, task_failure
 
 from .config import settings
 from .logging import get_logger
-from .events import (
-    publish_event,
-    TaskProgressUpdatedEvent,
-    TaskCompletedEvent,
-)
 
 logger = get_logger(__name__)
 
@@ -102,70 +95,6 @@ def async_task(bind: bool = False, **task_kwargs):
     return decorator
 
 
-# ========== 工作流任务定义 ==========
-
-@async_task(bind=True, max_retries=1, soft_time_limit=300)
-def run_patent_workflow_task(self, task_id: str, user_id: str, tech_description: str) -> Dict[str, Any]:
-    """
-    执行专利申请工作流的异步任务
-    这是一个长时间运行的任务，包含多个Agent的协同工作
-    """
-    logger.info("Starting patent workflow", task_id=task_id, user_id=user_id)
-
-    # 同步调用异步工作流（在Celery worker中运行事件循环）
-    loop = asyncio.get_event_loop()
-    result = loop.run_until_complete(
-        _run_workflow_async(self, task_id, user_id, tech_description)
-    )
-
-    return result
-
-
-async def _run_workflow_async(task_instance, task_id: str, user_id: str, tech_description: str) -> Dict[str, Any]:
-    """异步执行工作流"""
-    try:
-        from .workflow import PatentWorkflowOrchestrator
-
-        # 创建工作流编排器
-        orchestrator = PatentWorkflowOrchestrator(task_id=task_id, user_id=user_id)
-
-        # 发布开始事件
-        await publish_event(TaskProgressUpdatedEvent(
-            task_id=task_id,
-            user_id=user_id,
-            state="started",
-            progress=0,
-            message="工作流开始执行",
-        ))
-
-        # 执行工作流
-        result = await orchestrator.run(tech_description=tech_description)
-
-        # 发布完成事件
-        await publish_event(TaskCompletedEvent(
-            task_id=task_id,
-            user_id=user_id,
-            result=result,
-        ))
-
-        return {
-            "task_id": task_id,
-            "status": "completed",
-            "result": result,
-        }
-
-    except Exception as e:
-        logger.error("Workflow task failed", task_id=task_id, error=str(e), exc_info=True)
-        await publish_event(TaskProgressUpdatedEvent(
-            task_id=task_id,
-            user_id=user_id,
-            state="failed",
-            progress=100,
-            message=f"工作流执行失败: {str(e)}",
-        ))
-        raise
-
-
 @async_task(max_retries=2, soft_time_limit=120)
 def run_agent_task(
     agent_name: str,
@@ -217,88 +146,6 @@ async def _run_agent_async(
             error=str(e),
         )
         raise
-
-
-# ========== 定时任务定义 ==========
-
-@async_task
-def cleanup_expired_tasks() -> Dict[str, Any]:
-    """清理过期任务"""
-    logger.info("Running cleanup expired tasks job")
-
-    # TODO: 实现清理逻辑
-    # 1. 删除超过30天的已完成任务
-    # 2. 清理过期的临时文件
-    # 3. 归档旧数据
-
-    return {
-        "status": "completed",
-        "cleanup_time": datetime.now().isoformat(),
-    }
-
-
-@async_task
-def generate_daily_report() -> Dict[str, Any]:
-    """生成每日统计报告"""
-    logger.info("Running daily report job")
-
-    # TODO: 实现报告生成
-    # 1. 统计当天任务数
-    # 2. 统计成功率
-    # 3. 平均执行时间
-    # 4. Agent使用情况
-
-    return {
-        "status": "completed",
-        "report_time": datetime.now().isoformat(),
-    }
-
-
-@async_task
-def health_check() -> Dict[str, Any]:
-    """系统健康检查"""
-    logger.debug("Running health check")
-
-    # TODO: 实现健康检查
-    # 1. 数据库连接
-    # 2. Redis连接
-    # 3. LLM API可用性
-    # 4. Agent状态
-
-    return {
-        "status": "healthy",
-        "check_time": datetime.now().isoformat(),
-    }
-
-
-# ========== 定时任务配置 ==========
-
-def configure_periodic_tasks(app: Celery) -> None:
-    """配置定时任务"""
-    app.conf.beat_schedule = {
-        # 每小时执行一次清理
-        "cleanup-expired-tasks": {
-            "task": "src.core.tasks.cleanup_expired_tasks",
-            "schedule": timedelta(hours=1),
-        },
-        # 每天凌晨2点生成日报
-        "generate-daily-report": {
-            "task": "src.core.tasks.generate_daily_report",
-            "schedule": crontab(hour=2, minute=0),
-        },
-        # 每5分钟执行健康检查
-        "health-check": {
-            "task": "src.core.tasks.health_check",
-            "schedule": timedelta(minutes=5),
-        },
-    }
-
-    logger.info("Periodic tasks configured")
-
-
-# 如果Celery可用，配置定时任务
-if celery_app:
-    configure_periodic_tasks(celery_app)
 
 
 # ========== 任务事件处理 ==========
@@ -380,27 +227,6 @@ class LocalTaskExecutor:
 
 # 全局本地执行器实例
 local_executor = LocalTaskExecutor()
-
-
-# ========== 便捷函数 ==========
-
-def submit_workflow_task(task_id: str, user_id: str, tech_description: str) -> str:
-    """
-    提交工作流任务
-    返回任务ID
-    """
-    if celery_app:
-        # 使用Celery异步执行
-        result = run_patent_workflow_task.delay(task_id, user_id, tech_description)
-        logger.info("Workflow task submitted to Celery", celery_task_id=result.id)
-        return result.id
-    else:
-        # 使用本地执行器（异步在事件循环中运行）
-        asyncio.create_task(
-            _run_workflow_async(None, task_id, user_id, tech_description)
-        )
-        logger.info("Workflow task submitted to local executor")
-        return task_id
 
 
 def cancel_task(celery_task_id: str, patent_task_id: Optional[str] = None) -> bool:

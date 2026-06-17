@@ -26,8 +26,8 @@ metadata:
 
 ## 工具使用
 
-- `creative_thinking` - 激发创新思维
-- `patent_strategy_guide` - 提供专利策略建议
+- `creative_thinking` - 提取候选发散方向
+- `patent_strategy_guide` - 整理申请策略候选项和检查清单
 
 ## Agent 与工具边界
 

@@ -70,14 +70,14 @@ async def test_generate_patent_in_sections_preserves_agent_tool_messages(monkeyp
     context = engine.create_workflow(
         task_id="agent-result-tool-messages",
         user_id="test-user",
-        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+        description="一种入口预配置多屏协同姿态并连续处理跨屏画面的方法。",
     )
 
     claim_result = {
         "tool": "claim_drafter",
         "success": True,
         "data": {
-            "independent_claim": "1. 一种Cave折幕视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
+            "independent_claim": "1. 一种多屏协同视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
             "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于虚拟空间模型生成屏幕角度。"],
         },
     }
@@ -86,7 +86,7 @@ async def test_generate_patent_in_sections_preserves_agent_tool_messages(monkeyp
         "success": True,
         "data": {
             "section_type": "technical_field",
-            "content": "本发明涉及沉浸式折幕显示视频处理技术领域。",
+            "content": "本发明涉及沉浸式多屏显示视频处理技术领域。",
         },
     }
 
@@ -112,9 +112,9 @@ async def test_generate_patent_in_sections_preserves_agent_tool_messages(monkeyp
 
     draft = await engine._generate_patent_in_sections(None, "patent.writer.v1", "", context)
 
-    assert draft["claims"]["independent_claim"].startswith("1. 一种Cave折幕视频处理方法")
+    assert draft["claims"]["independent_claim"].startswith("1. 一种多屏协同视频处理方法")
     assert draft["claims"]["dependent_claims"]
-    assert draft["description"]["technical_field"] == "本发明涉及沉浸式折幕显示视频处理技术领域。"
+    assert draft["description"]["technical_field"] == "本发明涉及沉浸式多屏显示视频处理技术领域。"
 
 
 @pytest.mark.asyncio
@@ -123,14 +123,14 @@ async def test_generate_patent_in_sections_recovers_tool_messages_without_name(m
     context = engine.create_workflow(
         task_id="agent-result-tool-call-ids",
         user_id="test-user",
-        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+        description="一种入口预配置多屏协同姿态并连续处理跨屏画面的方法。",
     )
 
     claim_result = {
         "tool": "claim_drafter",
         "success": True,
         "data": {
-            "independent_claim": "1. 一种Cave折幕空间视频补偿方法，包括获取相邻屏幕空间关系并识别补充处理区域。",
+            "independent_claim": "1. 一种多屏协同空间视频补偿方法，包括获取相邻屏幕空间关系并识别补充处理区域。",
             "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于相邻屏幕边界计算空间间隙。"],
         },
     }
@@ -171,7 +171,7 @@ async def test_generate_patent_in_sections_recovers_tool_messages_without_name(m
 
     draft = await engine._generate_patent_in_sections(None, "patent.writer.v1", "", context)
 
-    assert draft["claims"]["independent_claim"].startswith("1. 一种Cave折幕空间视频补偿方法")
+    assert draft["claims"]["independent_claim"].startswith("1. 一种多屏协同空间视频补偿方法")
     assert draft["description"]["summary_of_invention"] == "系统根据姿态变化量及相邻屏幕的空间关系识别画面处理区域，避免补偿内容缺失。"
     assert draft["full_response"] == "或者"
 
@@ -182,21 +182,21 @@ async def test_generate_patent_in_sections_collects_drawing_tool_output(monkeypa
     context = engine.create_workflow(
         task_id="agent-result-drawing-tool-call",
         user_id="test-user",
-        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+        description="一种入口预配置多屏协同姿态并连续处理跨屏画面的方法。",
     )
 
     claim_result = {
         "tool": "claim_drafter",
         "success": True,
         "data": {
-            "independent_claim": "1. 一种Cave折幕空间视频补偿方法，包括获取相邻屏幕空间关系并识别补充处理区域。",
+            "independent_claim": "1. 一种多屏协同空间视频补偿方法，包括获取相邻屏幕空间关系并识别补充处理区域。",
             "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于相邻屏幕边界计算空间间隙。"],
         },
     }
     expected_drawings = [
         {
             "figure_number": "图1",
-            "title": "Cave折幕空间视频补偿系统结构示意图",
+            "title": "多屏协同空间视频补偿系统结构示意图",
             "description": "展示入口终端、姿态控制模块、相邻屏幕和视频补偿模块之间的连接关系。",
             "file_path": "/tmp/agent-result-drawing-tool-call/draft/drawings/fig1.png",
             "artifact_url": "/api/v1/workflows/agent-result-drawing-tool-call/artifacts/draft/drawings/fig1.png",
@@ -246,7 +246,7 @@ async def test_generate_patent_in_sections_requests_drawing_generation(monkeypat
     context = engine.create_workflow(
         task_id="writer-prompt-drawing-tool",
         user_id="test-user",
-        description="一种包含入口终端、姿态控制模块和可调折幕组件的沉浸式显示系统。",
+        description="一种包含入口终端、姿态控制模块和可调多屏组件的沉浸式显示系统。",
     )
     captured = {}
 
@@ -263,8 +263,8 @@ async def test_generate_patent_in_sections_requests_drawing_generation(monkeypat
                             "tool": "claim_drafter",
                             "success": True,
                             "data": {
-                                "independent_claim": "1. 一种沉浸式显示系统，包括入口终端和可调折幕组件。",
-                                "dependent_claims": ["2. 根据权利要求1所述的系统，其中可调折幕组件包括驱动机构。"],
+                                "independent_claim": "1. 一种沉浸式显示系统，包括入口终端和可调多屏组件。",
+                                "dependent_claims": ["2. 根据权利要求1所述的系统，其中可调多屏组件包括驱动机构。"],
                             },
                         },
                         ensure_ascii=False,
@@ -286,7 +286,7 @@ async def test_generate_patent_in_sections_preserves_drawings_description(monkey
     context = engine.create_workflow(
         task_id="writer-drawings-description",
         user_id="test-user",
-        description="一种包含入口终端、姿态控制模块和可调折幕组件的沉浸式显示系统。",
+        description="一种包含入口终端、姿态控制模块和可调多屏组件的沉浸式显示系统。",
     )
 
     async def fake_run_agent_conversation(profile_id, prompt):
@@ -301,8 +301,8 @@ async def test_generate_patent_in_sections_preserves_drawings_description(monkey
                             "tool": "claim_drafter",
                             "success": True,
                             "data": {
-                                "independent_claim": "1. 一种沉浸式显示系统，包括入口终端和可调折幕组件。",
-                                "dependent_claims": ["2. 根据权利要求1所述的系统，其中可调折幕组件包括驱动机构。"],
+                                "independent_claim": "1. 一种沉浸式显示系统，包括入口终端和可调多屏组件。",
+                                "dependent_claims": ["2. 根据权利要求1所述的系统，其中可调多屏组件包括驱动机构。"],
                             },
                         },
                         ensure_ascii=False,
@@ -339,7 +339,7 @@ async def test_generate_patent_in_sections_preserves_agent_failure(monkeypatch):
     context = engine.create_workflow(
         task_id="writer-agent-truncated",
         user_id="test-user",
-        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+        description="一种入口预配置多屏协同姿态并连续处理跨屏画面的方法。",
     )
 
     async def fake_run_agent_conversation(profile_id, prompt):
@@ -355,9 +355,10 @@ async def test_generate_patent_in_sections_preserves_agent_failure(monkeypatch):
 
     assert draft["_agent_failed"] is True
     assert draft["_agent_error"] == "Response truncated due to output length limit"
-    assert draft["claims"]["independent_claim"] == ""
-    assert draft["description"]["technical_field"] == ""
-    assert draft["abstract"] == ""
+    assert "待生成" not in str(draft)
+    assert "claims" not in draft
+    assert "description" not in draft
+    assert "abstract" not in draft
 
 
 @pytest.mark.asyncio
@@ -366,7 +367,7 @@ async def test_generate_patent_in_sections_resumes_partial_failed_output(monkeyp
     context = engine.create_workflow(
         task_id="writer-resume-partial",
         user_id="test-user",
-        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+        description="一种入口预配置多屏协同姿态并连续处理跨屏画面的方法。",
     )
     prompts = []
 
@@ -374,7 +375,7 @@ async def test_generate_patent_in_sections_resumes_partial_failed_output(monkeyp
         "tool": "claim_drafter",
         "success": True,
         "data": {
-            "independent_claim": "1. 一种Cave折幕视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
+            "independent_claim": "1. 一种多屏协同视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
             "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于虚拟空间模型生成屏幕角度。"],
         },
     }
@@ -383,7 +384,7 @@ async def test_generate_patent_in_sections_resumes_partial_failed_output(monkeyp
         "success": True,
         "data": {
             "section_type": "technical_field",
-            "content": "本发明涉及沉浸式折幕显示视频处理技术领域。",
+            "content": "本发明涉及沉浸式多屏显示视频处理技术领域。",
         },
     }
 
@@ -423,7 +424,7 @@ async def test_generate_patent_in_sections_resumes_partial_failed_output(monkeyp
                             "success": True,
                             "data": {
                                 "section_type": "background",
-                                "content": "现有Cave折幕显示空间难以根据入口姿态预配置跨屏画面。",
+                                "content": "现有多屏协同显示空间难以根据入口姿态预配置跨屏画面。",
                             },
                         },
                         ensure_ascii=False,
@@ -453,7 +454,7 @@ async def test_generate_patent_in_sections_resumes_partial_failed_output(monkeyp
                             "success": True,
                             "data": {
                                 "section_type": "detailed",
-                                "content": "入口终端获取空间配置后，生成折幕姿态参数并对跨屏视频画面进行重映射。",
+                                "content": "入口终端获取空间配置后，生成多屏姿态参数并对跨屏视频画面进行重映射。",
                             },
                         },
                         ensure_ascii=False,
@@ -468,7 +469,7 @@ async def test_generate_patent_in_sections_resumes_partial_failed_output(monkeyp
                             "success": True,
                             "data": {
                                 "file_path": "",
-                                "abstract": "本发明公开一种Cave折幕视频处理方法，可预配置屏幕姿态并重映射跨屏视频画面。",
+                                "abstract": "本发明公开一种多屏协同视频处理方法，可预配置屏幕姿态并重映射跨屏视频画面。",
                             },
                         },
                         ensure_ascii=False,
@@ -483,12 +484,12 @@ async def test_generate_patent_in_sections_resumes_partial_failed_output(monkeyp
 
     assert len(prompts) == 2
     assert draft.get("_agent_failed") is not True
-    assert draft["claims"]["independent_claim"].startswith("1. 一种Cave折幕视频处理方法")
-    assert draft["description"]["technical_field"] == "本发明涉及沉浸式折幕显示视频处理技术领域。"
-    assert draft["description"]["background_art"] == "现有Cave折幕显示空间难以根据入口姿态预配置跨屏画面。"
+    assert draft["claims"]["independent_claim"].startswith("1. 一种多屏协同视频处理方法")
+    assert draft["description"]["technical_field"] == "本发明涉及沉浸式多屏显示视频处理技术领域。"
+    assert draft["description"]["background_art"] == "现有多屏协同显示空间难以根据入口姿态预配置跨屏画面。"
     assert draft["description"]["summary_of_invention"] == "系统根据入口预配置屏幕姿态重映射跨屏画面。"
-    assert draft["description"]["detailed_description"] == "入口终端获取空间配置后，生成折幕姿态参数并对跨屏视频画面进行重映射。"
-    assert draft["abstract"].startswith("本发明公开一种Cave折幕视频处理方法")
+    assert draft["description"]["detailed_description"] == "入口终端获取空间配置后，生成多屏姿态参数并对跨屏视频画面进行重映射。"
+    assert draft["abstract"].startswith("本发明公开一种多屏协同视频处理方法")
 
 
 @pytest.mark.asyncio
@@ -497,7 +498,7 @@ async def test_generate_patent_in_sections_retries_successful_but_incomplete_out
     context = engine.create_workflow(
         task_id="writer-successful-incomplete-output",
         user_id="test-user",
-        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+        description="一种入口预配置多屏协同姿态并连续处理跨屏画面的方法。",
     )
     prompts = []
 
@@ -516,7 +517,7 @@ async def test_generate_patent_in_sections_retries_successful_but_incomplete_out
                                 "success": True,
                                 "data": {
                                     "section_type": "technical_field",
-                                    "content": "本发明涉及沉浸式折幕显示视频处理技术领域。",
+                                    "content": "本发明涉及沉浸式多屏显示视频处理技术领域。",
                                 },
                             },
                             ensure_ascii=False,
@@ -531,7 +532,7 @@ async def test_generate_patent_in_sections_retries_successful_but_incomplete_out
                                 "success": True,
                                 "data": {
                                     "section_type": "background",
-                                    "content": "现有Cave折幕显示空间难以根据入口姿态预配置跨屏画面。",
+                                    "content": "现有多屏协同显示空间难以根据入口姿态预配置跨屏画面。",
                                 },
                             },
                             ensure_ascii=False,
@@ -561,7 +562,7 @@ async def test_generate_patent_in_sections_retries_successful_but_incomplete_out
                                 "success": True,
                                 "data": {
                                     "section_type": "detailed",
-                                    "content": "入口终端获取空间配置后，生成折幕姿态参数并对跨屏视频画面进行重映射。",
+                                    "content": "入口终端获取空间配置后，生成多屏姿态参数并对跨屏视频画面进行重映射。",
                                 },
                             },
                             ensure_ascii=False,
@@ -581,7 +582,7 @@ async def test_generate_patent_in_sections_retries_successful_but_incomplete_out
                             "tool": "claim_drafter",
                             "success": True,
                             "data": {
-                                "independent_claim": "1. 一种Cave折幕视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
+                                "independent_claim": "1. 一种多屏协同视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
                                 "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于虚拟空间模型生成屏幕角度。"],
                             },
                         },
@@ -597,7 +598,7 @@ async def test_generate_patent_in_sections_retries_successful_but_incomplete_out
                             "success": True,
                             "data": {
                                 "file_path": "",
-                                "abstract": "本发明公开一种Cave折幕视频处理方法，可预配置屏幕姿态并重映射跨屏视频画面。",
+                                "abstract": "本发明公开一种多屏协同视频处理方法，可预配置屏幕姿态并重映射跨屏视频画面。",
                             },
                         },
                         ensure_ascii=False,
@@ -614,12 +615,12 @@ async def test_generate_patent_in_sections_retries_successful_but_incomplete_out
     assert "权利要求书" in prompts[1]
     assert "说明书摘要" in prompts[1]
     assert draft.get("_agent_failed") is not True
-    assert draft["claims"]["independent_claim"].startswith("1. 一种Cave折幕视频处理方法")
-    assert draft["description"]["technical_field"] == "本发明涉及沉浸式折幕显示视频处理技术领域。"
-    assert draft["description"]["background_art"] == "现有Cave折幕显示空间难以根据入口姿态预配置跨屏画面。"
+    assert draft["claims"]["independent_claim"].startswith("1. 一种多屏协同视频处理方法")
+    assert draft["description"]["technical_field"] == "本发明涉及沉浸式多屏显示视频处理技术领域。"
+    assert draft["description"]["background_art"] == "现有多屏协同显示空间难以根据入口姿态预配置跨屏画面。"
     assert draft["description"]["summary_of_invention"] == "系统根据入口预配置屏幕姿态重映射跨屏画面。"
-    assert draft["description"]["detailed_description"] == "入口终端获取空间配置后，生成折幕姿态参数并对跨屏视频画面进行重映射。"
-    assert draft["abstract"].startswith("本发明公开一种Cave折幕视频处理方法")
+    assert draft["description"]["detailed_description"] == "入口终端获取空间配置后，生成多屏姿态参数并对跨屏视频画面进行重映射。"
+    assert draft["abstract"].startswith("本发明公开一种多屏协同视频处理方法")
 
 
 @pytest.mark.asyncio
@@ -628,7 +629,7 @@ async def test_generate_patent_in_sections_preserves_partial_output_when_resume_
     context = engine.create_workflow(
         task_id="writer-resume-still-fails",
         user_id="test-user",
-        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+        description="一种入口预配置多屏协同姿态并连续处理跨屏画面的方法。",
     )
     prompts = []
 
@@ -636,7 +637,7 @@ async def test_generate_patent_in_sections_preserves_partial_output_when_resume_
         "tool": "claim_drafter",
         "success": True,
         "data": {
-            "independent_claim": "1. 一种Cave折幕视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
+            "independent_claim": "1. 一种多屏协同视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
             "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于虚拟空间模型生成屏幕角度。"],
         },
     }
@@ -660,10 +661,10 @@ async def test_generate_patent_in_sections_preserves_partial_output_when_resume_
 
     draft = await engine._generate_patent_in_sections(None, "patent.writer.v1", "", context)
 
-    assert len(prompts) == 3
+    assert len(prompts) == 4
     assert draft["_agent_failed"] is True
     assert draft["_agent_error"] == "说明书生成连续截断"
-    assert draft["claims"]["independent_claim"].startswith("1. 一种Cave折幕视频处理方法")
+    assert draft["claims"]["independent_claim"].startswith("1. 一种多屏协同视频处理方法")
     assert draft["claims"]["dependent_claims"]
     assert draft["description"]["technical_field"] == ""
 
@@ -674,7 +675,7 @@ async def test_execute_full_workflow_remediates_truncated_writer_stage(monkeypat
     context = engine.create_workflow(
         task_id="writer-truncated-phase-failure",
         user_id="test-user",
-        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+        description="一种入口预配置多屏协同姿态并连续处理跨屏画面的方法。",
     )
     context.metadata["quality_remediation_safety_limit"] = 2
 
@@ -684,27 +685,63 @@ async def test_execute_full_workflow_remediates_truncated_writer_stage(monkeypat
     async def fake_sleep(delay):
         return None
 
+    requirement_calls = 0
+
     async def fake_run_agent_stream(service, profile_id, task_desc, context, agent_name, event_callback=None):
+        nonlocal requirement_calls
         if profile_id == "patent.requirement_analyst.v1":
+            requirement_calls += 1
+            result = {
+                "tech_field": "沉浸式显示",
+                "core_principle": "入口预配置屏幕姿态并补偿跨屏画面",
+                "technical_problem": "多屏空间固定屏幕难以适配不同体验者",
+                "beneficial_effects": ["提升多显示面画面连续性"],
+                "key_innovative_features": ["根据显示面姿态生成画面补偿策略"],
+                "application_scenarios": ["沉浸式展示空间"],
+                "patent_type_recommendation": "方法",
+                "claim_skeleton": [
+                    "S1、获取显示面姿态信息；",
+                    "S2、确定相邻显示面映射关系；",
+                    "S3、生成连续显示画面；",
+                    "S4、输出至对应显示面。",
+                ],
+                "information_gaps": [],
+            }
+            if requirement_calls > 1:
+                result["retrieval_feedback_review"] = {
+                    "ready_for_writing": True,
+                    "all_requirement_gaps_closed": True,
+                    "remaining_requirement_gaps": [],
+                    "search_feedback_for_retrieval": [],
+                    "review_conclusion": "检索证据已足够支撑进入撰写。",
+                }
             return {
-                "text": json.dumps(
-                    {
-                        "tech_field": "沉浸式显示",
-                        "core_principle": "入口预配置屏幕姿态并补偿跨屏画面",
-                        "technical_problem": "折幕空间固定屏幕难以适配不同体验者",
-                        "key_innovative_features": [],
-                    },
-                    ensure_ascii=False,
-                ),
+                "text": json.dumps(result, ensure_ascii=False),
                 "tool_results": [],
             }
         if profile_id == "patent.retrieval_analyst.v1":
             return {
                 "text": json.dumps(
                     {
+                        "retrieval_strategy": {
+                            "keywords": ["多显示面姿态", "画面连续性", "跨屏补偿"],
+                            "query": "多显示面姿态 AND 画面连续性 AND 跨屏补偿",
+                            "databases_used": ["google_patents", "uspto"],
+                        },
                         "overall_patentability": "unknown",
                         "writing_recommendations": ["突出入口预配置和跨屏补偿"],
-                        "prior_art_references": [],
+                        "prior_art_references": [
+                            {
+                                "title": "多显示面画面映射控制相关公开",
+                                "source": "google_patents",
+                                "publication_number": "PUBLIC-REF-1",
+                                "relevance": "公开了多显示面映射控制，但未解决姿态变化下的连续画面补偿。",
+                            }
+                        ],
+                        "evidence_sources": [
+                            {"source": "google_patents", "status": "searched"},
+                            {"source": "uspto", "status": "searched"},
+                        ],
                     },
                     ensure_ascii=False,
                 ),
@@ -780,15 +817,13 @@ async def test_execute_full_workflow_remediates_truncated_writer_stage(monkeypat
 
     result = await engine.execute_full_workflow(context)
 
-    assert result.current_phase == WorkflowState.AWAITING_USER_DECISION
+    assert result.current_phase == WorkflowState.FAILED
     writing_phases = [p for p in result.phase_history if p.phase.value == "writing"]
     assert writing_phases[0].success is False
     assert writing_phases[0].output["_agent_failed"] is True
-    assert writing_phases[0].issues == ["Response truncated due to output length limit"]
-    assert len(writing_phases) > 1
+    assert "Response truncated due to output length limit" in writing_phases[0].issues[0]
     assert writer_attempts == 3
-    assert any(p.phase.value == "review" for p in result.phase_history)
-    assert result.metadata["quality_remediation"]["classification"] == "auto_remediation_limit"
+    assert not any(p.phase.value == "review" for p in result.phase_history)
     assert result.patent_draft.get("docx_path") in (None, "")
 
 
@@ -798,7 +833,7 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
     context = engine.create_workflow(
         task_id="writer-retry-recovers",
         user_id="test-user",
-        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+        description="一种入口预配置多屏协同姿态并连续处理跨屏画面的方法。",
     )
     writer_attempts = 0
 
@@ -808,27 +843,63 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
     async def fake_sleep(delay):
         return None
 
+    requirement_calls = 0
+
     async def fake_run_agent_stream(service, profile_id, task_desc, context, agent_name, event_callback=None):
+        nonlocal requirement_calls
         if profile_id == "patent.requirement_analyst.v1":
+            requirement_calls += 1
+            result = {
+                "tech_field": "沉浸式显示",
+                "core_principle": "入口预配置屏幕姿态并补偿跨屏画面",
+                "technical_problem": "多屏空间固定屏幕难以适配不同体验者",
+                "beneficial_effects": ["提升多显示面画面连续性"],
+                "key_innovative_features": ["根据显示面姿态生成画面补偿策略"],
+                "application_scenarios": ["沉浸式展示空间"],
+                "patent_type_recommendation": "方法",
+                "claim_skeleton": [
+                    "S1、获取显示面姿态信息；",
+                    "S2、确定相邻显示面映射关系；",
+                    "S3、生成连续显示画面；",
+                    "S4、输出至对应显示面。",
+                ],
+                "information_gaps": [],
+            }
+            if requirement_calls > 1:
+                result["retrieval_feedback_review"] = {
+                    "ready_for_writing": True,
+                    "all_requirement_gaps_closed": True,
+                    "remaining_requirement_gaps": [],
+                    "search_feedback_for_retrieval": [],
+                    "review_conclusion": "检索证据已足够支撑进入撰写。",
+                }
             return {
-                "text": json.dumps(
-                    {
-                        "tech_field": "沉浸式显示",
-                        "core_principle": "入口预配置屏幕姿态并补偿跨屏画面",
-                        "technical_problem": "折幕空间固定屏幕难以适配不同体验者",
-                        "key_innovative_features": [],
-                    },
-                    ensure_ascii=False,
-                ),
+                "text": json.dumps(result, ensure_ascii=False),
                 "tool_results": [],
             }
         if profile_id == "patent.retrieval_analyst.v1":
             return {
                 "text": json.dumps(
                     {
+                        "retrieval_strategy": {
+                            "keywords": ["多显示面姿态", "画面连续性", "跨屏补偿"],
+                            "query": "多显示面姿态 AND 画面连续性 AND 跨屏补偿",
+                            "databases_used": ["google_patents", "uspto"],
+                        },
                         "overall_patentability": "unknown",
                         "writing_recommendations": ["突出入口预配置和跨屏补偿"],
-                        "prior_art_references": [],
+                        "prior_art_references": [
+                            {
+                                "title": "多显示面画面映射控制相关公开",
+                                "source": "google_patents",
+                                "publication_number": "PUBLIC-REF-1",
+                                "relevance": "公开了多显示面映射控制，但未解决姿态变化下的连续画面补偿。",
+                            }
+                        ],
+                        "evidence_sources": [
+                            {"source": "google_patents", "status": "searched"},
+                            {"source": "uspto", "status": "searched"},
+                        ],
                     },
                     ensure_ascii=False,
                 ),
@@ -840,7 +911,11 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
                     {
                         "recommendation": "approve",
                         "revision_priority": "low",
-                        "review_summary": {"recommendation": "approve", "overall_rating": "good"},
+                        "review_summary": {
+                            "recommendation": "approve",
+                            "overall_rating": "good",
+                            "overall_score": 0.95,
+                        },
                         "formal_compliance_review": {"issues": []},
                         "claims_review": {"issues": []},
                         "description_review": {"issues": []},
@@ -874,8 +949,16 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
                             "tool": "claim_drafter",
                             "success": True,
                             "data": {
-                                "independent_claim": "1. 一种Cave折幕视频处理方法，包括入口预配置屏幕姿态并重映射跨屏视频画面。",
-                                "dependent_claims": ["2. 根据权利要求1所述的方法，其中基于虚拟空间模型生成屏幕角度。"],
+                                "independent_claim": (
+                                    "1. 一种多显示面姿态协同处理方法，其特征在于，包括：\n"
+                                    "S1、获取显示面姿态信息；\n"
+                                    "S2、确定相邻显示面映射关系；\n"
+                                    "S3、生成连续显示画面；\n"
+                                    "S4、输出至对应显示面。\n"
+                                ),
+                                "dependent_claims": [
+                                    "2. 根据权利要求1所述的方法，其特征在于，所述显示面姿态信息包括显示面位置和朝向。\n"
+                                ],
                             },
                         },
                         ensure_ascii=False,
@@ -890,7 +973,7 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
                             "success": True,
                             "data": {
                                 "section_type": "technical_field",
-                                "content": "本发明涉及沉浸式折幕显示视频处理技术领域。",
+                                "content": "本发明涉及沉浸式多屏显示视频处理技术领域。",
                             },
                         },
                         ensure_ascii=False,
@@ -905,7 +988,7 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
                             "success": True,
                             "data": {
                                 "section_type": "background",
-                                "content": "现有Cave折幕显示空间难以根据入口姿态预配置跨屏画面。",
+                                "content": "现有多屏协同显示空间难以根据入口姿态预配置跨屏画面。",
                             },
                         },
                         ensure_ascii=False,
@@ -935,7 +1018,7 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
                             "success": True,
                             "data": {
                                 "section_type": "detailed",
-                                "content": "入口终端获取空间配置后，生成折幕姿态参数并对跨屏视频画面进行重映射。",
+                                "content": "入口终端获取空间配置后，生成多屏姿态参数并对跨屏视频画面进行重映射。",
                             },
                         },
                         ensure_ascii=False,
@@ -950,7 +1033,7 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
                             "success": True,
                             "data": {
                                 "file_path": "",
-                                "abstract": "本发明公开一种Cave折幕视频处理方法，可预配置屏幕姿态并重映射跨屏视频画面。",
+                                "abstract": "多显示面姿态协同处理方法，获取显示面姿态信息并生成连续显示画面，提高多显示面显示连续性。",
                             },
                         },
                         ensure_ascii=False,
@@ -978,7 +1061,7 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
     writing_phase = next(p for p in result.phase_history if p.phase.value == "writing")
     assert writing_phase.success is True
     assert writing_phase.output.get("_agent_failed") is not True
-    assert writing_phase.output["claims"]["independent_claim"].startswith("1. 一种Cave折幕视频处理方法")
+    assert writing_phase.output["claims"]["independent_claim"].startswith("1. 一种多显示面姿态协同处理方法")
     review_phase = next(p for p in result.phase_history if p.phase.value == "review")
     assert review_phase.success is True
     assert review_phase.output["review_summary"]["recommendation"] == "approve"
@@ -990,7 +1073,7 @@ async def test_generate_patent_in_sections_emits_realtime_progress_events(monkey
     context = engine.create_workflow(
         task_id="writer-progress-events",
         user_id="test-user",
-        description="一种入口预配置Cave折幕姿态并连续处理跨屏画面的方法。",
+        description="一种入口预配置多屏协同姿态并连续处理跨屏画面的方法。",
     )
     events = []
 
@@ -1006,7 +1089,7 @@ async def test_generate_patent_in_sections_emits_realtime_progress_events(monkey
                             "tool": "claim_drafter",
                             "success": True,
                             "data": {
-                                "independent_claim": "1. 一种Cave折幕空间视频补偿方法。",
+                                "independent_claim": "1. 一种多屏协同空间视频补偿方法。",
                                 "dependent_claims": [],
                             },
                         },
@@ -1022,7 +1105,7 @@ async def test_generate_patent_in_sections_emits_realtime_progress_events(monkey
                             "success": True,
                             "data": {
                                 "section_type": "technical_field",
-                                "content": "本发明涉及沉浸式折幕显示视频处理技术领域。",
+                                "content": "本发明涉及沉浸式多屏显示视频处理技术领域。",
                             },
                         },
                         ensure_ascii=False,
@@ -1055,11 +1138,11 @@ def test_revision_prompt_keeps_source_disclosure_when_draft_is_failed():
     context = engine.create_workflow(
         task_id="failed-draft-revision",
         user_id="test-user",
-        description="入口处检测体验者身高，并根据身高映射调整Cave折幕屏幕角度。",
+        description="入口处检测体验者身高，并根据身高映射调整多屏协同屏幕角度。",
     )
     context.requirement_analysis = {
         "core_principle": "基于身高范围与屏幕姿态映射关系生成沉浸式显示形态",
-        "technical_problem": "固定折幕空间无法适配不同体验者身高",
+        "technical_problem": "固定多屏空间无法适配不同体验者身高",
     }
     context.retrieval_report = {
         "writing_recommendations": ["突出身高映射、屏幕角度调整和画面补偿的组合"]
@@ -1086,28 +1169,28 @@ def test_quality_review_prompt_includes_description_after_long_claims():
     context = engine.create_workflow(
         task_id="quality-review-full-draft",
         user_id="test-user",
-        description="可调Cave折幕显示系统",
+        description="可调多屏协同显示系统",
     )
     context.patent_draft = {
         "claims": {
-            "independent_claim": "1. 一种可调Cave折幕显示系统，包括" + "屏幕姿态控制模块；" * 120,
+            "independent_claim": "1. 一种可调多屏协同显示系统，包括" + "屏幕姿态控制模块；" * 120,
             "dependent_claims": [],
         },
         "description": {
-            "technical_field": "本发明涉及沉浸式折幕显示技术领域。",
-            "background_art": "现有Cave折幕空间屏幕角度固定。",
+            "technical_field": "本发明涉及沉浸式多屏显示技术领域。",
+            "background_art": "现有多屏协同空间屏幕角度固定。",
             "summary_of_invention": "系统根据身高映射调整屏幕姿态并补偿画面。",
             "drawings_description": "图1为系统结构示意图。",
             "detailed_description": "入口检测用户身高后驱动可动屏幕转动。",
         },
-        "abstract": "本发明公开一种可调Cave折幕显示系统。",
+        "abstract": "本发明公开一种可调多屏协同显示系统。",
         "docx_path": "",
     }
 
     prompt = engine._build_phase_prompt(context, WorkflowState.QUALITY_REVIEW)
 
-    assert "本发明涉及沉浸式折幕显示技术领域" in prompt
-    assert "本发明公开一种可调Cave折幕显示系统" in prompt
+    assert "本发明涉及沉浸式多屏显示技术领域" in prompt
+    assert "本发明公开一种可调多屏协同显示系统" in prompt
 
 
 def test_patent_draft_normalizes_streamed_tool_results_instead_of_docx_envelope():
@@ -1125,7 +1208,7 @@ def test_patent_draft_normalizes_streamed_tool_results_instead_of_docx_envelope(
                         "tool": "claim_drafter",
                         "success": True,
                         "data": {
-                            "independent_claim": "1. 一种沉浸式折幕显示空间姿态联动显示控制方法。",
+                            "independent_claim": "1. 一种沉浸式多屏显示空间姿态联动显示控制方法。",
                             "dependent_claims": ["2. 根据权利要求1所述的方法，其中检测体验者身高。"],
                         },
                     },
@@ -1141,7 +1224,7 @@ def test_patent_draft_normalizes_streamed_tool_results_instead_of_docx_envelope(
                         "success": True,
                         "data": {
                             "section_type": "technical_field",
-                            "content": "本发明涉及沉浸式折幕显示姿态控制技术领域。",
+                            "content": "本发明涉及沉浸式多屏显示姿态控制技术领域。",
                         },
                     },
                     ensure_ascii=False,
@@ -1156,7 +1239,7 @@ def test_patent_draft_normalizes_streamed_tool_results_instead_of_docx_envelope(
                         "success": True,
                         "data": {
                             "section_type": "summary",
-                            "content": "系统根据体验者身高联动调整折幕姿态并适配显示内容。",
+                            "content": "系统根据体验者身高联动调整多屏姿态并适配显示内容。",
                         },
                     },
                     ensure_ascii=False,
@@ -1170,7 +1253,7 @@ def test_patent_draft_normalizes_streamed_tool_results_instead_of_docx_envelope(
                         "success": True,
                         "data": {
                             "file_path": "/tmp/generated.docx",
-                            "abstract": "本发明公开一种沉浸式折幕显示空间姿态联动显示控制方法。",
+                            "abstract": "本发明公开一种沉浸式多屏显示空间姿态联动显示控制方法。",
                         },
                     },
                     ensure_ascii=False,
@@ -1182,11 +1265,11 @@ def test_patent_draft_normalizes_streamed_tool_results_instead_of_docx_envelope(
 
     normalized = engine._normalize_phase_output("patent_draft", docx_envelope)
 
-    assert normalized["claims"]["independent_claim"].startswith("1. 一种沉浸式折幕")
+    assert normalized["claims"]["independent_claim"].startswith("1. 一种沉浸式多屏")
     assert normalized["claims"]["dependent_claims"]
-    assert normalized["description"]["technical_field"] == "本发明涉及沉浸式折幕显示姿态控制技术领域。"
-    assert normalized["description"]["summary_of_invention"] == "系统根据体验者身高联动调整折幕姿态并适配显示内容。"
-    assert normalized["abstract"] == "本发明公开一种沉浸式折幕显示空间姿态联动显示控制方法。"
+    assert normalized["description"]["technical_field"] == "本发明涉及沉浸式多屏显示姿态控制技术领域。"
+    assert normalized["description"]["summary_of_invention"] == "系统根据体验者身高联动调整多屏姿态并适配显示内容。"
+    assert normalized["abstract"] == "本发明公开一种沉浸式多屏显示空间姿态联动显示控制方法。"
     assert normalized["docx_path"] == "/tmp/generated.docx"
     assert "tool_results" not in normalized
 
@@ -1195,8 +1278,8 @@ def test_patent_draft_normalizes_streamed_drawing_tool_results():
     engine = PatentWorkflowEngine()
     drawing = {
         "figure_number": "图1",
-        "title": "折幕空间姿态控制系统结构示意图",
-        "description": "展示入口终端、姿态控制模块、折幕组件和视频补偿模块的连接关系。",
+        "title": "多屏空间姿态控制系统结构示意图",
+        "description": "展示入口终端、姿态控制模块、多屏组件和视频补偿模块的连接关系。",
         "file_path": "/tmp/draft/drawings/fig1.png",
         "artifact_url": "/api/v1/workflows/streamed-drawings/artifacts/draft/drawings/fig1.png",
         "mime_type": "image/png",
@@ -1212,8 +1295,8 @@ def test_patent_draft_normalizes_streamed_drawing_tool_results():
                         "tool": "claim_drafter",
                         "success": True,
                         "data": {
-                            "independent_claim": "1. 一种折幕空间姿态控制系统，包括入口终端和姿态控制模块。",
-                            "dependent_claims": ["2. 根据权利要求1所述的系统，其中姿态控制模块输出折幕角度。"],
+                            "independent_claim": "1. 一种多屏空间姿态控制系统，包括入口终端和姿态控制模块。",
+                            "dependent_claims": ["2. 根据权利要求1所述的系统，其中姿态控制模块输出多屏角度。"],
                         },
                     },
                     ensure_ascii=False,

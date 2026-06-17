@@ -374,14 +374,14 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "patent_search",
         "schema": {
             "name": "patent_search",
-            "description": "在多源专利数据库(USPTO/EPO/CNIPA)中检索相关现有技术",
+            "description": "在真实可用的多源专利数据库和公开资料源中检索相关现有技术",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "检索查询关键词或技术描述"},
                     "sources": {
                         "type": "string",
-                        "description": "数据源(逗号分隔): google_patents,uspto,epo,cnipa",
+                        "description": "数据源(逗号分隔): google_patents,uspto,arxiv；留空使用全部可用真实数据源",
                     },
                     "limit": {"type": "string", "description": "最大结果数量"},
                 },
@@ -395,7 +395,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "similarity_analyzer",
         "schema": {
             "name": "similarity_analyzer",
-            "description": "分析发明方案与现有技术的相似度，识别关键差异和风险",
+            "description": "提取发明方案与现有技术的相似术语、区别特征和客观风险信号；实质结论由 Agent 判断",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -412,7 +412,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "patentability_scorer",
         "schema": {
             "name": "patentability_scorer",
-            "description": "评估技术方案的新颖性、创造性和实用性，给出综合专利性评分",
+            "description": "提取技术方案与现有技术的术语重合、区别特征等客观信号；新颖性、创造性和实用性结论由 Agent 判断",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -481,7 +481,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "support_checker",
         "schema": {
             "name": "support_checker",
-            "description": "检查权利要求与说明书之间的支持关系，识别支持性缺陷",
+            "description": "提取权利要求与说明书之间的支持关系客观信号；是否构成支持性缺陷由 Agent 判断",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -498,7 +498,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "compliance_checker",
         "schema": {
             "name": "compliance_checker",
-            "description": "检查专利申请文件的格式和形式合规性",
+            "description": "执行可代码化的格式和形式硬规则检查；最终合规结论由质量审查 Agent 判断",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -514,7 +514,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "claim_quality_analyzer",
         "schema": {
             "name": "claim_quality_analyzer",
-            "description": "分析权利要求的清楚性、保护范围、层次结构等质量指标",
+            "description": "提取权利要求清楚性、层次结构、换行和长度等客观信号；质量结论由 Agent 判断",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -530,7 +530,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "support_verifier",
         "schema": {
             "name": "support_verifier",
-            "description": "验证说明书对权利要求的支持充分性(专利法第26条第4款)",
+            "description": "提取说明书对权利要求支持关系的客观信号；充分性结论由 Agent 判断",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -547,7 +547,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "oa_predictor",
         "schema": {
             "name": "oa_predictor",
-            "description": "预测专利审查中可能收到的审查意见，提供应对策略",
+            "description": "检查可能触发审查意见的客观文本信号；是否构成 OA 风险及应对策略由 Agent 判断",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -563,7 +563,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "creative_thinking",
         "schema": {
             "name": "creative_thinking",
-            "description": "基于技术方案激发创新思维，探索替代方案和拓展方向",
+            "description": "根据技术文本提取可供 Agent 发散的候选方向；创新价值和采用与否由 Agent 判断",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -579,7 +579,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "patent_strategy_guide",
         "schema": {
             "name": "patent_strategy_guide",
-            "description": "基于技术方案和市场情况提供专利申请策略和保护策略建议",
+            "description": "根据技术文本整理申请策略候选项和检查清单；最终申请策略由 Agent 判断",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -613,7 +613,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "task_planner",
         "schema": {
             "name": "task_planner",
-            "description": "制定专利申请的工作计划和时间线，分解任务，设定里程碑",
+            "description": "根据技术文本生成候选工作拆解和里程碑；最终计划由 CEO Agent 调度确认",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -631,14 +631,15 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "quality_assessor",
         "schema": {
             "name": "quality_assessor",
-            "description": "对专利申请文件进行质量评估，给出改进建议",
+            "description": "提取专利申请文件的结构、完整性、格式和明显缺失等客观信号；质量判断和改进建议由 Agent 完成",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "document": {"type": "string", "description": "待评估的文件内容"},
-                    "assessment_type": {"type": "string", "description": "评估类型"},
+                    "phase_name": {"type": "string", "description": "阶段名称: requirement/retrieval/writing/review"},
+                    "output_content": {"type": "string", "description": "该阶段的输出内容(JSON或文本)"},
+                    "requirements": {"type": "string", "description": "需要硬规则检查的格式/结构要求"},
                 },
-                "required": ["document"],
+                "required": ["phase_name", "output_content"],
             },
         },
         "handler": _handle_quality_assessor,
@@ -648,7 +649,7 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "report_generator",
         "schema": {
             "name": "report_generator",
-            "description": "生成专利申请相关的各类报告(检索报告/分析报告/审查意见答复)",
+            "description": "根据已确认素材整理报告草稿；报告结论和取舍由对应 Agent 判断",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -665,14 +666,15 @@ PATENT_TOOL_DEFINITIONS = [
         "name": "risk_analyzer",
         "schema": {
             "name": "risk_analyzer",
-            "description": "分析专利申请过程中的各类风险(驳回/无效/侵权)",
+            "description": "提取驳回、无效、侵权等方向的客观风险信号；风险等级和处理策略由 Agent 判断",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "patent_document": {"type": "string", "description": "专利相关文件"},
-                    "risk_type": {"type": "string", "description": "风险类型"},
+                    "analysis_type": {"type": "string", "description": "分析类型: novelty/inventive_step/prior_art/support/overall"},
+                    "tech_data": {"type": "string", "description": "技术数据、专利文件或检索证据"},
+                    "prior_art_references": {"type": "string", "description": "现有技术参考列表(JSON或文本)"},
                 },
-                "required": ["patent_document"],
+                "required": ["analysis_type", "tech_data"],
             },
         },
         "handler": _handle_risk_analyzer,

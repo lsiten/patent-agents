@@ -27,6 +27,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from docx.shared import Pt
 from loguru import logger
 
+from src.core.patent_compliance import normalize_claim_linebreaks
+
 
 # ═══════════════════════════════════════════════════════════════════
 # PatentFeatureProfile — 内联格式描述
@@ -234,6 +236,19 @@ def _add_multiline_content(doc, content: Any, profile: _Profile) -> None:
     paragraphs = [p.strip() for p in content.split("\n") if p.strip()]
     for para_text in paragraphs:
         add_body_paragraph(doc, para_text, profile)
+
+
+def _add_claim_block(doc, claim_number: int, claim_text: Any, profile: _Profile) -> None:
+    """Add one claim while preserving mandatory line breaks after punctuation."""
+    text = _strip_markdown(claim_text)
+    text = re.sub(r'^\d+[\.\、]\s*', '', text.strip())
+    text = normalize_claim_linebreaks(text)
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    if not lines:
+        return
+    add_body_paragraph(doc, f"{claim_number}、{lines[0]}", profile)
+    for line in lines[1:]:
+        add_body_paragraph(doc, line, profile)
 
 
 def _add_figure_picture(doc, fig_info: Dict[str, str], profile: _Profile, width_inches: float = 5.0) -> bool:
@@ -527,13 +542,10 @@ class PatentDocxGeneratorTool:
 
                 ind_claim = _strip_markdown(claims.get("independent_claim", ""))
                 if ind_claim:
-                    ind_claim = re.sub(r'^\d+[\.\、]\s*', '', ind_claim.strip())
-                    add_body_paragraph(doc, f"1、{ind_claim}", profile)
+                    _add_claim_block(doc, 1, ind_claim, profile)
 
                 for i, dep in enumerate(claims.get("dependent_claims", []), 2):
-                    dep_text = _strip_markdown(dep)
-                    dep_text = re.sub(r'^\d+[\.\、]\s*', '', dep_text.strip())
-                    add_body_paragraph(doc, f"{i}、{dep_text}", profile)
+                    _add_claim_block(doc, i, dep, profile)
 
             # ── 说明书 ── (仅在有 description 内容时生成)
             has_description_content = any([

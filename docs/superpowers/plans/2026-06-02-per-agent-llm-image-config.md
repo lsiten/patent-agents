@@ -34,7 +34,7 @@
   - `test_persists_auto_generated_key`: 未设置 env 时自动生成 key 并持久化到文件
 - [ ] **Step 2:** 跑测试确认失败
 - [ ] **Step 3:** 实现 `secret_cipher.py`：
-  - `get_master_key() -> bytes`: 优先 env，fallback 文件 `data/.secret_key`，启动时自动生成
+  - `get_master_key() -> bytes`: 优先 env；未配置时生成并持久化本地密钥文件 `data/.secret_key`
   - `encrypt_value(plaintext: str) -> str`: 返回 `"enc:" + base64(ciphertext)`
   - `decrypt_value(ciphertext: str) -> str`: 检测 `"enc:"` 前缀解密；非前缀原样返回（兼容明文）
   - `is_encrypted(value: str) -> bool`
@@ -53,8 +53,8 @@
 - [ ] **Step 3:** 在 `LLMSettings` 类添加方法 `resolve_for_agent(overrides: dict | None) -> dict`：
   - 如果 `overrides` 为 None 或空，返回 `get_provider_config()` 的结果
   - 否则用 override 字段（provider / base_url / api_key / model）覆盖
-  - 如果 `provider` 不在 `TEXT_LLM_PROVIDERS`，fallback 到 `active_provider`
-  - 对 `api_key` 调用 `decrypt_value` 兜底
+  - 如果 `provider` 不在 `TEXT_LLM_PROVIDERS`，返回显式配置错误
+  - 对 `api_key` 调用 `decrypt_value`，失败时返回显式配置错误
 - [ ] **Step 4:** 跑测试确认通过
 
 ### Task 4: 扩展 `ImageGenSettings` 添加 per-agent resolve
@@ -165,7 +165,7 @@
 - [ ] **Step 2:** 路由 `POST /api/agents/{agent_id}/image-gen-config/test`:
   - 不真生图，调一个最小的 list models 或 health check
   - 返回 `{success, latency_ms, error}`
-- [ ] **Step 3:** 单元测试覆盖 happy path + 错误路径（用 mock）
+- [ ] **Step 3:** 单元测试覆盖 happy path + 错误路径（使用测试替身，不进入生产链路）
 
 ---
 

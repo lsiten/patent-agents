@@ -241,7 +241,7 @@ class TestImageGenResolveWithoutTextLLM:
         result = image_gen.resolve_without_text_llm(llm)
 
         assert result["provider"] == "azure_aoai"
-        assert result["api_key"] == ""
+        assert result["api_key"] is None
         assert result["base_url"] == "https://azure.example/v1"
         assert result["model_id"] == "gpt-image-2"
 

@@ -204,7 +204,10 @@ def _mark_workflow_resume_running(context: WorkflowContext) -> None:
     context.current_phase = EngineWorkflowState.ITERATION
     remediation = context.metadata.get("quality_remediation")
     if isinstance(remediation, dict):
-        remediation["resumed_at"] = datetime.now().isoformat()
+        if remediation.get("classification") == "service_restarted_resume_required":
+            context.metadata.pop("quality_remediation", None)
+        else:
+            remediation["resumed_at"] = datetime.now().isoformat()
 
 # ── Agent Override Store (真实持久化) ──
 from ..core.override_store import get_override_store
@@ -3288,7 +3291,7 @@ async def get_system_status():
             {"name": "质量审查Agent", "description": "合规性检查", "status": "idle"},
         ],
         knowledge_base_count=len(kb.list_all_patents()),
-        data_sources=["uspto", "epo", "cnipa", "google_patents", "arxiv"],
+        data_sources=["google_patents", "uspto", "arxiv"],
     )
 
 
@@ -4456,12 +4459,7 @@ def _has_any_keyword(text: str, keywords: tuple[str, ...]) -> bool:
 def _extract_patent_preflight_from_message(
     message: dict, patent_title: str
 ) -> Optional[Dict[str, Any]]:
-    """Extract strict preflight facts from either metadata or the assistant confirmation body.
-
-    Older conversations can lack structured metadata when the agent produced a complete
-    confirmation message before the backend marker contract existed. This fallback still
-    requires every startup fact to be present in the assistant message and match the title.
-    """
+    """Extract strict preflight facts from structured assistant metadata only."""
     if message.get("role") != "assistant":
         return None
 
@@ -4472,79 +4470,7 @@ def _extract_patent_preflight_from_message(
         ready_title = _normalized_patent_title(str(preflight.get("patent_title") or ""))
         if metadata.get("recommend_create_patent") and ready_title == normalized_title:
             return dict(preflight)
-
-    content = str(message.get("content") or "")
-    if not content.strip():
-        return None
-
-    title = _extract_recommended_patent_title(content)
-    if _normalized_patent_title(title or "") != normalized_title:
-        return None
-
-    readiness_phrases = (
-        "已具备启动正式流程条件",
-        "启动前方案已确认",
-        "确认后进入正式专利申请流程",
-        "头脑风暴复核认为已具备启动正式流程条件",
-    )
-    if not _has_any_keyword(content, readiness_phrases):
-        return None
-
-    field_checks: Dict[str, bool] = {
-        "patent_title": bool(title),
-        "protection_theme": _has_any_keyword(
-            content, ("保护主题", "核心保护主题", "保护主线", "核心保护")
-        ),
-        "patent_type": _has_any_keyword(
-            content, ("专利类型", "保护类型", "申请类型", "发明专利", "实用新型")
-        ),
-        "claim_skeleton": _has_any_keyword(
-            content, ("独权骨架", "独立权利要求骨架", "三步", "四步", "3步", "4步")
-        ),
-        "technical_facts": _has_any_keyword(
-            content, ("关键技术事实", "必要技术事实", "技术事实")
-        ),
-        "public_status": _has_any_keyword(
-            content, ("公开状态", "是否公开", "尚未公开", "未公开", "已经公开")
-        ),
-        "drawing_plan": _has_any_keyword(
-            content, ("附图需求", "附图规划", "附图方案", "附图建议", "附图")
-        ),
-    }
-    missing_fields = [field for field, present in field_checks.items() if not present]
-    if missing_fields:
-        return None
-
-    unresolved_hits = [
-        pattern for pattern in _PATENT_PREFLIGHT_UNRESOLVED_PATTERNS if pattern in content
-    ]
-    # Allow the final confirmation to mention the words "确认/已确认"; block only unresolved
-    # wording that says facts are still absent or user-exclusive.
-    unresolved_hits = [
-        pattern
-        for pattern in unresolved_hits
-        if pattern not in {"待确认", "继续确认"} or "还差" in content or "不能启动" in content
-    ]
-    if unresolved_hits:
-        return None
-
-    claim_steps_match = re.search(r"(?:独权骨架|独立权利要求骨架)[^。\n]*(3|4|三|四)\s*步", content)
-    claim_steps = claim_steps_match.group(1) if claim_steps_match else None
-    if claim_steps in {"三", "3"}:
-        independent_step_count = 3
-    elif claim_steps in {"四", "4"}:
-        independent_step_count = 4
-    else:
-        independent_step_count = None
-
-    return {
-        "patent_title": title,
-        "source": "assistant_confirmation_body",
-        "required_fields": sorted(_PATENT_PREFLIGHT_REQUIRED_FIELDS.keys()),
-        "field_checks": field_checks,
-        "independent_step_count": independent_step_count,
-        "summary_text": content[:6000],
-    }
+    return None
 
 
 def _conversation_has_patent_preflight_ready(conv: dict, patent_title: str) -> bool:

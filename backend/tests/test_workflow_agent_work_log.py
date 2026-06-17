@@ -1,9 +1,25 @@
 from __future__ import annotations
 
+from fastapi import BackgroundTasks
 import pytest
 
 from src.api import routes
 from src.core.workflow_engine import PatentWorkflowEngine
+
+
+def _preflight_metadata(title: str = "智能专利撰写协同方法") -> dict:
+    return {
+        "recommend_create_patent": True,
+        "patent_preflight": {
+            "patent_title": title,
+            "protection_theme": "多智能体协同完成专利文件撰写",
+            "patent_type": "发明",
+            "claim_skeleton": "三步：接收技术交底；分派专业智能体处理；整合审查并生成文件。",
+            "technical_facts": ["存在需求分析、检索、撰写和审查智能体"],
+            "public_status": "未公开",
+            "drawing_plan": ["系统结构图", "流程图"],
+        },
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -11,10 +27,18 @@ def clear_route_state():
     routes.conversations_store.clear()
     routes.conversation_event_queues.clear()
     routes.task_events.clear()
+    routes.workflow_background_tasks.clear()
     yield
     routes.conversations_store.clear()
     routes.conversation_event_queues.clear()
     routes.task_events.clear()
+    routes.workflow_background_tasks.clear()
+
+
+async def _await_tracked_workflow(task_id: str) -> None:
+    task = routes.workflow_background_tasks.get(task_id)
+    if task:
+        await task
 
 
 class FakeHermesService:
@@ -107,10 +131,12 @@ async def test_workflow_agent_event_callback_started(monkeypatch):
     assert received[0]["agent_name"] == "需求分析师"
     assert received[0]["action"] == "分析技术方案并提取创新点"
     assert received[0]["status"] == "running"
-    assert any(event["event_type"] == "agent.work.completed" for event in received)
+    assert any(event["event_type"] == "agent.work.failed" for event in received)
+    assert context.current_phase.value == "failed"
 
 
-def test_create_workflow_persists_agent_started_and_completed_messages(client, api_prefix, monkeypatch):
+@pytest.mark.asyncio
+async def test_create_workflow_persists_agent_started_and_completed_messages(monkeypatch):
     async def fake_execute_full_workflow(context, phase_callback=None, agent_event_callback=None):
         assert agent_event_callback is not None
         await agent_event_callback({
@@ -138,20 +164,44 @@ def test_create_workflow_persists_agent_started_and_completed_messages(client, a
 
     monkeypatch.setattr(routes.workflow_engine, "execute_full_workflow", fake_execute_full_workflow)
 
-    created = client.post(f"{api_prefix}/conversations", json={"title": "测试对话"})
-    conv_id = created.json()["id"]
-    routes.conversations_store[conv_id]["messages"].append({
-        "id": "user-message",
-        "role": "user",
-        "content": "一种智能专利撰写系统",
-        "timestamp": "2026-06-08T00:00:00",
-        "type": "text",
-        "metadata": None,
-    })
+    conv_id = "conv-agent-work-persist"
+    routes.conversations_store[conv_id] = {
+        "id": conv_id,
+        "title": "测试对话",
+        "messages": [
+            {
+                "id": "user-message",
+                "role": "user",
+                "content": "一种智能专利撰写系统",
+                "timestamp": "2026-06-08T00:00:00",
+                "type": "text",
+                "metadata": None,
+            },
+            {
+                "id": "assistant-preflight",
+                "role": "assistant",
+                "content": "专利名称：智能专利撰写协同方法\n保护主题：多智能体协同完成专利文件撰写。",
+                "timestamp": "2026-06-08T00:00:01",
+                "type": "text",
+                "metadata": _preflight_metadata(),
+            },
+        ],
+        "created_at": "2026-06-08T00:00:00",
+        "updated_at": "2026-06-08T00:00:01",
+        "status": "brainstorming",
+        "linked_workflow_id": None,
+    }
 
-    response = client.post(f"{api_prefix}/conversations/{conv_id}/create-workflow", json={})
+    response = await routes.create_workflow_from_conversation(
+        conv_id,
+        routes.CreateWorkflowFromConversationRequest(
+            confirmed=True,
+            patent_title="智能专利撰写协同方法",
+        ),
+        BackgroundTasks(),
+    )
+    await _await_tracked_workflow(response["task_id"])
 
-    assert response.status_code == 200
     messages = routes.conversations_store[conv_id]["messages"]
     progress_messages = [message for message in messages if message.get("role") == "agent"]
     assert [message["metadata"]["status"] for message in progress_messages] == ["running", "completed"]
@@ -159,7 +209,8 @@ def test_create_workflow_persists_agent_started_and_completed_messages(client, a
     assert "分析技术方案并提取创新点" in progress_messages[0]["content"]
 
 
-def test_failed_agent_work_event_is_persisted_and_streamed(client, api_prefix, monkeypatch):
+@pytest.mark.asyncio
+async def test_failed_agent_work_event_is_persisted_and_streamed(monkeypatch):
     async def fake_execute_full_workflow(context, phase_callback=None, agent_event_callback=None):
         assert agent_event_callback is not None
         await agent_event_callback({
@@ -177,20 +228,44 @@ def test_failed_agent_work_event_is_persisted_and_streamed(client, api_prefix, m
 
     monkeypatch.setattr(routes.workflow_engine, "execute_full_workflow", fake_execute_full_workflow)
 
-    created = client.post(f"{api_prefix}/conversations", json={"title": "失败对话"})
-    conv_id = created.json()["id"]
-    routes.conversations_store[conv_id]["messages"].append({
-        "id": "user-message",
-        "role": "user",
-        "content": "一种智能专利撰写系统",
-        "timestamp": "2026-06-08T00:00:00",
-        "type": "text",
-        "metadata": None,
-    })
+    conv_id = "conv-agent-work-failed"
+    routes.conversations_store[conv_id] = {
+        "id": conv_id,
+        "title": "失败对话",
+        "messages": [
+            {
+                "id": "user-message",
+                "role": "user",
+                "content": "一种智能专利撰写系统",
+                "timestamp": "2026-06-08T00:00:00",
+                "type": "text",
+                "metadata": None,
+            },
+            {
+                "id": "assistant-preflight",
+                "role": "assistant",
+                "content": "专利名称：智能专利撰写协同方法\n保护主题：多智能体协同完成专利文件撰写。",
+                "timestamp": "2026-06-08T00:00:01",
+                "type": "text",
+                "metadata": _preflight_metadata(),
+            },
+        ],
+        "created_at": "2026-06-08T00:00:00",
+        "updated_at": "2026-06-08T00:00:01",
+        "status": "brainstorming",
+        "linked_workflow_id": None,
+    }
 
-    response = client.post(f"{api_prefix}/conversations/{conv_id}/create-workflow", json={})
+    response = await routes.create_workflow_from_conversation(
+        conv_id,
+        routes.CreateWorkflowFromConversationRequest(
+            confirmed=True,
+            patent_title="智能专利撰写协同方法",
+        ),
+        BackgroundTasks(),
+    )
+    await _await_tracked_workflow(response["task_id"])
 
-    assert response.status_code == 200
     failed_messages = [
         message for message in routes.conversations_store[conv_id]["messages"]
         if (message.get("metadata") or {}).get("status") == "failed"
@@ -227,7 +302,8 @@ def test_conversation_event_stream_emits_agent_work(client, api_prefix):
 
 
 
-def test_direct_workflow_start_records_agent_events_without_conversation(client, api_prefix, monkeypatch):
+@pytest.mark.asyncio
+async def test_direct_workflow_start_records_agent_events_without_conversation(monkeypatch):
     async def fake_execute_full_workflow(context, phase_callback=None, agent_event_callback=None):
         assert agent_event_callback is not None
         await agent_event_callback({
@@ -244,15 +320,18 @@ def test_direct_workflow_start_records_agent_events_without_conversation(client,
 
     monkeypatch.setattr(routes.workflow_engine, "execute_full_workflow", fake_execute_full_workflow)
 
-    created = client.post(
-        f"{api_prefix}/workflows",
-        json={"tech_description": "一种基于多智能体协作的智能专利撰写系统和方法", "user_id": "default_user"},
+    created = await routes.create_workflow_session(
+        routes.WorkflowStartRequest(
+            tech_description="一种基于多智能体协作的智能专利撰写系统和方法",
+            user_id="default_user",
+        )
     )
-    task_id = created.json()["task_id"]
+    task_id = created.task_id
 
-    response = client.post(f"{api_prefix}/workflows/{task_id}/start")
+    response = await routes.start_workflow(task_id, BackgroundTasks())
+    await _await_tracked_workflow(task_id)
 
-    assert response.status_code == 200
+    assert response["status"] == "started"
     events = routes.task_events[task_id]
     assert any(event.event_type == "agent.work.started" for event in events)
     assert routes.conversation_event_queues == {}

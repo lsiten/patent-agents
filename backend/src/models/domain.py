@@ -70,7 +70,7 @@ class PriorArtReference(BaseModel):
     key_claims: List[str] = Field(default_factory=list)
     technical_differences: List[str] = Field(default_factory=list)  # 与本发明的区别
     url: Optional[str] = None
-    source: str  # 数据来源: cnipa/uspto/epo/google_scholar/arxiv等
+    source: str  # 数据来源: google_patents/uspto/arxiv/official_web 等真实返回来源
 
 
 class RetrievalReport(BaseModel):

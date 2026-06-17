@@ -69,18 +69,6 @@ export function buildPatentUrl(patentId: string, source: string): string {
   if (!id) return '';
 
   const sourceLower = source.toLowerCase();
-  if (sourceLower === 'cnipa' || sourceLower === '中国国家知识产权局') {
-    return `https://pss-system.cponline.cnipa.gov.cn/conventionalSearch?searchWord=${encodeURIComponent(id)}`;
-  }
-
-  if (sourceLower === 'epo' || sourceLower === '欧洲专利局' || id.startsWith('EP')) {
-    return `https://worldwide.espacenet.com/patent/search?q=${encodeURIComponent(id)}`;
-  }
-
-  if (sourceLower === 'wipo' || id.startsWith('WO')) {
-    return `https://patentscope.wipo.int/search/en/detail.jsf?docId=${encodeURIComponent(id)}`;
-  }
-
   if (sourceLower === 'arxiv') {
     return `https://arxiv.org/abs/${encodeURIComponent(id)}`;
   }

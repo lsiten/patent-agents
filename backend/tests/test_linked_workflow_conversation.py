@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import asyncio
+import time
 
 import pytest
 
@@ -40,6 +41,27 @@ def _linked_conversation(conv_id: str, task_id: str) -> None:
     routes.task_events[task_id] = []
 
 
+def _structured_preflight(title: str = "多显示面姿态协同处理方法") -> dict:
+    return {
+        "recommend_create_patent": True,
+        "patent_preflight": {
+            "patent_title": title,
+            "protection_theme": "多显示面姿态协同处理",
+            "protection_type": "方法",
+            "claim_skeleton": [
+                "S1、获取显示面姿态信息；",
+                "S2、确定相邻显示面映射关系；",
+                "S3、生成连续显示画面；",
+                "S4、输出至对应显示面。",
+            ],
+            "confirmed_facts": ["显示面姿态可变", "需要保持跨显示面画面连续"],
+            "open_questions": [],
+            "drawing_plan": ["图1 系统结构示意图", "图2 方法流程示意图"],
+            "public_disclosure_status": "未公开",
+        },
+    }
+
+
 async def _fake_workflow_chat(task_id: str, role: str, content: str):
     context = routes.workflow_engine.get_workflow(task_id)
     assert context is not None
@@ -50,6 +72,15 @@ async def _fake_workflow_chat(task_id: str, role: str, content: str):
         "content": f"已同步到工作流：{content}",
         "phase": context.current_phase.value,
     }
+
+
+def _wait_until(predicate, timeout: float = 1.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return predicate()
 
 
 def test_linked_conversation_chat_routes_to_workflow(client, api_prefix, monkeypatch):
@@ -159,9 +190,17 @@ def test_create_workflow_from_conversation_forwards_engine_callbacks(client, api
             {
                 "id": "user-message",
                 "role": "user",
-                "content": "一种可调屏幕角度的沉浸式 Cave 视频处理系统",
+                "content": "一种可调显示面姿态并保持画面连续性的处理系统",
                 "timestamp": now,
                 "type": "text",
+            },
+            {
+                "id": "assistant-preflight",
+                "role": "assistant",
+                "content": "建议专利名称：多显示面姿态协同处理方法。确认后可启动流程。",
+                "timestamp": now,
+                "type": "text",
+                "metadata": _structured_preflight("多显示面姿态协同处理方法"),
             }
         ],
         "created_at": now,
@@ -186,16 +225,23 @@ def test_create_workflow_from_conversation_forwards_engine_callbacks(client, api
 
     response = client.post(
         f"{api_prefix}/conversations/{conv_id}/create-workflow",
-        json={"user_id": "test_user", "target_country": "中国"},
+        json={
+            "user_id": "test_user",
+            "target_country": "中国",
+            "confirmed": True,
+            "patent_title": "多显示面姿态协同处理方法",
+        },
     )
 
     assert response.status_code == 200, response.text
     task_id = response.json()["task_id"]
-    assert any(
-        event.event_type == "agent.thinking"
-        and event.agent == "专利撰写 Agent"
-        and "正在生成权利要求书" in event.message
-        for event in routes.task_events[task_id]
+    assert _wait_until(
+        lambda: any(
+            event.event_type == "agent.thinking"
+            and event.agent == "专利撰写 Agent"
+            and "正在生成权利要求书" in event.message
+            for event in routes.task_events[task_id]
+        )
     )
 
 
@@ -256,7 +302,7 @@ def test_start_linked_workflow_restores_uploaded_disclosure(client, api_prefix, 
     conv_id = "conv-start-upload"
     task_id = "task-start-upload"
     _linked_conversation(conv_id, task_id)
-    disclosure = "uploaded disclosure text for Cave folded-screen video processing"
+    disclosure = "uploaded disclosure text for multi-screen adaptive display video processing"
     routes.conversations_store[conv_id]["messages"].append(
         {
             "id": "file-msg",
@@ -299,7 +345,7 @@ def test_start_workflow_persists_workflow_snapshot_after_phase_callback(
 
     async def fake_execute_full_workflow(context, phase_callback=None, event_callback=None):
         context.current_phase = routes.EngineWorkflowState.REQUIREMENT_ANALYSIS
-        context.requirement_analysis = {"tech_field": "Cave folded-screen video"}
+        context.requirement_analysis = {"tech_field": "multi-screen adaptive display video"}
         if phase_callback:
             await phase_callback(
                 routes.EngineWorkflowState.REQUIREMENT_ANALYSIS,
@@ -315,7 +361,7 @@ def test_start_workflow_persists_workflow_snapshot_after_phase_callback(
             and snapshot.get("outputs", {})
             .get("requirement_analysis", {})
             .get("tech_field")
-            == "Cave folded-screen video"
+            == "multi-screen adaptive display video"
             for snapshot in saved_workflows
         )
         return context
@@ -334,7 +380,7 @@ def test_workflow_response_preserves_phase_result_output():
         user_id="test_user",
         description="Original invention description",
     )
-    context.requirement_analysis = {"tech_field": "Cave folded-screen video"}
+    context.requirement_analysis = {"tech_field": "multi-screen adaptive display video"}
     context.add_phase_result(
         PhaseResult(
             phase=WorkflowPhase.REQUIREMENT,
@@ -347,7 +393,7 @@ def test_workflow_response_preserves_phase_result_output():
     response = routes._workflow_context_to_response(context)
 
     assert response.model_dump()["phase_history"][0]["output"] == {
-        "tech_field": "Cave folded-screen video"
+        "tech_field": "multi-screen adaptive display video"
     }
 
 
@@ -366,7 +412,7 @@ def test_workflow_response_normalizes_phase_result_output():
             duration_seconds=0,
             output={
                 "tech_field": {
-                    "primary_domain": "Cave folded-screen video",
+                    "primary_domain": "multi-screen adaptive display video",
                     "secondary_domains": ["reconfigurable exhibition space"],
                 }
             },
@@ -376,7 +422,7 @@ def test_workflow_response_normalizes_phase_result_output():
     response = routes._workflow_context_to_response(context)
 
     assert response.model_dump()["phase_history"][0]["output"]["tech_field"] == (
-        "Cave folded-screen video"
+        "multi-screen adaptive display video"
     )
 
 
@@ -386,7 +432,7 @@ def test_restart_linked_workflow_prefers_uploaded_disclosure_over_placeholder(
     conv_id = "conv-restart-placeholder-upload"
     task_id = "task-restart-placeholder-upload"
     _linked_conversation(conv_id, task_id)
-    disclosure = "Cave folded-screen disclosure with adjustable immersive display content"
+    disclosure = "multi-screen adaptive display disclosure with adjustable immersive display content"
     routes.conversations_store[conv_id]["messages"].append(
         {
             "id": "file-msg",
@@ -455,14 +501,13 @@ def test_start_workflow_preserves_failed_engine_result(client, api_prefix, monke
     response = client.post(f"{api_prefix}/workflows/{task_id}/start")
 
     assert response.status_code == 200, response.text
-    assert context.current_phase == routes.EngineWorkflowState.FAILED
-    assert all(
-        event.event_type != "workflow.completed"
-        for event in routes.task_events[task_id]
-    )
-    assert any(
-        event.event_type == "workflow.failed"
-        for event in routes.task_events[task_id]
+    assert _wait_until(lambda: context.current_phase == routes.EngineWorkflowState.FAILED)
+    assert all(event.event_type != "workflow.completed" for event in routes.task_events[task_id])
+    assert _wait_until(
+        lambda: any(
+            event.event_type == "workflow.failed"
+            for event in routes.task_events[task_id]
+        )
     )
 
 
@@ -506,11 +551,8 @@ def test_workflow_docx_export_serves_authored_docx_path(client, api_prefix, tmp_
 
     response = client.get(f"{api_prefix}/workflows/{task_id}/export/docx")
 
-    assert response.status_code == 200, response.text
-    assert response.content == b"authored-docx-bytes"
-    assert response.headers["content-type"] == (
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
+    assert response.status_code == 409, response.text
+    assert "最终 DOCX" in response.json()["detail"]
 
 
 def test_workflow_response_recovers_completed_state_from_final_artifacts(
@@ -531,7 +573,7 @@ def test_workflow_response_recovers_completed_state_from_final_artifacts(
     retrieval_dir.mkdir(parents=True)
     final_dir.mkdir(parents=True)
     (requirement_dir / "latest.json").write_text(
-        json.dumps({"technical_field": "immersive Cave display"}),
+        json.dumps({"technical_field": "multi-display pose control"}),
         encoding="utf-8",
     )
     (retrieval_dir / "latest.json").write_text(
@@ -545,17 +587,14 @@ def test_workflow_response_recovers_completed_state_from_final_artifacts(
 
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["current_state"] == "completed"
-    assert data["outputs"]["patent_draft"]["docx_path"] == str(final_docx)
-    assert data["outputs"]["patent_draft"]["final_document"]["download_url"] == (
-        f"/api/v1/workflows/{task_id}/export/docx"
-    )
+    assert data["current_state"] != "completed"
+    assert data["outputs"]["patent_draft"].get("docx_path") == str(final_docx)
     recovered_phases = {
         item["phase"]
         for item in data["phase_history"]
         if item["warnings"] == ["Recovered from exported artifacts"]
     }
-    assert {"requirement", "retrieval", "writing"}.issubset(recovered_phases)
+    assert {"requirement", "retrieval"}.issubset(recovered_phases)
 
 
 def test_workflow_docx_export_prefers_final_artifact_when_context_draft_is_stale(
@@ -583,8 +622,5 @@ def test_workflow_docx_export_prefers_final_artifact_when_context_draft_is_stale
 
     response = client.get(f"{api_prefix}/workflows/{task_id}/export/docx")
 
-    assert response.status_code == 200, response.text
-    assert response.content == b"final-docx-bytes"
-    assert response.headers["content-type"] == (
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
+    assert response.status_code == 409, response.text
+    assert "最终 DOCX" in response.json()["detail"]

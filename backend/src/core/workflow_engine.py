@@ -371,6 +371,7 @@ class PatentWorkflowEngine:
         context: WorkflowContext,
         phase_state: WorkflowState,
         reason: str,
+        preserve_fields: Optional[List[str]] = None,
     ) -> None:
         """Clear current downstream artifacts after an upstream phase changes.
 
@@ -381,8 +382,11 @@ class PatentWorkflowEngine:
         fields = _DOWNSTREAM_CONTEXT_FIELDS.get(phase_state, ())
         if not fields:
             return
+        preserved = set(preserve_fields or [])
         invalidated: List[str] = []
         for field in fields:
+            if field in preserved:
+                continue
             if getattr(context, field, None):
                 setattr(context, field, {})
                 invalidated.append(field)
@@ -393,6 +397,34 @@ class PatentWorkflowEngine:
                 "reason": reason,
                 "invalidated_at": datetime.now().isoformat(),
             }
+
+    def _preserve_downstream_fields_after_phase(
+        self,
+        phase_state: WorkflowState,
+        phase_output: Any,
+    ) -> List[str]:
+        """Return downstream artifacts that remain valid after an upstream round.
+
+        Requirement analysis has two modes in the current loop:
+        1. initial analysis or substantive update before retrieval, which must
+           invalidate old retrieval/writing/review artifacts;
+        2. post-retrieval review confirming gaps are closed, which must preserve
+           the retrieval report that was just reviewed and only invalidate stale
+           draft/review artifacts.
+        """
+        if phase_state != WorkflowState.REQUIREMENT_ANALYSIS or not isinstance(phase_output, dict):
+            return []
+
+        retrieval_review = phase_output.get("retrieval_feedback_review")
+        if isinstance(retrieval_review, dict) and self._requirement_review_allows_drafting(
+            retrieval_review
+        ):
+            return ["retrieval_report"]
+
+        if self._requirement_review_allows_drafting(phase_output):
+            return ["retrieval_report"]
+
+        return []
 
     def _update_shared_context_from_phase(
         self,
@@ -875,10 +907,6 @@ class PatentWorkflowEngine:
                         f"Workflow phase failed: {agent_id}: {agent_error}",
                         task_id=context.task_id,
                     )
-                    if agent_id == "patent_writer":
-                        break
-                    if agent_id == "quality_reviewer":
-                        break
                     await self._persist_loop_and_sediment_skills(
                         context,
                         "failed",
@@ -890,6 +918,10 @@ class PatentWorkflowEngine:
                     context,
                     phase_state,
                     reason="upstream_phase_completed",
+                    preserve_fields=self._preserve_downstream_fields_after_phase(
+                        phase_state,
+                        context_data,
+                    ),
                 )
 
                 # 记录阶段完成
@@ -1636,9 +1668,9 @@ class PatentWorkflowEngine:
         self,
         context: WorkflowContext,
         phase: WorkflowPhase,
-        fallback_field: Optional[str] = None,
+        context_field: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Return latest successful phase output from history, falling back to context field."""
+        """Return latest successful phase output from history, then the context snapshot field."""
         expected = getattr(phase, "value", phase)
         for result in reversed(context.phase_history or []):
             result_phase = getattr(result.phase, "value", result.phase)
@@ -1647,10 +1679,10 @@ class PatentWorkflowEngine:
             output = self._unwrap_phase_payload(result.output)
             if isinstance(output, dict) and output:
                 return output
-        if fallback_field:
-            fallback = self._unwrap_phase_payload(getattr(context, fallback_field, {}))
-            if isinstance(fallback, dict) and fallback:
-                return fallback
+        if context_field:
+            snapshot = self._unwrap_phase_payload(getattr(context, context_field, {}))
+            if isinstance(snapshot, dict) and snapshot:
+                return snapshot
         return {}
 
     def _build_phase_prompt(self, context: WorkflowContext, phase: WorkflowState, content_only: bool = False) -> str:
@@ -1676,8 +1708,11 @@ class PatentWorkflowEngine:
 - `all_requirement_gaps_closed`: true/false
 - `remaining_requirement_gaps`: 仍未补齐的需求/证据缺口数组
 - `search_feedback_for_retrieval`: 需要检索 Agent 下一轮继续解决的问题数组
-- `ready_for_writing`: true/false，只有需求和检索均足以支撑完整专利撰写时才能为 true
+- `ready_for_writing`: true/false；只有存在会导致专利文本无法完整撰写的真实技术缺口、用户专属事实缺口或需求矛盾时才设为 false。
+- `carried_retrieval_risks`: 已完成多轮真实检索但仍只能作为风险带入撰写/审查的证据限制数组。
 如果仍有缺口，你必须把每个缺口归属到 requirement_analysis 或 retrieval_analysis：需求/方案细节缺口由你基于上一轮内容继续补齐；证据/现有技术/真伪核验缺口写入 `search_feedback_for_retrieval` 交给检索 Agent。
+不得仅因为“未找到单一最接近现有技术”“某个检索源不可用/无结果”“还可补充产品页面、白皮书、标准或厂商公开资料”就阻止撰写；当检索 Agent 已记录真实检索式、数据源、命中/失败/无结果和可核验对比证据时，这些事项应进入 `carried_retrieval_risks` 并交由撰写和质量审查处理。
+只有补证项会改变发明主题、权利要求骨架、必要技术特征或公开状态时，才能把 `ready_for_writing` 设为 false。
 不得因为检索暂时失败就要求用户补充，除非缺口是用户专属事实（例如内部产品参数、尚未公开资料、明确业务选择）。
 最终 JSON 必须剔除逐字稿时间戳、说话人、寒暄和会议口语。
 ---
@@ -2037,7 +2072,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             "content_incomplete": "WRITE_MORE",
             "requirement_unclear": "ANALYZE_MORE",
             "evidence_missing": "SEARCH_MORE",
-            "external_info_missing": "NEEDS_USER_INPUT",
+            "external_info_missing": self._route_missing_information(review_report),
             "system_failure": "TERMINAL_FAILURE",
         }
         if root_cause in mapping:
@@ -2045,7 +2080,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 
         missing_information = review_report.get("missing_information", [])
         if isinstance(missing_information, list) and any(str(item).strip() for item in missing_information):
-            return "NEEDS_USER_INPUT"
+            return self._route_missing_information(review_report)
 
         draft_issues = self._validate_patent_draft_completeness(context.patent_draft)
         if any(
@@ -2068,6 +2103,43 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         if self._needs_quality_remediation(review_report):
             return "WRITE_MORE"
         return "TERMINAL_FAILURE"
+
+    def _route_missing_information(self, review_report: Dict[str, Any]) -> str:
+        """Route missing information back to the Agent most likely to resolve it first.
+
+        Missing information is not automatically a user-blocking state. Most
+        quality findings should go back through requirement analysis or
+        retrieval so Agents can refine the shared facts, change search
+        strategies, and only ask the user after the remediation loop is unable
+        to make progress.
+        """
+        if not isinstance(review_report, dict):
+            return "ANALYZE_MORE"
+
+        missing_information = review_report.get("missing_information", [])
+        if not isinstance(missing_information, list):
+            missing_information = [missing_information]
+        text = "\n".join(str(item) for item in missing_information if str(item).strip()).lower()
+
+        search_markers = (
+            "检索",
+            "证据",
+            "公开",
+            "网页",
+            "专利",
+            "prior art",
+            "patent",
+            "google patents",
+            "uspto",
+            "对比文件",
+            "真伪",
+            "核验",
+            "来源",
+        )
+        if any(marker.lower() in text for marker in search_markers):
+            return "SEARCH_MORE"
+
+        return "ANALYZE_MORE"
 
     def _resolve_remediation_resume_phase(self, classification: str) -> WorkflowState:
         mapping = {
@@ -2134,10 +2206,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             "证据",
             "可核验",
             "Google Patents",
-            "CNIPA",
             "USPTO",
-            "EPO",
-            "WIPO",
             "专业/官方",
             "交叉核验",
             "技术问题",
@@ -2205,6 +2274,10 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             isinstance(retrieval_report, dict)
             and self._has_real_retrieval_evidence(retrieval_report)
         )
+        has_negative_retrieval_audit = (
+            isinstance(retrieval_report, dict)
+            and self._has_auditable_negative_retrieval(retrieval_report)
+        )
         unavailable_source_markers = (
             "未配置",
             "未启用",
@@ -2228,109 +2301,141 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             "商业专利库",
             "数据源",
             "不应要求用户补充",
+            "最接近对比文件",
+            "最接近专利文件",
+            "直接披露",
+            "直接公开",
+            "中国专利数据库",
+            "中文专利源",
+            "CNIPA",
+            "可核验中文",
+            "未获得直接",
+            "未取得任何可写入",
+            "similar_patents",
+            "可核验专利文献",
+            "可写入",
+            "公开号",
+            "申请人",
+            "公开日",
+            "核心公开内容",
+            "中文专利证据",
+            "专利证据",
+            "专利文献",
+            "最接近专利文献",
+            "行业痛点",
+            "背景公开证据",
+            "产品白皮书",
+            "白皮书",
+            "真实产品页面",
+            "产品页面",
+            "厂商文档",
+            "厂商资料",
+            "厂商公开资料",
+            "行业标准",
+            "标准规范",
+            "商业沉浸式",
+            "单一最接近文献",
+            "最接近现有技术确认",
+            "继续检索英文专利源",
+            "继续检索中文专利源",
+            "形成可审计的否定式检索结论",
         )
-        if has_evidence and any(marker in text for marker in unavailable_source_markers):
+        if (has_evidence or has_negative_retrieval_audit) and any(
+            marker in text for marker in unavailable_source_markers
+        ):
             return True
 
         implementation_detail_markers = (
-            "最大/最小转角",
-            "最大转角",
-            "最小转角",
-            "安全限位",
-            "驱动机构型号",
-            "姿态检测精度",
-            "控制延迟",
-            "刷新率",
             "具体数值",
             "可公开范围",
             "尚未量化",
             "参数仍需",
-            "需研发侧确认",
-            "生成规则是离线标定",
-            "生成规则",
-            "表生成规则",
-            "角度—画面映射",
-            "角度-画面映射",
-            "映射关系",
-            "数学关系",
-            "表项结构",
-            "标定方法",
-            "重投影参数",
-            "实时计算",
-            "查表",
-            "插值",
-            "视锥重投影",
-            "触发条件",
-            "外转补充",
-            "内转删除",
-            "裁切/重构",
-            "裁切",
-            "重构",
-            "量化",
-            "算法化",
             "工程参数",
             "研发内部",
-            "不影响核心发明构思",
             "范围化",
             "可选化",
             "实施例示例化",
-            "客观信号不足",
-            "应用场景",
-            "场景信号",
-            "最接近",
-            "核心组合",
-            "尚未检索到",
-            "缺少关于",
-            "可核验专利对比文件",
-            "可移动或可转动显示墙",
-            "动态投影映射",
-            "论文级来源",
-            "官方或论文级来源",
-            "Wikipedia",
-            "初步背景",
-            "背景起点",
-            "未调用",
-            "similarity_analyzer",
-            "patentability_scorer",
-            "risk_analyzer",
-            "客观分数",
-            "客观评分",
-            "风险量化",
-            "工具调用达到上限",
-            "固定顺序",
-            "空跑工具",
-            "全文",
-            "权利要求全文",
-            "说明书关键段落",
-            "附图实施方式",
-            "逐项核验",
-            "下载PDF",
-            "详情页",
-            "完整打开",
-            "形成逐项特征对照表",
-            "商业产品",
-            "学术论文",
-            "行业白皮书",
-            "标准规范",
-            "非专利公开",
-            "补充非专利公开",
-            "重点核验",
-            "完整组合",
-            "逐项核验",
-            "完整抽取",
-            "权利要求全文",
-            "说明书关键段落",
-            "附图实施方式",
-            "正文尚未成功读取",
-            "搜索结果线索",
-            "不能作为确定性公开事实",
-            "商业产品",
-            "行业白皮书",
-            "标准规范",
+            "真实产品采用",
+            "公开产品采用",
+            "公开功能",
+            "公开时间",
+            "角度阈值",
+            "角度区间",
+            "显示模板参数",
+            "具体算法",
+            "唯一算法",
+            "硬件来源",
         )
         if any(marker in text for marker in implementation_detail_markers):
             return True
         return False
+
+    def _has_auditable_negative_retrieval(self, report: Dict[str, Any]) -> bool:
+        """True when retrieval made real attempts and recorded why direct evidence is absent.
+
+        This does not treat missing patent evidence as success. It only lets the
+        writer proceed with explicit carried risks after the retrieval Agent has
+        documented sources, queries, failures/no-hits, and non-patent or web
+        evidence. The writer/reviewer must still cite the limitation honestly.
+        """
+        if not isinstance(report, dict):
+            return False
+        if not self._has_real_retrieval_evidence(report):
+            return False
+
+        sources = self._extract_retrieval_sources(report)
+        evidence_sources = self._as_nonempty_list(report.get("evidence_sources"))
+        web_evidence = self._as_nonempty_list(report.get("web_evidence"))
+        non_patent = self._as_nonempty_list(report.get("non_patent_prior_art"))
+        tool_results = self._as_nonempty_list(report.get("tool_results"))
+        if len(sources) + len(evidence_sources) + len(web_evidence) + len(non_patent) < 3:
+            return False
+
+        audit_text = "\n".join(
+            self._iter_phase_text_values(
+                {
+                    "retrieval_strategy": report.get("retrieval_strategy"),
+                    "retrieval_keywords": report.get("retrieval_keywords"),
+                    "retrieval_databases": report.get("retrieval_databases"),
+                    "unavailable_sources": report.get("unavailable_sources"),
+                    "empty_sources": report.get("empty_sources"),
+                    "skipped_sources": report.get("skipped_sources"),
+                    "evidence_gaps": report.get("evidence_gaps"),
+                    "evidence_sources": report.get("evidence_sources"),
+                }
+            )
+        )
+        attempted_patent_source = any(
+            marker in audit_text
+            for marker in (
+                "Google Patents",
+                "google_patents",
+                "USPTO",
+                "CNIPA",
+                "中国专利",
+                "专利源",
+                "专利库",
+                "patent_search",
+            )
+        )
+        recorded_no_hit_or_failure = any(
+            marker in audit_text
+            for marker in (
+                "HTTP 503",
+                "解析失败",
+                "不可用",
+                "无法访问",
+                "无结果",
+                "未取得",
+                "未获得",
+                "未命中",
+                "未见直接",
+                "否定式",
+                "筛选记录",
+            )
+        )
+        enough_attempts = len(tool_results) >= 3 or len(evidence_sources) >= 3
+        return attempted_patent_source and recorded_no_hit_or_failure and enough_attempts
 
     def _filter_hard_prewriting_gaps(
         self,
@@ -2374,6 +2479,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         text = "\n".join(self._iter_phase_text_values(gap_text)) if isinstance(gap_text, (dict, list)) else str(gap_text or "")
         if not text.strip():
             return True
+        confirmed_text = self._confirmed_context_text(context)
         public_status_gap_markers = (
             "产品公开时间",
             "首次公开",
@@ -2384,10 +2490,108 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         )
         if any(marker in text for marker in public_status_gap_markers):
             return self._workflow_confirms_public_status(context)
+        if any(marker in text for marker in ("角度阈值", "角度区间", "显示模板参数")):
+            return any(
+                marker in confirmed_text
+                for marker in ("姿态-显示映射表", "映射表", "不写死", "显示模板参数")
+            )
+        if any(
+            marker in text
+            for marker in (
+                "补充画面",
+                "过渡画面",
+                "裁切画面",
+                "重构画面",
+                "具体算法",
+                "唯一算法",
+            )
+        ):
+            return any(
+                marker in confirmed_text
+                for marker in (
+                    "透视变换",
+                    "纹理采样",
+                    "时序插值",
+                    "内容补全",
+                    "遮挡掩膜",
+                    "边缘羽化",
+                    "透明度渐变",
+                    "过渡帧",
+                    "不限定唯一算法",
+                    "可选算法族",
+                )
+            )
+        if any(marker in text for marker in ("姿态检测", "硬件来源", "屏幕姿态检测")):
+            return any(
+                marker in confirmed_text
+                for marker in (
+                    "角度传感器",
+                    "执行机构反馈",
+                    "屏幕控制器状态",
+                    "视觉/深度定位",
+                    "深度定位",
+                )
+            )
         return False
+
+    def _confirmed_context_text(self, context: WorkflowContext) -> str:
+        """Return all user-confirmed/shared facts visible to workflow gates."""
+        parts: List[str] = []
+        parts.append(str(context.original_description or ""))
+        parts.append(context.get_shared_agent_context_text(limit=20000))
+        for msg in context.message_history:
+            if msg.get("role") in {"user", "assistant"}:
+                parts.append(str(msg.get("content") or ""))
+        supplies = context.metadata.get("user_supplemental_info")
+        if isinstance(supplies, list):
+            parts.extend(str(item) for item in supplies)
+        remediation = context.metadata.get("quality_remediation")
+        if isinstance(remediation, dict):
+            parts.append(str(remediation.get("user_supplied_info") or ""))
+        return "\n".join(part for part in parts if part.strip())
 
     def _requirement_review_allows_drafting(self, retrieval_review: Dict[str, Any]) -> bool:
         """Agent-owned signal that the file can move to drafting with risks carried forward."""
+        if not isinstance(retrieval_review, dict):
+            return False
+
+        if retrieval_review.get("ready_for_writing") is False:
+            return False
+
+        def is_explicitly_nonblocking_gap(item: Any) -> bool:
+            if isinstance(item, dict):
+                if item.get("blocking_for_writing") is False:
+                    return True
+                gap_text = "\n".join(
+                    str(item.get(key) or "")
+                    for key in ("impact", "reason", "recommendation", "gap")
+                )
+            else:
+                gap_text = str(item or "")
+            nonblocking_patterns = (
+                "不应阻止撰写",
+                "不阻止撰写",
+                "不影响当前权利要求骨架",
+                "不影响当前权利要求",
+                "不影响当前撰写",
+                "不改变发明主题",
+                "作为检索风险带入撰写",
+                "作为撰写和质量审查风险",
+                "带入撰写和质量审查",
+            )
+            return any(pattern in gap_text for pattern in nonblocking_patterns)
+
+        remaining = self._as_nonempty_list(retrieval_review.get("remaining_requirement_gaps"))
+        hard_remaining = [
+            item
+            for item in remaining
+            if not is_explicitly_nonblocking_gap(item)
+        ]
+        if retrieval_review.get("ready_for_writing") is True and (
+            retrieval_review.get("all_requirement_gaps_closed") is True or not hard_remaining
+        ):
+            return True
+
         text = "\n".join(self._iter_phase_text_values(retrieval_review))
         allow_markers = (
             "具备预撰写基础",
@@ -2401,12 +2605,15 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             "可以进入预撰写或内部草案",
             "可以进入预撰写或内部方案草案",
             "可进入撰写",
+            "可以进入撰写",
             "可进入草案",
             "可启动草案",
             "可以进入草案",
             "技术方案层面已具备预撰写基础",
             "已具备预撰写基础",
             "足以支撑预撰写",
+            "足以支撑撰写",
+            "已足以支撑撰写",
             "足以提示撰写",
         )
         return any(marker in text for marker in allow_markers)
@@ -2540,10 +2747,6 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                     sources.add("google_patents")
                 elif "uspto.gov" in url:
                     sources.add("uspto")
-                elif "epo.org" in url or "espacenet.com" in url:
-                    sources.add("epo")
-                elif "cnipa" in url or "cponline.cnipa" in url:
-                    sources.add("cnipa")
 
         return sorted(sources)
 
@@ -2558,11 +2761,6 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         professional_domains = (
             "patents.google.com",
             "uspto.gov",
-            "epo.org",
-            "espacenet.com",
-            "wipo.int",
-            "cnipa.gov.cn",
-            "cponline.cnipa.gov.cn",
             "patentcenter.uspto.gov",
             "ieee.org",
             "acm.org",
@@ -2632,21 +2830,51 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             "继续检索",
             "中国专利",
             "专利库",
-            "CNIPA",
             "Google Patents",
             "USPTO",
-            "EPO",
-            "WIPO",
             "可核验证据",
             "专业/官方",
             "官方或专业",
             "交叉核验",
             "真伪",
+            "证据",
+            "补证",
+            "核验",
             "现有技术",
             "对比文件",
+            "最接近",
+            "产品页面",
+            "白皮书",
+            "厂商",
+            "标准",
             "专利号",
         )
         return any(marker in text for marker in retrieval_markers)
+
+    def _review_gaps_are_carriable_retrieval_risks(
+        self,
+        gaps: List[Any],
+        retrieval_report: Optional[Dict[str, Any]],
+    ) -> bool:
+        """Return True when review gaps are retrieval risk notes, not drafting blockers."""
+        if not gaps:
+            return True
+        report = retrieval_report or {}
+        if not (
+            self._has_real_retrieval_evidence(report)
+            or self._has_auditable_negative_retrieval(report)
+        ):
+            return False
+        for item in gaps:
+            text = "\n".join(self._iter_phase_text_values(item)) if isinstance(item, (dict, list)) else str(item)
+            if not text.strip():
+                continue
+            if self._is_nonblocking_prewriting_gap(text, report):
+                continue
+            if self._requirement_gap_belongs_to_retrieval(text):
+                continue
+            return False
+        return True
 
     def _collect_prewriting_blockers(self, context: WorkflowContext) -> List[Dict[str, str]]:
         """Return blockers that must be resolved before the writer Agent runs.
@@ -2720,6 +2948,10 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             else False
         )
         has_real_retrieval_evidence = self._has_real_retrieval_evidence(ret_preview or {})
+        requirement_allows_drafting = (
+            bool(req.get("can_start_drafting") is True or req.get("ready_for_writing") is True)
+            or self._requirement_review_allows_drafting(req)
+        )
 
         raw_information_gaps = [
             item
@@ -2743,6 +2975,22 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 carried["retrieval_information_gaps"] = retrieval_gaps
             filtered_gaps = []
             retrieval_gaps = []
+        elif requirement_allows_drafting and (
+            has_real_retrieval_evidence
+            or self._has_auditable_negative_retrieval(ret_preview or {})
+        ):
+            carried = context.metadata.setdefault("prewriting_carried_risks", {})
+            if filtered_gaps:
+                carried["requirement_information_gaps"] = filtered_gaps
+            if retrieval_gaps:
+                carried["retrieval_information_gaps"] = retrieval_gaps
+            carried["requirement_review_conclusion"] = str(
+                req.get("analysis_confidence_note")
+                or req.get("review_conclusion")
+                or "需求分析 Agent 已确认足以支撑撰写。"
+            )[:2000]
+            filtered_gaps = []
+            retrieval_gaps = []
         if filtered_gaps:
             blockers.append({
                 "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
@@ -2761,7 +3009,17 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 "severity": "high",
                 "message": "需求分析标记了未解决的信息不足信号，必须先由 CEO 调度补齐或确认。",
             })
-        if self._retrieval_has_requirement_review(context) and not isinstance(retrieval_review, dict):
+        if (
+            self._retrieval_has_requirement_review(context)
+            and not isinstance(retrieval_review, dict)
+            and not (
+                requirement_allows_drafting
+                and (
+                    has_real_retrieval_evidence
+                    or self._has_auditable_negative_retrieval(ret_preview or {})
+                )
+            )
+        ):
             blockers.append({
                 "phase": WorkflowState.REQUIREMENT_ANALYSIS.value,
                 "severity": "high",
@@ -2770,19 +3028,24 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         if isinstance(retrieval_review, dict):
             ready_for_writing = retrieval_review.get("ready_for_writing")
             all_gaps_closed = retrieval_review.get("all_requirement_gaps_closed")
-            remaining = self._filter_hard_prewriting_gaps(
-                [
-                    item
-                    for item in self._as_nonempty_list(
-                        retrieval_review.get("remaining_requirement_gaps")
-                    )
-                    if not self._gap_closed_by_confirmed_context(item, context)
-                ],
-                ret_preview,
+            raw_remaining = [
+                item
+                for item in self._as_nonempty_list(
+                    retrieval_review.get("remaining_requirement_gaps")
+                )
+                if not self._gap_closed_by_confirmed_context(item, context)
+            ]
+            raw_search_feedback = self._as_nonempty_list(
+                retrieval_review.get("search_feedback_for_retrieval")
             )
-            search_feedback = self._filter_hard_prewriting_gaps(
-                self._as_nonempty_list(retrieval_review.get("search_feedback_for_retrieval")),
-                ret_preview,
+            remaining = self._filter_hard_prewriting_gaps(raw_remaining, ret_preview)
+            search_feedback = self._filter_hard_prewriting_gaps(raw_search_feedback, ret_preview)
+            carriable_retrieval_risks = (
+                self._review_gaps_are_carriable_retrieval_risks(raw_remaining, ret_preview)
+                and self._review_gaps_are_carriable_retrieval_risks(
+                    raw_search_feedback,
+                    ret_preview,
+                )
             )
             if review_allows_drafting:
                 context.metadata["prewriting_carried_risks"] = {
@@ -2792,6 +3055,19 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 }
                 remaining = []
                 search_feedback = []
+            elif carriable_retrieval_risks:
+                carried = context.metadata.setdefault("prewriting_carried_risks", {})
+                carried["remaining_requirement_gaps"] = raw_remaining
+                carried["search_feedback_for_retrieval"] = raw_search_feedback
+                carried["review_conclusion"] = retrieval_review.get("review_conclusion")
+                carried["policy"] = (
+                    "需求分析复核中的剩余项均为检索证据增强或来源限制；"
+                    "已有真实检索证据/失败审计，作为撰写和质量审查风险继续流转。"
+                )
+                remaining = []
+                search_feedback = []
+                ready_for_writing = True
+                all_gaps_closed = True
             hard_review_blocked = bool(remaining or search_feedback)
             soft_review_flag_only = (
                 (review_allows_drafting or not hard_review_blocked)
@@ -2894,6 +3170,23 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             self._as_nonempty_list(ret.get("evidence_gaps")),
             ret,
         )
+        latest_requirement_approves_retrieval = (
+            retrieval_has_newer_requirement_review
+            and (review_allows_drafting or requirement_allows_drafting)
+            and self._has_real_retrieval_evidence(ret)
+        )
+        if evidence_gaps and latest_requirement_approves_retrieval:
+            context.metadata.setdefault("prewriting_carried_risks", {})[
+                "retrieval_evidence_gaps"
+            ] = {
+                "items": evidence_gaps,
+                "policy": (
+                    "检索 Agent 已返回真实可核验证据，且更新后的需求分析 Agent "
+                    "已确认需求缺口可进入撰写；剩余证据限制转交撰写/质检阶段处理，"
+                    "不再触发检索无限循环。"
+                ),
+            }
+            evidence_gaps = []
         if evidence_gaps and not retrieval_has_newer_requirement_review:
             blockers.append({
                 "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
@@ -2981,6 +3274,13 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         max_attempts: int = 8,
     ) -> bool:
         attempts = int(context.metadata.get("prewriting_gate_attempts", 0) or 0)
+        remediation = context.metadata.get("quality_remediation")
+        if (
+            isinstance(remediation, dict)
+            and remediation.get("classification") == "service_restarted_resume_required"
+            and context.current_phase != WorkflowState.AWAITING_USER_DECISION
+        ):
+            context.metadata.pop("quality_remediation", None)
 
         while True:
             blockers = self._collect_prewriting_blockers(context)
@@ -3281,6 +3581,10 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 context,
                 phase_state,
                 reason="remediation_phase_completed",
+                preserve_fields=self._preserve_downstream_fields_after_phase(
+                    phase_state,
+                    context_data,
+                ),
             )
         phase_result = PhaseResult(
             phase=phase_enum,
@@ -3818,8 +4122,11 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         if not isinstance(draft, dict):
             return draft
         normalized = dict(draft)
-        # Do not infer or fill patent titles from the disclosure context. If the
-        # Agent omits a title, compliance review must surface the defect.
+        if not str(normalized.get("title") or normalized.get("patent_title") or "").strip():
+            confirmed_title = str(context_title or "").strip()
+            if confirmed_title:
+                normalized["title"] = confirmed_title
+                normalized["patent_title"] = confirmed_title
         claims = normalized.get("claims") or {}
         if isinstance(claims, dict):
             normalized["claims"] = normalize_claims_payload_linebreaks(claims)
@@ -3954,6 +4261,11 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             if issue.get("severity") in {"critical", "high"}:
                 issues.append(f"document_rule:{issue.get('issue', '')}")
 
+        manual_draft_report = validate_patent_manual_draft(draft)
+        for issue in manual_draft_report.get("issues", []):
+            if issue.get("severity") in {"critical", "high"}:
+                issues.append(f"manual_rule:{issue.get('issue', '')}")
+
         return issues
 
     def _reviewable_content_issues(self, draft: Dict[str, Any]) -> List[str]:
@@ -4012,6 +4324,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         manual = draft.get("manual_compliance", {}) if isinstance(draft, dict) else {}
         claim_report = manual.get("claim_rules", {}) if isinstance(manual, dict) else {}
         doc_report = manual.get("document_rules", {}) if isinstance(manual, dict) else {}
+        draft_report = manual.get("manual_draft_rules", {}) if isinstance(manual, dict) else {}
 
         def to_review_issue(issue: Dict[str, Any]) -> Dict[str, Any]:
             return {
@@ -4034,7 +4347,12 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             for item in doc_report.get("issues", [])
             if isinstance(item, dict) and item.get("severity") in {"critical", "high"}
         ]
-        if not claim_issues and not doc_issues:
+        draft_issues = [
+            to_review_issue(item)
+            for item in draft_report.get("issues", [])
+            if isinstance(item, dict) and item.get("severity") in {"critical", "high"}
+        ]
+        if not claim_issues and not doc_issues and not draft_issues:
             return review_report
 
         merged = dict(review_report)
@@ -4051,7 +4369,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         formal_review = dict(merged.get("formal_compliance_review") or {})
         formal_review.setdefault("issues", [])
         if isinstance(formal_review["issues"], list):
-            formal_review["issues"].extend(doc_issues)
+            formal_review["issues"].extend(doc_issues + draft_issues)
         merged["formal_compliance_review"] = formal_review
 
         drawing_issues = [
@@ -5976,23 +6294,14 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         source_lower = source.lower() if source else ""
         pid = patent_id.strip()
 
-        if source_lower in ("cnipa", "中国国家知识产权局"):
-            # CNIPA 公开查询
-            return f"https://pss-system.cponline.cnipa.gov.cn/conventionalSearch?searchWord={pid}"
-        elif source_lower in ("uspto", "美国专利商标局"):
-            # USPTO 全文检索
+        if source_lower in ("uspto", "美国专利商标局"):
             clean_id = pid.replace("/", "").replace(" ", "")
             return f"https://patents.google.com/patent/{clean_id}"
-        elif source_lower in ("epo", "欧洲专利局"):
-            return f"https://worldwide.espacenet.com/patent/search?q={pid}"
         elif source_lower in ("google_patents", "google patents"):
             clean_id = pid.replace(" ", "")
             return f"https://patents.google.com/patent/{clean_id}"
         elif source_lower in ("arxiv", "arxiv 学术论文"):
-            # arXiv ID 格式: 2301.12345
             return f"https://arxiv.org/abs/{pid}"
-        elif source_lower in ("wipo",):
-            return f"https://patentscope.wipo.int/search/en/detail.jsf?docId={pid}"
         return ""
 
     def _try_parse_json(self, text: Any) -> Dict[str, Any]:

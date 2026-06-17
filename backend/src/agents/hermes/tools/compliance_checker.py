@@ -65,15 +65,35 @@ class ComplianceCheckerTool(HermesTool):
                     "suggestion": issue.get("suggestion", ""),
                     "target_agent": issue.get("target_agent", "patent_writer"),
                 })
-            score = max(0, 100 - sum(25 if i["severity"] == "critical" else 15 if i["severity"] == "high" else 8 for i in issues))
-            overall = "pass" if score >= 85 else ("conditional_pass" if score >= 70 else "fail")
+            hard_rule_score = max(
+                0,
+                100
+                - sum(
+                    25
+                    if i["severity"] == "critical"
+                    else 15
+                    if i["severity"] == "high"
+                    else 8
+                    for i in issues
+                ),
+            )
+            hard_rule_status = (
+                "no_blocking_signal"
+                if hard_rule_score >= 85
+                else ("needs_agent_review" if hard_rule_score >= 70 else "blocking_signal")
+            )
             data = {
                 "compliance_issues": issues,
                 "format_issues": [i for i in issues if i.get("severity") in ["critical", "high"]],
                 "terminology_issues": [],
                 "manual_rule_report": manual_report,
-                "overall_compliance": overall,
-                "score": score,
+                "hard_rule_status": hard_rule_status,
+                "hard_rule_score": hard_rule_score,
+                "requires_agent_judgment": [
+                    "硬规则信号是否影响进入下一阶段",
+                    "是否需要 CEO 调度撰写 Agent 修复",
+                    "修复后是否需要再次质量审查",
+                ],
                 "summary": "规则化形式检查完成；最终结论由质量审查 Agent 综合判定。",
             }
 

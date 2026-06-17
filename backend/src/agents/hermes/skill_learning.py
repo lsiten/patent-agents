@@ -213,7 +213,7 @@ def _render_examples(records: Iterable[Dict[str, Any]]) -> str:
             if category not in categories:
                 categories.append(category)
     if not categories:
-        return "- 暂无抽象缺陷类型。"
+        return "- 本轮未沉淀可复用缺陷类型。"
     return "\n".join(f"- {category}" for category in categories[:8])
 
 

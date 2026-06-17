@@ -24,7 +24,7 @@
 | 专利撰写Agent | ✅ 完成 | 权利要求书 + 说明书完整撰写 |
 | 质量审查Agent | ✅ 完成 | 形式+实质双重审查 + 风险预估 |
 | 知识库系统 | ✅ 完成 | 定稿专利存储 + 风格参考 + 相似匹配 |
-| 数据源集成 | ✅ 完成 | USPTO, EPO, Google Patents, arXiv |
+| 数据源集成 | ✅ 完成 | Google Patents, USPTO, arXiv（按真实配置启用） |
 | FastAPI后端 | ✅ 完成 | 9个REST API + SSE实时事件流 |
 
 ### 📚 文档与工程
@@ -36,7 +36,6 @@
 | 环境配置示例 | ✅ .env.example |
 | Python依赖 | ✅ requirements.txt + pyproject.toml |
 | 一键启动脚本 | ✅ start.sh (macOS/Linux) |
-| 演示数据 | ✅ demo_data.py |
 
 ---
 
@@ -54,7 +53,7 @@ patent-agents/
 │   │   │   ├── patent_writer.py         # 专利撰写Agent
 │   │   │   └── quality_reviewer.py      # 质量审查Agent
 │   │   ├── 📁 core/
-│   │   │   └── workflow.py              # 状态机引擎
+│   │   │   └── workflow_engine.py       # Hermes Agent 工作流引擎
 │   │   ├── 📁 models/                   # 数据模型
 │   │   ├── 📁 api/                      # REST API
 │   │   ├── 📁 knowledge/                # 知识库
@@ -63,7 +62,6 @@ patent-agents/
 │   │   └── 📁 tools/                    # 工具函数
 │   ├── main.py                          # FastAPI入口
 │   ├── requirements.txt                 # Python依赖
-│   ├── demo_data.py                     # 演示数据
 │   └── .env.example                     # 环境配置
 │
 ├── 📁 frontend/                         # 前端应用 (Next.js 14)
@@ -163,7 +161,7 @@ chmod +x start.sh
 ### v1.1 近期计划
 - [ ] 接入真实 LLM API (GPT-4, Claude 3)
 - [ ] 向量数据库集成 (FAISS/Milvus)
-- [ ] 专利数据库API对接 (CNIPA, USPTO, EPO)
+- [ ] 扩展更多官方/专业专利源真实连接器
 
 ### v1.2 中期计划
 - [ ] PDF/DOCX专业格式导出

@@ -832,7 +832,7 @@ Authorization: Bearer {token}
 
 {
   "query": "人工智能 多智能体 专利申请",
-  "sources": ["cnipa", "uspto", "epo"],
+  "sources": ["google_patents", "uspto", "arxiv"],
   "limit": 20,
   "filters": {
     "start_date": "2020-01-01",
@@ -852,13 +852,13 @@ Authorization: Bearer {token}
     "search_time_ms": 2345,
     "results": [
       {
-        "patent_number": "CN112345678A",
+        "patent_number": "US20240123456A1",
         "title": "基于多智能体的专利申请系统",
         "abstract": "本发明公开了一种...",
-        "applicant": "某某公司",
+        "applicant": "Example Applicant",
         "publication_date": "2021-01-01",
         "similarity_score": 0.87,
-        "source": "cnipa"
+        "source": "google_patents"
       }
     ]
   }

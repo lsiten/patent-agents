@@ -15,7 +15,7 @@ metadata:
 
 1. **关键词选择** - 核心技术词、同义词、上下位词
 2. **分类号组合** - IPC/CPC 分类号
-3. **数据源选择** - CNIPA、USPTO、EPO、Google Patents
+3. **数据源选择** - 当前工具真实支持且可核验的数据源，例如 Google Patents、USPTO、arXiv
 
 ## 检索式构建
 
@@ -27,13 +27,13 @@ metadata:
 
 - `patent_search` - 执行专利检索
   - query: 检索关键词或技术描述
-  - sources: google_patents,cnipa,uspto,epo
+  - sources: google_patents,uspto,arxiv
   - limit: 最大结果数量
 
 ## Agent 与工具边界
 
 - `patent_search` 负责连接真实专利数据源并返回可核验证据；检索式设计、关键词取舍、数据库优先级和补检策略由检索分析 Agent 判断。
-- 默认中国申请时，优先尝试已配置且真实可用的中国专利数据库或可核验的中国公开专利来源；如果 CNIPA 未配置、不可用或无结果，必须记录为数据源覆盖限制，并改用 Google Patents 专利详情、USPTO/EPO/WIPO、官方或专业来源继续补检。本机未配置 CNIPA 不能单独作为需求缺口或流程终止理由。
+- 默认中国申请时，优先使用当前工具真实支持且可核验的数据源；如果目标法域官方源未接入、不可用或无结果，必须记录为数据源覆盖限制，并改用 Google Patents 专利详情、USPTO、arXiv、官方或专业来源继续补检。本机未配置某个来源不能单独作为需求缺口或流程终止理由。
 - 数据源超时、未接入或无结果时，必须如实记录证据缺口，不得虚构专利号、申请人或公开日。
 - `databases_used` 只能记录已有真实返回证据或已成功读取证据的数据源；请求过但无结果、未接入、超时或无法验证的数据源要写入 `unavailable_sources` 或 `evidence_gaps`。
 - 无结果不是终止条件。必须分析无结果原因，并至少尝试中文宽检索、英文宽检索、核心区别特征窄检索三类补检；每轮基于上一轮返回或失败信息调整检索式。

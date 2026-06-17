@@ -89,12 +89,28 @@ def _find_claim_steps(independent_claim: str) -> List[str]:
     return parts
 
 
+CLAIM_MANDATORY_LINEBREAK_PUNCT_RE = re.compile(r"[；;。]|(?<!\d)\.")
+SECONDARY_INDEPENDENT_CLAIM_RE = re.compile(
+    r"^\s*\d+[\.\、]\s*一种.+?(系统|装置|设备|介质|计算机程序产品|终端|服务器)，"
+)
+
+
+def _is_secondary_independent_claim(block: str) -> bool:
+    """Return True for system/device/storage claims that are not dependent claims."""
+    text = str(block or "").strip()
+    if not text:
+        return False
+    if re.search(r"根据\s*权利要求\s*\d+", text):
+        return False
+    return bool(SECONDARY_INDEPENDENT_CLAIM_RE.search(text))
+
+
 def normalize_claim_linebreaks(claim_text: str) -> str:
-    """Force a newline after Chinese/ASCII semicolons and periods in claims."""
+    """Force a newline after semicolons and sentence-ending periods in claims."""
     text = str(claim_text or "").strip()
     if not text:
         return ""
-    text = re.sub(r"([；;。])\s*", r"\1\n", text)
+    text = re.sub(r"([；;。]|(?<!\d)\.)\s*", r"\1\n", text)
     text = re.sub(r"\n{2,}", "\n", text)
     return text.strip()
 
@@ -155,7 +171,8 @@ def validate_claim_rules(claims: Any) -> Dict[str, Any]:
         })
 
     for idx, block in enumerate(claim_blocks, start=1):
-        if idx > 1 and len(block) > 200:
+        is_secondary_independent = idx > 1 and _is_secondary_independent_claim(block)
+        if idx > 1 and not is_secondary_independent and len(block) > 200:
             issues.append({
                 "severity": "high",
                 "location": f"权利要求{idx}",
@@ -163,7 +180,7 @@ def validate_claim_rules(claims: Any) -> Dict[str, Any]:
                 "suggestion": "删减实施例细节和非必要限定，保留该从属权利要求的单一附加特征。",
                 "target_agent": "patent_writer",
             })
-        for match in re.finditer(r"[；;。]", block):
+        for match in CLAIM_MANDATORY_LINEBREAK_PUNCT_RE.finditer(block):
             following = block[match.end(): match.end() + 1]
             if following and following != "\n":
                 issues.append({
@@ -176,6 +193,8 @@ def validate_claim_rules(claims: Any) -> Dict[str, Any]:
                 break
 
     for idx, block in enumerate(dependent, start=2):
+        if _is_secondary_independent_claim(block):
+            continue
         ref_match = re.search(r"权利要求\s*([0-9]+)", block)
         if not ref_match:
             issues.append({
@@ -315,8 +334,15 @@ def validate_patent_manual_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
             _issue(issues, "high", "背景技术", f"背景技术过长，当前约{len(background)}字", "背景技术应精简，避免把实施方式写入背景。")
         if _contains_any(background, ("本发明", "本申请", "本方案")):
             _issue(issues, "high", "背景技术", "背景技术疑似泄露本发明方案或核心发明点", "背景技术只描述现有技术和其缺陷。")
-        if not re.search(r"(CN|中国专利|公开号|申请号|公开[日号]|专利)", background):
-            _issue(issues, "medium", "背景技术", "背景技术缺少可核验现有技术引用信号", "检索 Agent 应提供公开文献，撰写 Agent 据此客观评述。", "retrieval_analyst")
+        if not re.search(r"(CN\d|CN\s*\d|中国专利|公开号|申请号|公开[日号])", background):
+            _issue(
+                issues,
+                "high",
+                "背景技术",
+                "背景技术缺少带公开号或申请号的可核验现有技术文献",
+                "检索 Agent 必须提供至少一件真实公开的专利文献，撰写 Agent 据此按三段式客观评述。",
+                "retrieval_analyst",
+            )
 
     if not summary:
         _issue(issues, "critical", "发明内容", "缺少发明内容", "发明内容必须包含技术问题、技术方案、有益效果。")

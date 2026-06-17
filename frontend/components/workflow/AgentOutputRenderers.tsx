@@ -610,13 +610,9 @@ export function RetrievalReportView({ data }: RetrievalReportViewProps) {
 
   const dbDisplayName: Record<string, string> = {
     'USPTO': '美国专利商标局',
-    'EPO': '欧洲专利局',
-    'CNIPA': '中国国家知识产权局',
     'Google Patents': 'Google 专利',
     'arXiv': 'arXiv 学术论文',
     'uspto': '美国专利商标局',
-    'epo': '欧洲专利局',
-    'cnipa': '中国国家知识产权局',
     'google_patents': 'Google 专利',
     'arxiv': 'arXiv 学术论文',
   };

@@ -140,9 +140,11 @@ class TestDeleteWorkflow:
         data = response.json()
         assert data.get("status") == "cancelled"
 
-        # Verify it's gone
+        # Cancel keeps the workflow visible so the UI can show terminal state
+        # and let users inspect prior phase logs.
         get_resp = client.get(f"{api_prefix}/workflows/{task_id}")
-        assert get_resp.status_code == 404
+        assert get_resp.status_code == 200
+        assert get_resp.json()["current_state"] == "cancelled"
 
     def test_delete_nonexistent_session(self, client, api_prefix):
         fake_id = str(uuid.uuid4())

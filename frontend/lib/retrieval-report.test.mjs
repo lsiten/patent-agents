@@ -26,10 +26,10 @@ test('normalizes prior_art_references with backend url first', async () => {
   const references = getRetrievalPatentReferences({
     prior_art_references: [
       {
-        reference_id: 'CN112233445A',
+        reference_id: 'US20240123456A1',
         title: '一种智能检索方法',
-        source: 'CNIPA',
-        url: 'https://example.test/original-cn',
+        source: 'google_patents',
+        url: 'https://patents.google.com/patent/US20240123456A1',
         similarity_score: 0.87,
       },
     ],
@@ -37,8 +37,8 @@ test('normalizes prior_art_references with backend url first', async () => {
   });
 
   assert.equal(references.length, 1);
-  assert.equal(references[0].patentId, 'CN112233445A');
-  assert.equal(references[0].url, 'https://example.test/original-cn');
+  assert.equal(references[0].patentId, 'US20240123456A1');
+  assert.equal(references[0].url, 'https://patents.google.com/patent/US20240123456A1');
   assert.equal(references[0].similarityScore, 0.87);
 });
 
@@ -63,10 +63,10 @@ test('normalizes similar_patents and preserves comparison fields', async () => {
   const references = getRetrievalPatentReferences({
     similar_patents: [
       {
-        patent_id: 'EP1234567A1',
-        title: 'Legacy patent',
-        source: 'EPO',
-        applicant: 'Example Applicant',
+        patent_id: 'US2023123456A1',
+        title: 'Adaptive display patent',
+        source: 'google_patents',
+        applicant: 'Verified Applicant',
         publication_date: '2025-01-01',
         similarity_score: 88,
         key_similarities: ['特征 A 相同'],
@@ -76,15 +76,15 @@ test('normalizes similar_patents and preserves comparison fields', async () => {
   });
 
   assert.equal(references.length, 1);
-  assert.equal(references[0].patentId, 'EP1234567A1');
-  assert.equal(references[0].title, 'Legacy patent');
-  assert.equal(references[0].source, 'EPO');
-  assert.equal(references[0].applicant, 'Example Applicant');
+  assert.equal(references[0].patentId, 'US2023123456A1');
+  assert.equal(references[0].title, 'Adaptive display patent');
+  assert.equal(references[0].source, 'google_patents');
+  assert.equal(references[0].applicant, 'Verified Applicant');
   assert.equal(references[0].publicationDate, '2025-01-01');
   assert.equal(references[0].similarityScore, 0.88);
   assert.deepEqual(references[0].similarities, ['特征 A 相同']);
   assert.deepEqual(references[0].differences, ['区别 B']);
-  assert.equal(references[0].url, 'https://worldwide.espacenet.com/patent/search?q=EP1234567A1');
+  assert.equal(references[0].url, 'https://patents.google.com/patent/US2023123456A1');
 });
 
 test('normalizes tool-style key_references and search_results', async () => {
@@ -92,10 +92,10 @@ test('normalizes tool-style key_references and search_results', async () => {
   const references = getRetrievalPatentReferences({
     key_references: [
       {
-        publication_number: 'CN109876543A',
+        publication_number: 'US10987654B2',
         name: '多屏画面处理系统',
-        database: 'CNIPA',
-        assignee: '示例申请人',
+        database: 'uspto',
+        assignee: 'Verified Applicant',
         publicationDate: '2024-05-01',
         score: 76,
         key_features: ['多屏显示', '画面映射'],
@@ -106,9 +106,9 @@ test('normalizes tool-style key_references and search_results', async () => {
   });
 
   assert.equal(references.length, 2);
-  assert.equal(references[0].patentId, 'CN109876543A');
+  assert.equal(references[0].patentId, 'US10987654B2');
   assert.equal(references[0].title, '多屏画面处理系统');
-  assert.equal(references[0].applicant, '示例申请人');
+  assert.equal(references[0].applicant, 'Verified Applicant');
   assert.equal(references[0].similarityScore, 0.76);
   assert.deepEqual(references[0].similarities, ['多屏显示', '画面映射']);
   assert.deepEqual(references[0].differences, ['未公开姿态补偿']);

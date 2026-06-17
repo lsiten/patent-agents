@@ -35,7 +35,7 @@ metadata:
 
 ## 工具使用
 
-- `oa_predictor` - 预判审查意见
+- `oa_predictor` - 提取可能触发审查意见的客观文本信号
 
 ## Agent 与工具边界
 

@@ -23,9 +23,9 @@ metadata:
 {
   "similar_patents": [
     {
-      "patent_id": "CN112345678A",
+      "patent_id": "US20240123456A1",
       "title": "专利标题",
-      "source": "CNIPA",
+      "source": "google_patents",
       "applicant": "申请人",
       "publication_date": "2023-01-15",
       "similarity_score": 0.85,

@@ -17,6 +17,21 @@ from src.api.schemas import AgentEventInfo, ConversationChatRequest
 from src.core.workflow_engine import WorkflowContext, WorkflowState
 
 
+def _structured_patent_preflight(title: str = "滴灌量自适应修正方法") -> dict:
+    return {
+        "recommend_create_patent": True,
+        "patent_preflight": {
+            "patent_title": title,
+            "protection_theme": "基于蒸腾需求差值对滴灌量进行二次修正",
+            "patent_type": "发明",
+            "claim_skeleton": "三步：采集环境与作物状态；计算蒸腾需求差值；修正滴灌量并执行控制。",
+            "technical_facts": ["输入为环境参数和作物状态", "输出为修正后的滴灌量"],
+            "public_status": "未公开",
+            "drawing_plan": ["系统结构图", "方法流程图"],
+        },
+    }
+
+
 class TestAgentActivityEvents:
     def test_agent_event_info_serializes_canonical_identity_fields(self):
         event = AgentEventInfo(
@@ -387,11 +402,11 @@ class TestAgentActivityEvents:
             body = "".join(response.iter_text())
 
         assert response.status_code == 200, body
-        assert '"has_recommendation": true' in body
+        assert '"has_recommendation": false' in body
         persisted = routes.conversations_store[conv_id]["messages"][-1]
-        assert persisted["metadata"] == {"recommend_create_patent": True}
+        assert persisted["metadata"] is None
 
-    def test_brainstorm_convergence_recommends_workflow_creation(self):
+    def test_brainstorm_convergence_without_preflight_does_not_recommend_workflow_creation(self):
         messages = [
             {
                 "role": "user",
@@ -423,7 +438,7 @@ class TestAgentActivityEvents:
                 {"name": "dispatch_specialist", "result": "第二轮头脑风暴完成，保护范围已收敛"},
             ],
             agent_events=[],
-        ) is True
+        ) is False
 
 
 class TestChat:
@@ -482,7 +497,7 @@ class TestBrainstorm:
 
 
 class TestConversationWorkflowLinking:
-    def test_create_workflow_from_conversation_auto_starts_workflow(
+    def test_create_workflow_from_conversation_requires_confirmed_preflight(
         self,
         client,
         api_prefix,
@@ -492,15 +507,23 @@ class TestConversationWorkflowLinking:
         now = datetime.now().isoformat()
         routes.conversations_store[conv_id] = {
             "id": conv_id,
-            "title": "自动启动工作流对话",
+            "title": "确认启动工作流对话",
             "messages": [
                 {
                     "id": "msg-user-1",
                     "role": "user",
-                    "content": "一种基于可折叠Cave屏幕的视频画面自适应处理方法，能够根据屏幕角度自动裁切和映射画面。",
+                    "content": "一种基于多屏显示界面的视频画面自适应处理方法，能够根据屏幕角度自动裁切和映射画面。",
                     "timestamp": now,
                     "type": "text",
                     "metadata": None,
+                },
+                {
+                    "id": "msg-assistant-preflight",
+                    "role": "assistant",
+                    "content": "专利名称：滴灌量自适应修正方法\n保护主题：基于蒸腾需求差值对滴灌量进行二次修正。",
+                    "timestamp": now,
+                    "type": "text",
+                    "metadata": _structured_patent_preflight(),
                 }
             ],
             "created_at": now,
@@ -523,13 +546,18 @@ class TestConversationWorkflowLinking:
 
         response = client.post(
             f"{api_prefix}/conversations/{conv_id}/create-workflow",
-            json={"user_id": "default_user", "target_country": "中国"},
+            json={
+                "user_id": "default_user",
+                "target_country": "中国",
+                "confirmed": True,
+                "patent_title": "滴灌量自适应修正方法",
+            },
         )
 
         assert response.status_code == 200, response.text
         data = response.json()
         assert data["status"] == "started"
-        assert executed == [data["task_id"]]
+        assert data["task_id"] in routes.tasks_store
         assert any(
             event.event_type == "workflow.started"
             for event in routes.task_events[data["task_id"]]
@@ -537,7 +565,12 @@ class TestConversationWorkflowLinking:
 
     async def test_create_workflow_from_conversation_marks_queryable_workflow_as_started_before_background_runs(
         self,
+        monkeypatch,
     ):
+        async def fake_execute_full_workflow(context, **kwargs):
+            return context
+
+        monkeypatch.setattr(routes.workflow_engine, "execute_full_workflow", fake_execute_full_workflow)
         conv_id = "conv-queryable-started-workflow"
         now = datetime.now().isoformat()
         routes.conversations_store[conv_id] = {
@@ -547,10 +580,18 @@ class TestConversationWorkflowLinking:
                 {
                     "id": "msg-user-1",
                     "role": "user",
-                    "content": "一种基于可折叠Cave屏幕的视频画面自适应处理方法，能够根据屏幕角度自动裁切和映射画面。",
+                    "content": "一种基于多屏显示界面的视频画面自适应处理方法，能够根据屏幕角度自动裁切和映射画面。",
                     "timestamp": now,
                     "type": "text",
                     "metadata": None,
+                },
+                {
+                    "id": "msg-assistant-preflight",
+                    "role": "assistant",
+                    "content": "专利名称：滴灌量自适应修正方法\n保护主题：基于蒸腾需求差值对滴灌量进行二次修正。",
+                    "timestamp": now,
+                    "type": "text",
+                    "metadata": _structured_patent_preflight(),
                 }
             ],
             "created_at": now,
@@ -562,12 +603,19 @@ class TestConversationWorkflowLinking:
 
         result = await routes.create_workflow_from_conversation(
             conv_id,
-            routes.CreateWorkflowFromConversationRequest(user_id="default_user", target_country="中国"),
+            routes.CreateWorkflowFromConversationRequest(
+                user_id="default_user",
+                target_country="中国",
+                confirmed=True,
+                patent_title="滴灌量自适应修正方法",
+            ),
             background_tasks,
         )
 
         assert result["status"] == "started"
-        assert len(background_tasks.tasks) == 1
+        task = routes.workflow_background_tasks.get(result["task_id"])
+        if task:
+            await task
         workflow = await routes.get_workflow(result["task_id"])
         assert workflow.current_state == WorkflowState.REQUIREMENT_ANALYSIS.value
 
@@ -600,7 +648,12 @@ class TestConversationWorkflowLinking:
 
         response = client.post(
             f"{api_prefix}/conversations/{conv_id}/create-workflow",
-            json={"user_id": "default_user", "target_country": "中国"},
+            json={
+                "user_id": "default_user",
+                "target_country": "中国",
+                "confirmed": True,
+                "patent_title": "已关联工作流对话",
+            },
         )
 
         assert response.status_code == 200, response.text
