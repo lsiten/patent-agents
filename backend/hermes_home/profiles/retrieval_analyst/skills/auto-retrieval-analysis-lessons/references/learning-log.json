@@ -2,25 +2,6 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:37:19.237879",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
     "generated_at": "2026-06-18T22:37:22.228763",
     "iteration_count": 2,
     "review_recommendation": "revise",
@@ -523,6 +504,24 @@
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
     "generated_at": "2026-06-18T23:00:40.260249",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-18T23:02:51.238435",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [

@@ -2,29 +2,6 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:37:19.233601",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
     "generated_at": "2026-06-18T22:37:22.227302",
     "iteration_count": 2,
     "review_recommendation": "revise",
@@ -639,6 +616,28 @@
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
     "generated_at": "2026-06-18T23:00:40.258250",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-18T23:02:51.236798",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
