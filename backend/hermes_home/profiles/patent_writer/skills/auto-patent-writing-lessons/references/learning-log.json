@@ -2,382 +2,6 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:36:31.229250",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:36:34.227882",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:36:37.241199",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:36:39.937004",
-    "iteration_count": 0,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 7,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:36:40.232957",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:36:43.243277",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:36:46.229822",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:36:49.227984",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:36:52.229813",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:36:55.235914",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:36:58.223997",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:37:01.232435",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:37:04.225243",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:37:05.331553",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:37:07.238900",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:37:09.988688",
-    "iteration_count": 0,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 7,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:37:10.232669",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:37:13.239016",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-18T22:37:16.228174",
-    "iteration_count": 2,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "success",
-    "has_drawings": true,
-    "drawing_count": 6,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
     "generated_at": "2026-06-18T22:37:19.239389",
     "iteration_count": 2,
     "review_recommendation": "revise",
@@ -590,5 +214,357 @@
     "has_drawings": true,
     "drawing_count": 7,
     "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:38:40.163580",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 7,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:39:04.866805",
+    "iteration_count": 2,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:39:10.226676",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 7,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:39:15.289110",
+    "iteration_count": 2,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:39:15.333600",
+    "iteration_count": 2,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:39:40.264052",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 7,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:40:10.303207",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 7,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:40:40.335196",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 7,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:41:10.382738",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 7,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:41:40.420166",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 7,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:42:10.476793",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 7,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:42:40.530438",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 7,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:43:10.569788",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 7,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:43:40.603092",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 7,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-18T22:44:10.655796",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 7,
+    "has_final_document": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-18T23:00:37.900088",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-18T23:00:37.920979",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-18T23:00:37.941565",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-18T23:00:40.260857",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": true
   }
 ]
