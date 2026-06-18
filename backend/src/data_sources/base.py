@@ -9,7 +9,6 @@ import httpx
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from src.core.config import settings
 from ..models.domain import PriorArtReference, SearchQuery, DataSourceConfig
 
 
@@ -419,9 +418,20 @@ class DataSourceManager:
     """数据源管理器 - 统一调度所有数据源"""
 
     def __init__(self):
-        self.sources: Dict[str, DataSource] = {
-            "uspto": UsptoSource(),
-        }
+        from src.core.config import settings
+
+        self.sources: Dict[str, DataSource] = {}
+        if settings.patent_db.enable_uspto and settings.patent_db.uspto_api_key:
+            self.sources["uspto"] = UsptoSource(DataSourceConfig(
+                source_id="uspto",
+                name="美国专利商标局",
+                source_type="patent",
+                base_url=settings.patent_db.uspto_api_url,
+                enabled=True,
+                auth_required=True,
+                credentials_env={"api_key": "USPTO_API_KEY"},
+                rate_limit=60,
+            ))
         if settings.patent_db.enable_google_patents:
             self.sources["google_patents"] = GooglePatentsSource()
         if settings.patent_db.enable_arxiv:

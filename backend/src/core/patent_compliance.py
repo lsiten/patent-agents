@@ -105,6 +105,25 @@ def _is_secondary_independent_claim(block: str) -> bool:
     return bool(SECONDARY_INDEPENDENT_CLAIM_RE.search(text))
 
 
+def _claims_contain_secondary_subject(claims: Any, subjects: Iterable[str]) -> bool:
+    """Return True when claims include an additional independent subject claim."""
+    subject_tuple = tuple(subjects)
+    if not subject_tuple:
+        return True
+    if isinstance(claims, dict):
+        candidates = claims.get("dependent_claims") or []
+        if not isinstance(candidates, list):
+            candidates = [candidates]
+    else:
+        blocks = split_claims_text(str(claims or ""))
+        candidates = blocks[1:]
+    for item in candidates:
+        block = str(item or "")
+        if any(subject in block for subject in subject_tuple) and _is_secondary_independent_claim(block):
+            return True
+    return False
+
+
 def normalize_claim_linebreaks(claim_text: str) -> str:
     """Force a newline after semicolons and sentence-ending periods in claims."""
     text = str(claim_text or "").strip()
@@ -297,6 +316,24 @@ def validate_patent_manual_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
     elif len(title) > 25:
         _issue(issues, "medium", "发明名称", f"发明名称超过25字，当前约{len(title)}字", "一般应控制在25字以内，必要时不超过60字。")
 
+    claims = draft.get("claims") or {}
+    if title and "系统" in title and not _claims_contain_secondary_subject(claims, ("系统",)):
+        _issue(
+            issues,
+            "critical",
+            "权利要求书",
+            "发明名称包含系统但权利要求书缺少系统独立权利要求",
+            "若保护主题为“方法及系统”，必须在权利要求书中增加系统独立权利要求；若只保护方法，则发明名称、摘要和发明内容均应改为方法主题。",
+        )
+    if title and "装置" in title and not _claims_contain_secondary_subject(claims, ("装置", "设备")):
+        _issue(
+            issues,
+            "critical",
+            "权利要求书",
+            "发明名称包含装置但权利要求书缺少装置或设备独立权利要求",
+            "若保护主题包含装置，必须增加对应装置/设备独立权利要求；若不保护装置，则统一删除题名和正文中的装置主题。",
+        )
+
     if not abstract:
         _issue(issues, "critical", "说明书摘要", "缺少说明书摘要", "摘要必须包含专利名称、技术领域、简化技术方案和技术效果。")
     else:
@@ -334,14 +371,20 @@ def validate_patent_manual_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
             _issue(issues, "high", "背景技术", f"背景技术过长，当前约{len(background)}字", "背景技术应精简，避免把实施方式写入背景。")
         if _contains_any(background, ("本发明", "本申请", "本方案")):
             _issue(issues, "high", "背景技术", "背景技术疑似泄露本发明方案或核心发明点", "背景技术只描述现有技术和其缺陷。")
-        if not re.search(r"(CN\d|CN\s*\d|中国专利|公开号|申请号|公开[日号])", background):
+        source_signal = re.search(
+            r"(CN\d|CN\s*\d|中国专利|公开号|申请号|公开[日号]|arXiv|DOI|doi|"
+            r"https?://|论文|期刊|会议|出版物|公开资料|标准|白皮书)",
+            background,
+            re.IGNORECASE,
+        )
+        if not source_signal:
             _issue(
                 issues,
                 "high",
                 "背景技术",
-                "背景技术缺少带公开号或申请号的可核验现有技术文献",
-                "检索 Agent 必须提供至少一件真实公开的专利文献，撰写 Agent 据此按三段式客观评述。",
-                "retrieval_analyst",
+                "背景技术缺少可核验现有技术来源",
+                "撰写 Agent 应引用检索 Agent 已确认的真实公开证据；没有专利文献时可引用论文、公开网页或权威网站，并明确其技术方案与不足，禁止虚构专利号。",
+                "patent_writer",
             )
 
     if not summary:
@@ -352,7 +395,24 @@ def validate_patent_manual_draft(draft: Dict[str, Any]) -> Dict[str, Any]:
             missing_summary_parts.append("技术问题")
         if "技术方案" not in summary and "包括" not in summary:
             missing_summary_parts.append("技术方案")
-        if "有益效果" not in summary and not any(word in summary for word in ("实现", "避免", "提高", "减少", "保证")):
+        effect_signals = (
+            "有益效果",
+            "实现",
+            "避免",
+            "提高",
+            "减少",
+            "保证",
+            "保持",
+            "提升",
+            "降低",
+            "增强",
+            "改善",
+            "从而",
+            "能够",
+            "通过上述方案",
+            "通过上述技术方案",
+        )
+        if not any(word in summary for word in effect_signals):
             missing_summary_parts.append("有益效果")
         if missing_summary_parts:
             _issue(issues, "high", "发明内容", f"发明内容缺少：{'、'.join(missing_summary_parts)}", "按技术问题、技术方案、有益效果三段式重写。")

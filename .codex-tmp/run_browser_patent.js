@@ -102,6 +102,13 @@ async function waitForAnyText(page, patterns, timeout = 180000) {
   console.log("BRAINSTORM_READY");
   console.log(brainstormText.slice(-3000));
 
+  const directionButtons = page.getByRole("button", { name: /是，按该主线继续清洗/ });
+  if (await directionButtons.count()) {
+    const beforeDirection = await page.locator('[data-testid="chat-message-assistant"]').count().catch(() => 0);
+    await directionButtons.first().click();
+    await waitForAssistantTurn(page, beforeDirection, 300000).catch(() => {});
+  }
+
   const assistantCountBeforeConfirm = await page.locator('[data-testid="chat-message-assistant"]').count().catch(() => 0);
   await sendMessage(page, confirmPrompt);
   await waitForAssistantTurn(page, assistantCountBeforeConfirm, 300000);

@@ -392,6 +392,7 @@ class SecuritySettings(BaseSettings):
 class PatentDBSettings(BaseSettings):
     """专利数据库API配置"""
     # USPTO
+    enable_uspto: bool = Field(default=False, alias="ENABLE_USPTO")
     uspto_api_key: Optional[str] = Field(default=None, alias="USPTO_API_KEY")
     uspto_api_url: str = Field(
         default="https://developer.uspto.gov/ibd-api/v1",
@@ -399,7 +400,7 @@ class PatentDBSettings(BaseSettings):
     )
 
     # Google Patents
-    enable_google_patents: bool = Field(default=True, alias="ENABLE_GOOGLE_PATENTS")
+    enable_google_patents: bool = Field(default=False, alias="ENABLE_GOOGLE_PATENTS")
 
     # arXiv
     enable_arxiv: bool = Field(default=True, alias="ENABLE_ARXIV")

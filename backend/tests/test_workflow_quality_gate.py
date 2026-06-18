@@ -158,6 +158,98 @@ class TestRetrievalPromptContracts:
         assert "evidence_sources" in prompt
         assert "evidence_gaps" in prompt
 
+
+class TestRequirementRetrievalReviewContracts:
+    def test_nonblocking_impact_on_writing_allows_drafting(self):
+        engine = PatentWorkflowEngine()
+        review = {
+            "ready_for_writing": True,
+            "all_requirement_gaps_closed": False,
+            "remaining_requirement_gaps": [
+                {
+                    "gap": "申请人内部是否已有具体型号尚未确认。",
+                    "impact_on_writing": "不阻止撰写。当前保护策略是不写死型号。",
+                }
+            ],
+        }
+
+        assert engine._requirement_review_allows_drafting(review) is True
+
+    def test_ready_for_writing_carries_retrieval_risks_without_relooping(self):
+        engine = PatentWorkflowEngine()
+        context = WorkflowContext(task_id="prewrite-ready", user_id="u-prewrite")
+        requirement = {
+            "tech_field": "沉浸式显示控制",
+            "core_principle": "根据屏幕姿态联动画面处理策略。",
+            "technical_problem": "屏幕姿态变化后画面连续性下降。",
+            "beneficial_effects": ["保持多显示面画面连续"],
+            "key_innovative_features": ["姿态与画面处理策略联合映射"],
+            "application_scenarios": ["沉浸式多屏显示空间"],
+            "patent_type_recommendation": "发明专利",
+            "claim_skeleton": {"step_count": 4, "steps": ["获取", "确定", "控制", "处理"]},
+            "information_gaps": ["尚未获得可核验的中国或国际专利对比文件。"],
+            "retrieval_feedback_review": {
+                "ready_for_writing": True,
+                "all_requirement_gaps_closed": False,
+                "remaining_requirement_gaps": [
+                    {
+                        "owner": "retrieval_analysis",
+                        "gap": "专利数据库证据仍可继续补强。",
+                        "impact_on_writing": "不阻止撰写，作为撰写和质量审查风险继续流转。",
+                    }
+                ],
+                "search_feedback_for_retrieval": [
+                    "继续补强 Google Patents 或 CNIPA 证据，但不影响技术方案撰写。"
+                ],
+            },
+        }
+        retrieval = {
+            "retrieval_strategy": {
+                "keywords": ["movable display", "projection mapping", "image remapping"],
+                "databases_used": ["arxiv", "Microsoft Research"],
+                "unavailable_sources": ["google_patents"],
+            },
+            "web_evidence": [
+                {
+                    "title": "RoomAlive - Microsoft Research",
+                    "url": "https://www.microsoft.com/en-us/research/project/roomalive/",
+                    "source_type": "official research page",
+                }
+            ],
+            "non_patent_prior_art": [
+                {
+                    "title": "IllumiRoom",
+                    "url": "https://www.microsoft.com/en-us/research/project/illumiroom-peripheral-projected-illusions-for-interactive-experiences/",
+                },
+                {
+                    "title": "Projection Mapping Technologies for AR",
+                    "url": "http://arxiv.org/abs/1704.02897v1",
+                },
+            ],
+            "evidence_sources": [
+                {"source": "google_patents", "status": "unavailable"},
+                {"source": "arxiv", "status": "used"},
+                {"source": "Microsoft Research", "status": "used"},
+            ],
+            "tool_results": [
+                {"success": True, "result": "google_patents 数据源未配置或未启用"},
+                {"success": True, "result": "arXiv returned http://arxiv.org/abs/1704.02897v1"},
+                {"success": True, "result": "Microsoft Research https://www.microsoft.com/"},
+            ],
+            "evidence_gaps": ["专利源未配置，未取得专利号。"],
+        }
+
+        context.requirement_analysis = requirement
+        context.retrieval_report = retrieval
+        context.phase_history = [
+            PhaseResult(WorkflowPhase.REQUIREMENT, True, 1.0, requirement),
+            PhaseResult(WorkflowPhase.RETRIEVAL, True, 1.0, retrieval),
+            PhaseResult(WorkflowPhase.REQUIREMENT, True, 1.0, requirement),
+        ]
+
+        assert engine._collect_prewriting_blockers(context) == []
+
+
 class TestLowScoreRemediationContracts:
     """Low-score remediation contract tests for the next workflow iteration."""
 
@@ -457,7 +549,7 @@ class TestWorkflowCompletionGate:
 
     def _complete_draft(self) -> dict:
         return {
-            "title": "一种图像分类处理方法、系统、设备及存储介质",
+            "title": "一种图像分类处理方法及系统",
             "claims": {
                 "independent_claim": (
                     "1. 一种基于AI的图像分类方法，其特征在于，包括：\n"
@@ -465,7 +557,13 @@ class TestWorkflowCompletionGate:
                     "S2、提取图像特征；\n"
                     "S3、输出分类结果。\n"
                 ),
-                "dependent_claims": ["2. 根据权利要求1所述的方法，其特征在于，所述图像特征包括纹理特征。\n"],
+                "dependent_claims": [
+                    "2. 根据权利要求1所述的方法，其特征在于，所述图像特征包括纹理特征。\n",
+                    "3. 一种基于AI的图像分类系统，其特征在于，包括：\n"
+                    "图像获取模块，用于获取待分类图像；\n"
+                    "特征提取模块，用于提取所述待分类图像的图像特征；\n"
+                    "分类输出模块，用于根据所述图像特征输出分类结果。\n",
+                ],
             },
             "description": {
                 "technical_field": "本发明涉及图像识别与人工智能分类处理技术领域。",
@@ -476,7 +574,7 @@ class TestWorkflowCompletionGate:
                 ),
                 "summary_of_invention": (
                     "本发明要解决的技术问题是提高低纹理或近似类别图像的分类稳定性。\n"
-                    "为解决上述技术问题，本发明提供一种基于AI的图像分类方法，包括获取待分类图像、提取图像特征以及输出分类结果。\n"
+                    "为解决上述技术问题，本发明提供一种基于AI的图像分类方法及系统，包括获取待分类图像、提取图像特征以及输出分类结果，并由对应模块执行上述处理。\n"
                     "本发明的有益效果在于提高分类准确率并减少近似类别误判。"
                 ),
                 "drawings_description": "",
@@ -489,7 +587,7 @@ class TestWorkflowCompletionGate:
                     "需要说明的是，各步骤的数据处理顺序可以根据实际部署环境进行流水化执行。"
                 ),
             },
-            "abstract": "本发明公开一种图像分类处理方法、系统、设备及存储介质，涉及图像识别与人工智能分类处理技术领域。该方法获取待分类图像，提取图像特征并输出分类结果。由此提高低纹理或近似类别图像的分类稳定性。",
+            "abstract": "本发明公开一种图像分类处理方法及系统，涉及图像识别与人工智能分类处理技术领域。该方法获取待分类图像，提取图像特征并输出分类结果，系统由对应模块执行上述处理。由此提高低纹理或近似类别图像的分类稳定性。",
             "docx_path": "",
         }
 
@@ -530,6 +628,16 @@ class TestWorkflowCompletionGate:
         """A complete application needs dependent claims, not only claim 1."""
         draft = self._complete_draft()
         draft["claims"]["dependent_claims"] = []
+
+        engine = PatentWorkflowEngine()
+        assert engine._has_unresolved_critical_issues(self._context_with_draft(draft)) is True
+
+    def test_method_and_system_title_without_system_independent_claim_blocked(self):
+        """A method-and-system title needs a corresponding system independent claim."""
+        draft = self._complete_draft()
+        draft["claims"]["dependent_claims"] = [
+            "2. 根据权利要求1所述的方法，其特征在于，所述图像特征包括纹理特征。\n"
+        ]
 
         engine = PatentWorkflowEngine()
         assert engine._has_unresolved_critical_issues(self._context_with_draft(draft)) is True

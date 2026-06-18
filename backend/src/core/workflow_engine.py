@@ -40,6 +40,10 @@ from src.core.patent_compliance import (
     validate_patent_manual_draft,
     validate_patent_document_structure,
 )
+try:
+    from src.core.config import settings as _app_settings
+except Exception:
+    _app_settings = None
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -95,7 +99,12 @@ def _get_agent_factory():
     return get_agent_config_registry()
 
 
-async def _run_agent_conversation(profile_id: str, prompt: str, session_id: str | None = None) -> str | Dict[str, Any]:
+async def _run_agent_conversation(
+    profile_id: str,
+    prompt: str,
+    session_id: str | None = None,
+    timeout_seconds: int = 600,
+) -> str | Dict[str, Any]:
     """运行 Agent 对话的辅助函数
     
     创建 AIAgent 并在线程中运行同步的 run_conversation 方法。
@@ -108,13 +117,13 @@ async def _run_agent_conversation(profile_id: str, prompt: str, session_id: str 
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(agent.run_conversation, prompt),
-            timeout=600,
+            timeout=timeout_seconds,
         )
     except asyncio.TimeoutError:
         return {
             "failed": True,
             "completed": False,
-            "error": f"Agent {profile_id} timed out",
+            "error": f"Agent {profile_id} timed out after {timeout_seconds}s",
         }
     
     if isinstance(result, dict):
@@ -126,6 +135,24 @@ T = TypeVar("T", bound=BaseModel)
 
 QUALITY_REMEDIATION_THRESHOLD = 0.9
 QUALITY_REMEDIATION_SAFETY_LIMIT = 12
+WRITER_INITIAL_TIMEOUT_SECONDS = 1800
+WRITER_REVISION_TIMEOUT_SECONDS = 1200
+WRITER_DRAWING_REPAIR_TIMEOUT_SECONDS = 1200
+
+
+def _configured_timeout_seconds(name: str, default: int) -> int:
+    """Read optional workflow timeout config without making the engine depend on settings."""
+    workflow = getattr(_app_settings, "workflow", None)
+    value = None
+    if workflow is not None:
+        value = getattr(workflow, name, None)
+    if value is None and _app_settings is not None:
+        value = getattr(_app_settings, name, None)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = 0
+    return parsed if parsed > 0 else default
 SPECIALIST_AGENT_NAMES = {
     "requirement_analyst": "需求分析师",
     "retrieval_analyst": "检索分析师",
@@ -442,9 +469,73 @@ class PatentWorkflowEngine:
             "review_report": "latest_quality_review",
         }.get(context_field, context_field)
         compact = json.loads(json.dumps(data, ensure_ascii=False, default=str))
+        if context_field == "requirement_analysis":
+            compact = self._attach_confirmed_preflight_to_requirement(context, compact)
         if context_field == "patent_draft":
             compact = self._build_quality_review_draft_summary(data)
         context.merge_shared_agent_context(phase_key, compact)
+
+    def _attach_confirmed_preflight_to_requirement(
+        self,
+        context: WorkflowContext,
+        requirement: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Ensure requirement facts include the user-confirmed preflight package.
+
+        Requirement analysis is allowed to focus on technical gaps, but downstream
+        Agents and the preview UI still need the confirmed patent name/type and
+        public facts in the same artifact instead of inferring them from chat.
+        """
+        if not isinstance(requirement, dict):
+            return requirement
+        enriched = dict(requirement)
+        confirmed = (
+            context.metadata.get("confirmed_preflight")
+            or context.shared_agent_context.get("confirmed_preflight")
+            or {}
+        )
+        if not isinstance(confirmed, dict):
+            confirmed = {}
+
+        patent_title = str(
+            enriched.get("patent_title")
+            or enriched.get("title")
+            or confirmed.get("patent_title")
+            or context.title
+            or ""
+        ).strip()
+        if patent_title:
+            enriched.setdefault("patent_title", patent_title)
+            enriched.setdefault("title", patent_title)
+
+        patent_type = str(
+            enriched.get("patent_type")
+            or confirmed.get("patent_type")
+            or confirmed.get("专利类型")
+            or ""
+        ).strip()
+        if patent_type and "patent_type" not in enriched:
+            enriched["patent_type"] = patent_type
+
+        if "confirmed_facts" not in enriched:
+            facts = {
+                k: v
+                for k, v in confirmed.items()
+                if k
+                in {
+                    "patent_title",
+                    "patent_type",
+                    "public_status",
+                    "claim_mainline",
+                    "technical_solution",
+                    "drawing_plan",
+                    "protection_focus",
+                }
+                and v not in (None, "", [], {})
+            }
+            if facts:
+                enriched["confirmed_facts"] = facts
+        return enriched
 
     def create_workflow(
         self,
@@ -740,19 +831,27 @@ class PatentWorkflowEngine:
                                 task_description=task_desc[:300],
                             ))
 
-                        # patent_writer 使用分段生成
-                        if agent_id == "patent_writer" and not hasattr(service, "run_conversation_stream"):
+                        # patent_writer must use the sectioned writer path even when Hermes
+                        # streaming is available; otherwise one long turn hides writing progress
+                        # and delays persisted stage output until the whole draft finishes.
+                        if agent_id == "patent_writer":
                             # 发射分段生成进度事件
                             if event_callback:
                                 event_callback(agent_display_name, "agent.thinking",
                                     "💭 开始分段生成专利文件（权利要求 → 说明书 → 摘要）",
                                     {"agent_name": agent_display_name, "thought": "分段生成专利文件", "step": 1})
-                            context_data = await self._generate_patent_in_sections(
-                                service,
-                                profile_id,
-                                task_desc,
-                                context,
-                                event_callback=event_callback,
+                            context_data = await asyncio.wait_for(
+                                self._generate_patent_in_sections(
+                                    service,
+                                    profile_id,
+                                    task_desc,
+                                    context,
+                                    event_callback=event_callback,
+                                ),
+                                timeout=_configured_timeout_seconds(
+                                    "writer_initial_timeout_seconds",
+                                    WRITER_INITIAL_TIMEOUT_SECONDS,
+                                ),
                             )
                             agent_text = json.dumps(context_data, ensure_ascii=False)[:500] if isinstance(context_data, dict) else str(context_data)[:500]
                         elif agent_id == "quality_reviewer":
@@ -1123,7 +1222,14 @@ class PatentWorkflowEngine:
                     context.current_phase = WorkflowState.PATENT_WRITING
                     await self._publish_progress_event(context, WorkflowState.PATENT_WRITING, "running")
 
-                    revision_prompt = self._build_revision_prompt(context, review_issues)
+                    review_requires_drawing_changes = self._review_requires_drawing_changes(
+                        context.review_report
+                    )
+                    revision_prompt = self._build_revision_prompt(
+                        context,
+                        review_issues,
+                        allow_drawing_generation=review_requires_drawing_changes,
+                    )
 
                     if event_callback:
                         event_callback("CEO Agent", "agent.dispatch",
@@ -1138,14 +1244,25 @@ class PatentWorkflowEngine:
                                 revision_prompt,
                                 context,
                                 event_callback=event_callback,
+                                allow_drawing_generation=review_requires_drawing_changes,
                             ),
-                            timeout=int(context.metadata.get("writer_revision_timeout_seconds", 420) or 420),
+                            timeout=int(
+                                context.metadata.get(
+                                    "writer_revision_timeout_seconds",
+                                    WRITER_REVISION_TIMEOUT_SECONDS,
+                                )
+                                or WRITER_REVISION_TIMEOUT_SECONDS
+                            ),
                         )
                         agent_text = json.dumps(context_data, ensure_ascii=False)[:500]
                         agent_tool_results = []
                     except asyncio.TimeoutError:
                         timeout_seconds = int(
-                            context.metadata.get("writer_revision_timeout_seconds", 420) or 420
+                            context.metadata.get(
+                                "writer_revision_timeout_seconds",
+                                WRITER_REVISION_TIMEOUT_SECONDS,
+                            )
+                            or WRITER_REVISION_TIMEOUT_SECONDS
                         )
                         self._logger.warning(
                             f"Patent writer revision timed out after {timeout_seconds}s; marking draft failed",
@@ -1216,6 +1333,11 @@ class PatentWorkflowEngine:
                             review_issues,
                             event_callback=event_callback,
                         )
+                        context_data = self._merge_reusable_revision_drawings(
+                            context,
+                            context_data,
+                            review_issues,
+                        )
                         context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
                         context_data = await self._ensure_required_patent_drawings(
                             context,
@@ -1243,30 +1365,61 @@ class PatentWorkflowEngine:
                     revision_duration = time.perf_counter() - revision_started_at
                     if isinstance(context_data, dict):
                         context_data.setdefault("_phase_duration_seconds", revision_duration)
-                    context.patent_draft = context_data
-                    self._update_shared_context_from_phase(context, "patent_draft", context_data)
-                    # 持久化修正后的撰写结果
-                    try:
-                        _persist_phase_result(context.task_id, "patent_draft", context_data if isinstance(context_data, dict) else {"output": str(context_data)})
-                    except Exception:
-                        pass
+                    writer_failed = (
+                        isinstance(context_data, dict)
+                        and context_data.get("_agent_failed") is True
+                    )
+                    if not writer_failed:
+                        context.patent_draft = context_data
+                        self._update_shared_context_from_phase(context, "patent_draft", context_data)
+                        # 持久化修正后的撰写结果。失败/超时输出不能覆盖上一轮有效草稿。
+                        try:
+                            _persist_phase_result(context.task_id, "patent_draft", context_data if isinstance(context_data, dict) else {"output": str(context_data)})
+                        except Exception:
+                            pass
+                    else:
+                        context.metadata["last_writer_failure"] = {
+                            "iteration_count": context.iteration_count,
+                            "error": str(context_data.get("_agent_error") or "专利撰写 Agent 修正失败"),
+                            "duration_seconds": revision_duration,
+                        }
                     context.add_phase_result(PhaseResult(
                         phase=WorkflowPhase.WRITING,
-                        success=not (isinstance(context_data, dict) and context_data.get("_agent_failed") is True),
+                        success=not writer_failed,
                         duration_seconds=revision_duration,
                         output=context_data if isinstance(context_data, dict) else {},
                         issues=[
                             str(context_data.get("_agent_error", ""))
-                        ] if isinstance(context_data, dict) and context_data.get("_agent_failed") is True else [],
+                        ] if writer_failed else [],
                     ))
-                    await self._publish_progress_event(context, WorkflowState.PATENT_WRITING, "completed")
+                    await self._publish_progress_event(
+                        context,
+                        WorkflowState.PATENT_WRITING,
+                        "failed" if writer_failed else "completed",
+                    )
                     if phase_callback:
                         last_result = context.phase_history[-1]
                         if asyncio.iscoroutinefunction(phase_callback):
                             await phase_callback(WorkflowState.PATENT_WRITING, last_result)
                         else:
                             phase_callback(WorkflowState.PATENT_WRITING, last_result)
-                    await checkpoint(f"quality_revision_writing_round_{context.iteration_count}_completed")
+                    await checkpoint(
+                        f"quality_revision_writing_round_{context.iteration_count}_"
+                        f"{'failed' if writer_failed else 'completed'}"
+                    )
+                    if writer_failed:
+                        if event_callback:
+                            event_callback(
+                                "CEO Agent",
+                                "agent.thinking",
+                                "⚠️ 专利撰写 Agent 本轮修正未完成，已保留上一轮有效草稿，继续调度撰写 Agent 基于原审查意见修复",
+                                {
+                                    "agent_name": "CEO Agent",
+                                    "thought": "writer_revision_failed_preserve_previous_draft",
+                                    "iteration_count": context.iteration_count,
+                                },
+                            )
+                        continue
 
                     # ── 重新审查 ──
                     review_started_at = time.perf_counter()
@@ -1487,7 +1640,7 @@ class PatentWorkflowEngine:
                         description=description_data,
                         abstract=abstract_text,
                         task_id=context.task_id,
-                        tech_description=context.original_description,
+                        tech_description=self._build_confirmed_writer_context(context, limit=12000),
                         drawings=draft.get("drawings", []),
                         output_stage="final",
                     )
@@ -1711,6 +1864,8 @@ class PatentWorkflowEngine:
 - `ready_for_writing`: true/false；只有存在会导致专利文本无法完整撰写的真实技术缺口、用户专属事实缺口或需求矛盾时才设为 false。
 - `carried_retrieval_risks`: 已完成多轮真实检索但仍只能作为风险带入撰写/审查的证据限制数组。
 如果仍有缺口，你必须把每个缺口归属到 requirement_analysis 或 retrieval_analysis：需求/方案细节缺口由你基于上一轮内容继续补齐；证据/现有技术/真伪核验缺口写入 `search_feedback_for_retrieval` 交给检索 Agent。
+用户未提供真实商业产品参数、硬件型号、尺寸、身高档位、角度档位、传感器型号、算法唯一选型时，不得默认阻止撰写；如果这些信息不是发明主题成立的必要事实，必须基于已确认方案、真实检索证据、物理规律和本领域常识写成“可配置/可选/非限定实施例”，并把限制放入 `carried_retrieval_risks` 或 `implementation_assumptions`。
+只有缺口无法通过可配置范围、可选结构、非限定示例或本领域常识合理表达，且会导致权利要求骨架无法成立时，才允许把 `ready_for_writing` 设为 false。
 不得仅因为“未找到单一最接近现有技术”“某个检索源不可用/无结果”“还可补充产品页面、白皮书、标准或厂商公开资料”就阻止撰写；当检索 Agent 已记录真实检索式、数据源、命中/失败/无结果和可核验对比证据时，这些事项应进入 `carried_retrieval_risks` 并交由撰写和质量审查处理。
 只有补证项会改变发明主题、权利要求骨架、必要技术特征或公开状态时，才能把 `ready_for_writing` 设为 false。
 不得因为检索暂时失败就要求用户补充，除非缺口是用户专属事实（例如内部产品参数、尚未公开资料、明确业务选择）。
@@ -1733,6 +1888,7 @@ patent_search、similarity_analyzer、patentability_scorer、risk_analyzer、web
 你必须先加载并遵守本 profile 的撰写、权利要求、附图和规范 skills；正式专利正文由你作为专利撰写 Agent 的 LLM 分段生成。
 claim_drafter、description_writer、terminology_normalizer、support_checker 只提供结构、约束和客观信号，不能替代正式权利要求、说明书和摘要。
 撰写前必须确认【已确认/共享公共信息】、需求分析和检索分析已经足够支持撰写；若不足，输出明确缺口并标注 responsible_phase，不得硬写。
+对真实项目参数缺失但不影响发明成立的内容，应写成可配置范围、可选部件或非限定实施例：例如身高/角度/场景映射表、执行机构、传感器、尺寸、阈值、算法策略均可列为“可以包括/可选为/在一实施例中”，不得因为没有用户私有参数就拒绝撰写。
 如果发明涉及结构、装置、系统、流程、空间关系或说明书包含附图说明，必须由你调用 patent_drawing_generator 为每一张附图分别生成真实附图，且绘图输入必须来自当前专利内容。
 注意：当前阶段只生成审查前的专利草稿和附图，不得调用 patent_docx_generator；最终 DOCX 必须在质量审查合格后由工作流统一生成。
 ---
@@ -1741,7 +1897,8 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             WorkflowState.QUALITY_REVIEW: """【质量审查阶段输出契约】
 你必须先加载并遵守本 profile 的质量审查 skills；最终评分、是否通过、是否需要补正和修复路径必须由你作为质量审查 Agent 的 LLM 判断。
 可调用 compliance_checker、claim_quality_analyzer、support_verifier、oa_predictor 获取客观信号和审查线索；工具结果不能替代内容质量、创造性、充分公开、权利要求清楚性和附图一致性的专业判断。
-必须同时审查文本、权利要求、说明书、附图是否缺失/重复、图号和 DOCX 插图位置。发现问题时输出可由 CEO 调度的缺陷清单。
+必须同时审查文本、权利要求、说明书、附图是否缺失/重复、图号和附图文件可访问性。发现问题时输出可由 CEO 调度的缺陷清单。
+注意：当前阶段是最终 DOCX 生成前的质量门，`docx_path` 为空不是缺陷；只有已提供最终 DOCX 路径时才审查 DOCX 插图位置。
 所有 high/critical 问题必须包含 `responsible_phase`，取值只能是：requirement_analysis、retrieval_analysis、patent_writing、user_input、system_failure。
 如果 recommendation 为 revise/reject 或存在 high/critical 问题，顶层必须输出 `root_cause`，取值只能是：content_incomplete、requirement_unclear、evidence_missing、external_info_missing、system_failure。
 CEO 只会按这些字段路由，不会替你判断专业结论；因此必须把修复建议写成对应 Agent 可执行的反馈。
@@ -1835,7 +1992,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 context, WorkflowPhase.RETRIEVAL, "retrieval_report"
             )
             req = json.dumps(requirement_output, ensure_ascii=False)[:500]
-            ret = json.dumps(retrieval_output, ensure_ascii=False)[:500]
+            ret = self._build_retrieval_summary_for_writer(retrieval_output, limit=8000)
             return f"{tool_prefix}基于需求分析和检索结果撰写专利申请文件：\n\n需求：{req}\n\n检索：{ret}{country_hint_map[phase]}"
 
         elif phase == WorkflowState.QUALITY_REVIEW:
@@ -1905,14 +2062,20 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             "title": draft.get("title") or draft.get("patent_title") or "",
             "claims": {
                 "independent_claim": str(claims.get("independent_claim") or "")[:1500],
-                "dependent_claims": [str(claim)[:600] for claim in claims.get("dependent_claims", [])[:8]],
+                # Quality review must see every claim. Truncating to the first
+                # few dependent claims can hide a second independent system/device
+                # claim and create false remediation loops.
+                "dependent_claims": [str(claim)[:1200] for claim in claims.get("dependent_claims", [])[:30]],
             },
             "description": {
                 "technical_field": str(description.get("technical_field") or "")[:800],
-                "background_art": str(description.get("background_art") or "")[:800],
-                "summary_of_invention": str(description.get("summary_of_invention") or "")[:1000],
-                "drawings_description": str(description.get("drawings_description") or "")[:800],
-                "detailed_description": str(description.get("detailed_description") or "")[:1500],
+                "background_art": str(description.get("background_art") or "")[:3000],
+                "summary_of_invention": str(description.get("summary_of_invention") or "")[:3000],
+                "drawings_description": str(description.get("drawings_description") or "")[:3000],
+                # Reviewer must inspect the full S1-S4 implementation and figure
+                # correspondence. Old short truncation made complete sections look
+                # cut off and caused false "content_incomplete" loops.
+                "detailed_description": str(description.get("detailed_description") or "")[:12000],
             },
             "drawings": [
                 {
@@ -1930,6 +2093,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 "如果说明书包含附图说明或具体实施方式引用图号，必须存在对应 drawings 元数据和可访问文件路径。",
                 "审查附图是否与权利要求、附图说明、具体实施方式中的结构/流程一致。",
                 "需要附图但未生成、图号不一致、附图无法访问或图文不匹配，均应判定为 high/critical 问题并要求撰写 Agent 补图或修正。",
+                "当前质量审查发生在最终 DOCX 生成前，docx_path 为空不是缺陷；通过后工作流才生成最终 DOCX。",
             ],
             "abstract": str(draft.get("abstract") or "")[:800],
             "docx_path": draft.get("docx_path") or "",
@@ -2047,6 +2211,16 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         if not isinstance(review_report, dict):
             return "TERMINAL_FAILURE"
 
+        root_cause = str(review_report.get("root_cause") or "").strip().lower()
+        root_mapping = {
+            "content_incomplete": "WRITE_MORE",
+            "requirement_unclear": "ANALYZE_MORE",
+            "evidence_missing": "SEARCH_MORE",
+            "external_info_missing": self._route_missing_information(review_report),
+            "system_failure": "TERMINAL_FAILURE",
+        }
+        root_route = root_mapping.get(root_cause)
+
         route_mapping = {
             "patent_writing": "WRITE_MORE",
             "writing": "WRITE_MORE",
@@ -2057,6 +2231,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             "user_input": "NEEDS_USER_INPUT",
             "system_failure": "TERMINAL_FAILURE",
         }
+        routed_phases: set[str] = set()
         for issue in self._extract_review_issue_records(review_report):
             responsible_phase = str(
                 issue.get("responsible_phase")
@@ -2065,18 +2240,46 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 or ""
             ).strip().lower()
             if responsible_phase in route_mapping:
-                return route_mapping[responsible_phase]
+                routed_phases.add(responsible_phase)
 
-        root_cause = str(review_report.get("root_cause") or "").strip().lower()
-        mapping = {
-            "content_incomplete": "WRITE_MORE",
-            "requirement_unclear": "ANALYZE_MORE",
-            "evidence_missing": "SEARCH_MORE",
-            "external_info_missing": self._route_missing_information(review_report),
-            "system_failure": "TERMINAL_FAILURE",
-        }
-        if root_cause in mapping:
-            return mapping[root_cause]
+        # A review can contain both drafting defects and evidence defects. Evidence
+        # defects must be resolved before the writer is asked to revise again,
+        # otherwise the writer keeps rewriting from the same incomplete source set.
+        #
+        # A low/medium "system_failure" note is often a non-blocking process
+        # reminder such as "final DOCX has not been generated yet" during the
+        # pre-DOCX quality gate. That must not terminate the agent loop.
+        has_blocking_system_failure = any(
+            str(issue.get("responsible_phase") or issue.get("target_phase") or issue.get("route_to") or "")
+            .strip()
+            .lower()
+            == "system_failure"
+            and str(issue.get("severity") or issue.get("likelihood") or "").strip().lower()
+            in {"high", "critical"}
+            for issue in self._extract_review_issue_records(review_report)
+            if isinstance(issue, dict)
+        )
+        if has_blocking_system_failure:
+            return "TERMINAL_FAILURE"
+
+        # The reviewer-level root cause is the primary routing signal. Individual
+        # risk records can name retrieval_analysis for later evidence hardening,
+        # but if the reviewer's top-level cause is content_incomplete the next
+        # action must be a writer revision based on the already confirmed facts.
+        if root_route and root_route != "TERMINAL_FAILURE":
+            return root_route
+
+        if "retrieval_analysis" in routed_phases or "retrieval" in routed_phases:
+            return "SEARCH_MORE"
+        if "requirement_analysis" in routed_phases or "requirements" in routed_phases:
+            return "ANALYZE_MORE"
+        if "patent_writing" in routed_phases or "writing" in routed_phases:
+            return "WRITE_MORE"
+        if "user_input" in routed_phases:
+            return "NEEDS_USER_INPUT"
+
+        if root_route:
+            return root_route
 
         missing_information = review_report.get("missing_information", [])
         if isinstance(missing_information, list) and any(str(item).strip() for item in missing_information):
@@ -2350,20 +2553,45 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             "可公开范围",
             "尚未量化",
             "参数仍需",
+            "真实商业产品",
+            "真实产品",
+            "真实项目",
+            "真实参数",
             "工程参数",
             "研发内部",
             "范围化",
             "可选化",
+            "可配置",
+            "非限定",
             "实施例示例化",
             "真实产品采用",
             "公开产品采用",
             "公开功能",
             "公开时间",
+            "身高区间",
+            "身高档位",
+            "角度档位",
             "角度阈值",
             "角度区间",
+            "场景模式",
+            "对应关系",
+            "映射关系",
+            "映射表",
             "显示模板参数",
+            "执行机构",
+            "执行机构型号",
+            "传感器型号",
+            "显示单元尺寸",
+            "屏幕尺寸",
+            "角度范围",
+            "反馈精度",
             "具体算法",
             "唯一算法",
+            "算法选型",
+            "画面重构算法",
+            "固定实现",
+            "拟采用参数",
+            "内部产品参数",
             "硬件来源",
         )
         if any(marker in text for marker in implementation_detail_markers):
@@ -2564,7 +2792,13 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                     return True
                 gap_text = "\n".join(
                     str(item.get(key) or "")
-                    for key in ("impact", "reason", "recommendation", "gap")
+                    for key in (
+                        "impact",
+                        "impact_on_writing",
+                        "reason",
+                        "recommendation",
+                        "gap",
+                    )
                 )
             else:
                 gap_text = str(item or "")
@@ -2967,7 +3201,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 retrieval_gaps.append(gap_text)
                 continue
             filtered_gaps.append(gap_text)
-        if review_allows_drafting and has_real_retrieval_evidence:
+        if review_allows_drafting:
             carried = context.metadata.setdefault("prewriting_carried_risks", {})
             if filtered_gaps:
                 carried["requirement_information_gaps"] = filtered_gaps
@@ -3052,9 +3286,16 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                     "remaining_requirement_gaps": remaining,
                     "search_feedback_for_retrieval": search_feedback,
                     "review_conclusion": retrieval_review.get("review_conclusion"),
+                    "policy": (
+                        "需求分析 Agent 已明确 ready_for_writing=true，"
+                        "剩余检索项仅作为撰写和质量审查风险继续流转，"
+                        "不再触发检索无限循环。"
+                    ),
                 }
                 remaining = []
                 search_feedback = []
+                ready_for_writing = True
+                all_gaps_closed = True
             elif carriable_retrieval_risks:
                 carried = context.metadata.setdefault("prewriting_carried_risks", {})
                 carried["remaining_requirement_gaps"] = raw_remaining
@@ -3740,13 +3981,22 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             return False
         return any(
             isinstance(drawing, dict)
-            and bool(
-                drawing.get("artifact_url")
-                or drawing.get("artifactUrl")
-                or drawing.get("file_path")
-            )
+            and self._drawing_artifact_is_accessible(drawing)
             for drawing in drawings
         )
+
+    def _drawing_artifact_is_accessible(self, drawing: Dict[str, Any]) -> bool:
+        """Return True when a drawing has a workflow-accessible artifact reference."""
+        artifact_url = drawing.get("artifact_url") or drawing.get("artifactUrl")
+        if artifact_url:
+            return True
+        file_path = drawing.get("file_path") or drawing.get("path")
+        if not file_path:
+            return False
+        try:
+            return _Path(str(file_path)).exists()
+        except (OSError, ValueError):
+            return False
 
     def _missing_drawing_references(self, draft: Dict[str, Any]) -> List[str]:
         planned_specs = self._planned_drawing_specs(draft)
@@ -3761,8 +4011,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             str(drawing.get("figure_number") or "").replace(" ", "")
             for drawing in drawings
             if isinstance(drawing, dict)
-            and bool(drawing.get("artifact_url") or drawing.get("artifactUrl") or drawing.get("file_path"))
-            and str(drawing.get("prompt_version") or "").startswith("patent_drawing_")
+            and self._drawing_artifact_is_accessible(drawing)
         }
         return [figure for figure in referenced if figure not in generated]
 
@@ -3893,8 +4142,8 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 【附图说明上下文】
 {drawing_description}
 
-【技术方案】
-{context.original_description[:4000]}
+【已确认技术方案上下文】
+{self._build_confirmed_writer_context(context, limit=12000)}
 
 【权利要求摘要】
 {json.dumps(draft.get("claims", {}), ensure_ascii=False)[:1800]}
@@ -3918,10 +4167,14 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
     }}
   ]
 }}"""
-            agent_result = await _run_agent_conversation(
-                profile_id="patent.writer.v1",
-                prompt=agent_prompt,
-                session_id=f"{context.task_id}:patent_drawing_repair",
+            agent_result = await asyncio.wait_for(
+                _run_agent_conversation(
+                    profile_id="patent.writer.v1",
+                    prompt=agent_prompt,
+                    session_id=f"{context.task_id}:patent_drawing_repair",
+                    timeout_seconds=WRITER_DRAWING_REPAIR_TIMEOUT_SECONDS,
+                ),
+                timeout=WRITER_DRAWING_REPAIR_TIMEOUT_SECONDS,
             )
             parsed: Dict[str, Any] = {}
             if isinstance(agent_result, dict):
@@ -3961,6 +4214,12 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         except Exception as exc:
             self._logger.warning(f"Failed to generate required patent drawings: {exc}")
             draft.setdefault("_drawing_generation_error", str(exc)[:500])
+            if self._missing_drawing_references(draft):
+                draft["_agent_failed"] = True
+                draft["_agent_error"] = (
+                    "专利撰写 Agent 未能在限定时间内补齐必要附图；"
+                    "需要 CEO 继续调度撰写 Agent 基于现有草稿和附图反馈补齐。"
+                )
 
         return draft
 
@@ -3987,7 +4246,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 description=draft.get("description", {}),
                 abstract=draft.get("abstract", ""),
                 task_id=context.task_id,
-                tech_description=context.original_description,
+                tech_description=self._build_confirmed_writer_context(context, limit=12000),
                 drawings=draft.get("drawings", []),
                 output_stage="draft",
                 file_name="working_draft.docx",
@@ -4070,6 +4329,72 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 },
             )
         return repaired
+
+    def _merge_reusable_revision_drawings(
+        self,
+        context: WorkflowContext,
+        draft: Dict[str, Any],
+        review_issues: List[str],
+    ) -> Dict[str, Any]:
+        """Preserve usable drawings across writer revision rounds.
+
+        Revision rounds should build on the previous draft. If the writer returns
+        only changed text and omits unchanged drawing metadata, the workflow must
+        not treat every prior figure as missing and regenerate them. Figures
+        explicitly mentioned in review feedback remain eligible for regeneration.
+        """
+        if not isinstance(draft, dict):
+            return draft
+        previous = context.patent_draft if isinstance(context.patent_draft, dict) else {}
+        previous_drawings = previous.get("drawings") if isinstance(previous, dict) else []
+        current_drawings = draft.get("drawings") if isinstance(draft.get("drawings"), list) else []
+        if not isinstance(previous_drawings, list) or not previous_drawings:
+            return draft
+
+        issue_text = "\n".join(str(issue or "") for issue in review_issues)
+        mentioned_figures = {
+            f"图{number}" for number in re.findall(r"图\s*([0-9]{1,2})", issue_text)
+        }
+        planned_specs = self._planned_drawing_specs(draft)
+        current_by_number: Dict[str, Dict[str, Any]] = {}
+        for item in current_drawings:
+            if not isinstance(item, dict):
+                continue
+            number = str(item.get("figure_number") or "").replace(" ", "")
+            if re.fullmatch(r"图\d+", number):
+                current_by_number[number] = dict(item)
+
+        merged = list(current_by_number.values())
+        existing_numbers = set(current_by_number)
+        for item in previous_drawings:
+            if not isinstance(item, dict):
+                continue
+            number = str(item.get("figure_number") or "").replace(" ", "")
+            if not re.fullmatch(r"图\d+", number):
+                continue
+            if number in existing_numbers or number in mentioned_figures:
+                continue
+            if not self._drawing_artifact_is_accessible(item):
+                continue
+            merged_item = dict(item)
+            merged.append(merged_item)
+            existing_numbers.add(number)
+
+        if len(merged) != len(current_drawings):
+            draft["drawings"] = self._normalize_drawing_metadata(
+                merged,
+                planned_specs=planned_specs,
+            )
+            draft["_reused_revision_drawings"] = sorted(
+                {
+                    str(item.get("figure_number") or "").replace(" ", "")
+                    for item in draft.get("drawings", [])
+                    if isinstance(item, dict)
+                    and self._drawing_artifact_is_accessible(item)
+                    and str(item.get("figure_number") or "").replace(" ", "") not in current_by_number
+                }
+            )
+        return draft
 
     def _normalize_drawing_metadata(
         self,
@@ -4327,13 +4652,20 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         draft_report = manual.get("manual_draft_rules", {}) if isinstance(manual, dict) else {}
 
         def to_review_issue(issue: Dict[str, Any]) -> Dict[str, Any]:
+            target_agent = str(issue.get("target_agent") or "patent_writer")
+            if target_agent in {"retrieval_analyst", "retrieval", "search"}:
+                responsible_phase = "retrieval_analysis"
+            elif target_agent in {"requirement_analyst", "requirement", "brainstorm_partner"}:
+                responsible_phase = "requirement_analysis"
+            else:
+                responsible_phase = "patent_writing"
             return {
                 "severity": issue.get("severity", "medium"),
                 "location": issue.get("location", "全文"),
                 "description": issue.get("issue") or issue.get("description", ""),
                 "suggestion": issue.get("suggestion", ""),
-                "target_agent": issue.get("target_agent", "patent_writer"),
-                "responsible_phase": "patent_writing",
+                "target_agent": target_agent,
+                "responsible_phase": responsible_phase,
                 "source": "deterministic_manual_gate",
             }
 
@@ -4357,8 +4689,21 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 
         merged = dict(review_report)
         merged["_hard_rule_failed"] = True
-        merged["_hard_rule_route"] = "patent_writing"
-        merged.setdefault("root_cause", "content_incomplete")
+        all_hard_issues = claim_issues + doc_issues + draft_issues
+        hard_routes = {
+            str(issue.get("responsible_phase") or "")
+            for issue in all_hard_issues
+            if str(issue.get("responsible_phase") or "")
+        }
+        if "retrieval_analysis" in hard_routes:
+            merged["_hard_rule_route"] = "retrieval_analysis"
+            merged["root_cause"] = "evidence_missing"
+        elif "requirement_analysis" in hard_routes:
+            merged["_hard_rule_route"] = "requirement_analysis"
+            merged["root_cause"] = "requirement_unclear"
+        else:
+            merged["_hard_rule_route"] = "patent_writing"
+            merged.setdefault("root_cause", "content_incomplete")
 
         claims_review = dict(merged.get("claims_review") or {})
         claims_review.setdefault("issues", [])
@@ -4567,7 +4912,86 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             "suggestions": list(dict.fromkeys(suggestions)),
         }
 
-    def _build_revision_prompt(self, context: WorkflowContext, review_issues: List[str]) -> str:
+    def _review_requires_drawing_changes(self, review_report: Dict[str, Any]) -> bool:
+        """Return True only when review feedback specifically requires drawing changes."""
+        if not isinstance(review_report, dict):
+            return False
+        drawing_terms = (
+            "附图",
+            "图号",
+            "图题",
+            "插图",
+            "图片",
+            "图文",
+            "draw",
+            "figure",
+        )
+        actionable_terms = (
+            "缺失",
+            "损坏",
+            "不可访问",
+            "重复",
+            "不一致",
+            "不符",
+            "错误",
+            "重画",
+            "重新生成",
+            "替换",
+            "补齐",
+            "新增",
+        )
+        concrete_drawing_problem_terms = (
+            "缺失",
+            "损坏",
+            "不可访问",
+            "重复",
+            "图文不符",
+            "图文不一致",
+            "图号重复",
+            "未生成",
+            "无法访问",
+            "无法打开",
+            "需要重画",
+            "重新生成",
+            "替换图",
+            "补齐图",
+            "新增图",
+        )
+        for record in self._extract_review_issue_records(review_report):
+            section = str(record.get("section") or "").lower()
+            text = " ".join(
+                str(record.get(key) or "")
+                for key in ("location", "description", "suggestion", "reason", "suggested_content")
+            ).lower()
+            if not text:
+                continue
+            has_drawing_reference = any(term.lower() in text for term in drawing_terms) or any(
+                key in section for key in ("drawing", "figure")
+            )
+            if not has_drawing_reference:
+                continue
+            if "最终docx" in text and "复核" in text and not any(
+                term in text for term in ("缺", "损坏", "不可访问", "重复", "不符", "不一致")
+            ):
+                continue
+            has_concrete_figure = bool(re.search(r"图\s*[0-9]{1,2}", text, re.IGNORECASE))
+            has_concrete_problem = any(term.lower() in text for term in concrete_drawing_problem_terms)
+            if has_concrete_problem and (
+                has_concrete_figure
+                or "附图缺失" in text
+                or "未生成附图" in text
+                or "drawing" in section
+                or "figure" in section
+            ):
+                return True
+        return False
+
+    def _build_revision_prompt(
+        self,
+        context: WorkflowContext,
+        review_issues: List[str],
+        allow_drawing_generation: bool = True,
+    ) -> str:
         """构建修正撰写的prompt，包含审查问题和原有草稿"""
         draft_output = self._latest_phase_output(context, WorkflowPhase.WRITING, "patent_draft")
         requirement_output = self._latest_phase_output(
@@ -4576,9 +5000,28 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         retrieval_output = self._latest_phase_output(
             context, WorkflowPhase.RETRIEVAL, "retrieval_report"
         )
-        draft_summary = json.dumps(draft_output or context.patent_draft, ensure_ascii=False)[:2000]
+        current_draft = draft_output or context.patent_draft
+        draft_summary = json.dumps(current_draft, ensure_ascii=False)[:6000]
+        previous_drawings = []
+        if isinstance(current_draft, dict):
+            previous_drawings = [
+                item for item in (current_draft.get("drawings") or [])
+                if isinstance(item, dict)
+            ]
+        previous_drawings_summary = json.dumps(previous_drawings, ensure_ascii=False)[:3000]
+        drawing_revision_rule = (
+            "审查意见明确涉及附图缺失、损坏、重复、图文不符或附图实施例变化；仅允许针对被点名的图号重新调用生图工具。"
+            if allow_drawing_generation
+            else "本轮审查未指出附图缺失、损坏、重复或图文不符；禁止调用 patent_drawing_generator，必须原样返回上一轮可访问附图元数据。"
+        )
         requirement_summary = json.dumps(requirement_output, ensure_ascii=False)[:3000]
-        retrieval_summary = json.dumps(retrieval_output, ensure_ascii=False)[:2000]
+        retrieval_summary = self._build_retrieval_summary_for_writer(retrieval_output, limit=12000)
+        confirmed_writer_context = self._build_confirmed_writer_context(
+            context,
+            requirement_output=requirement_output,
+            retrieval_output=retrieval_output,
+            limit=18000,
+        )
         issues_text = "\n".join(f"  {i+1}. {issue}" for i, issue in enumerate(review_issues))
         draft_failed = (
             not isinstance(context.patent_draft, dict)
@@ -4589,7 +5032,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         if draft_failed:
             failed_hint = """
 ## 当前专利文件生成失败或不完整
-当前专利文件不能作为修正依据。请以原始技术描述、需求分析结果和检索分析结果为主要依据，重新生成完整专利文件。"""
+当前专利文件不能作为修正依据。请以已确认撰写上下文、需求分析结果和检索分析结果为主要依据，重新生成完整专利文件。"""
 
         return f"""请基于质量审查意见对专利申请文件进行修正。
 
@@ -4597,8 +5040,8 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 {issues_text}
 {failed_hint}
 
-## 原始技术描述：
-{context.original_description}
+## 已确认撰写上下文：
+{confirmed_writer_context}
 
 ## 需求分析结果：
 {requirement_summary}
@@ -4609,13 +5052,97 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 ## 当前专利文件：
 {draft_summary}
 
+## 上一轮可复用附图元数据：
+{previous_drawings_summary}
+
 ## 修正要求：
 1. 这是基于上一轮专利文件的迭代修正，不是重新开始；上一轮已正确且未被指出问题的内容必须保留
 2. 逐一解决上述所有问题；仅替换或补充需要修复的权利要求、说明书章节、摘要或附图
 3. 如果需求分析或检索报告中已有明确结论，不得丢弃；如确需调整，必须与审查问题直接相关
 4. 保持原有文件结构不变（权利要求书+说明书+摘要+必要附图）
 5. 修正后输出完整的JSON格式专利文件，而不是只输出修改片段
-6. 确保修改后权利要求与说明书、附图的一致性"""
+6. 确保修改后权利要求与说明书、附图的一致性
+7. 如果审查问题涉及背景技术或证据，背景技术必须按三段式重写，并点名引用至少两个检索报告 confirmed_sources / web_evidence / non_patent_prior_art 中的真实来源标题、论文号、公开资料名称或 URL；不得只写“公开技术”“相关研究”等泛称，不得虚构专利号
+8. 若发明名称、摘要或发明内容包含“方法及系统”或“系统”，权利要求书必须包含对应系统独立权利要求；系统独权应以模块/单元承接权利要求1的方法步骤。若不增加系统独权，必须把发明名称、摘要和发明内容统一改为只保护“方法”。
+9. 权利要求1仍必须只能由S1-S3或S1-S4组成，且不超过250字；系统独立权利要求不计入权利要求1步数，但必须与说明书系统结构一致。
+10. 修订轮不得重画或替换未被审查指出问题且文件可访问的附图；必须原样返回上一轮可复用附图元数据。只有审查意见明确指出某张图缺失、损坏、重复、图文不符或该图实施例需要改变时，才重新调用生图工具生成该图。
+   - 当前附图修订判定：{drawing_revision_rule}
+11. 具体实施方式不得截断；必须显式按权利要求1的 S1、S2、S3（以及 S4，如有）逐项展开；所有被审查指出的图号对应实施例必须完整补齐，不能以“补充……”或省略号结束。"""
+
+    def _build_retrieval_summary_for_writer(self, retrieval_output: Any, limit: int = 12000) -> str:
+        """Build a source-preserving retrieval summary for the writer Agent.
+
+        This is only context packaging. It does not add evidence, invent sources,
+        or make patentability judgments.
+        """
+        if not isinstance(retrieval_output, dict) or not retrieval_output:
+            return "{}"
+        keys = (
+            "retrieval_strategy",
+            "confirmed_sources",
+            "prior_art_references",
+            "similar_patents",
+            "web_evidence",
+            "non_patent_prior_art",
+            "evidence_sources",
+            "evidence_gaps",
+            "novelty_assessment",
+            "inventive_step_assessment",
+            "utility_assessment",
+            "writing_recommendations",
+            "risk_factors",
+            "overall_patentability",
+            "overall_confidence",
+            "conclusion",
+        )
+        compact = {key: retrieval_output.get(key) for key in keys if retrieval_output.get(key) not in (None, "", [])}
+        return json.dumps(compact or retrieval_output, ensure_ascii=False, default=str)[:limit]
+
+    def _build_confirmed_writer_context(
+        self,
+        context: WorkflowContext,
+        requirement_output: Any = None,
+        retrieval_output: Any = None,
+        limit: int = 16000,
+    ) -> str:
+        """Build the writer-facing technical package from confirmed workflow facts.
+
+        Raw disclosure/transcript text is intentionally excluded here. Requirement
+        and brainstorm agents may use the disclosure to extract facts, but the
+        patent writer should only draft from confirmed facts, requirement analysis,
+        retrieval evidence, and user-confirmed preflight information.
+        """
+        shared = context.shared_agent_context if isinstance(context.shared_agent_context, dict) else {}
+        safe_shared = {
+            key: value
+            for key, value in shared.items()
+            if key
+            not in {
+                "user_supplements",
+                "raw_disclosure",
+                "original_description",
+                "disclosure_text",
+                "transcript",
+            }
+        }
+        payload = {
+            "task_id": context.task_id,
+            "patent_title": context.title or context.metadata.get("confirmed_preflight", {}).get("patent_title", ""),
+            "target_country": context.target_country,
+            "patent_type_preference": context.metadata.get("patent_type_preference", ""),
+            "confirmed_preflight": context.metadata.get("confirmed_preflight", {}),
+            "shared_confirmed_facts": safe_shared,
+            "requirement_analysis": requirement_output or self._latest_phase_output(
+                context, WorkflowPhase.REQUIREMENT, "requirement_analysis"
+            ),
+            "retrieval_report": self._build_retrieval_summary_for_writer(
+                retrieval_output
+                if retrieval_output is not None
+                else self._latest_phase_output(context, WorkflowPhase.RETRIEVAL, "retrieval_report"),
+                limit=12000,
+            ),
+        }
+        return json.dumps(payload, ensure_ascii=False, default=str)[:limit]
 
     async def _generate_patent_in_sections(
         self,
@@ -4624,6 +5151,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         base_task: str,
         context,
         event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
+        allow_drawing_generation: bool = True,
     ) -> Dict[str, Any]:
         """通过 Agent 工具调用生成专利文件
         
@@ -4643,18 +5171,39 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             context, WorkflowPhase.RETRIEVAL, "retrieval_report"
         )
         req_data = json.dumps(requirement_output, ensure_ascii=False)[:2000] if requirement_output else ""
-        ret_data = json.dumps(retrieval_output, ensure_ascii=False)[:1500] if retrieval_output else ""
+        ret_data = self._build_retrieval_summary_for_writer(retrieval_output, limit=12000)
+        confirmed_writer_context = self._build_confirmed_writer_context(
+            context,
+            requirement_output=requirement_output,
+            retrieval_output=retrieval_output,
+            limit=18000,
+        )
+        reusable_drawings = []
+        if not allow_drawing_generation and isinstance(context.patent_draft, dict):
+            reusable_drawings = [
+                item for item in (context.patent_draft.get("drawings") or [])
+                if isinstance(item, dict) and self._drawing_artifact_is_accessible(item)
+            ]
+        reusable_drawings_json = json.dumps(reusable_drawings, ensure_ascii=False)[:5000]
+        drawing_task_rule = (
+            """3. 对涉及结构、装置、系统、流程或空间关系的发明，调用 patent_drawing_generator 工具生成对应附图
+    - tech_description: 依据权利要求、说明书附图说明和原始技术方案整理的绘图说明
+    - task_id: 当前工作流任务ID {task_id}
+    - title: 当前草稿中该图的真实附图标题
+    - description: 当前草稿中该图必须表达的具体对象、结构、步骤、连接关系或状态变化"""
+        ).format(task_id=context.task_id) if allow_drawing_generation else f"""3. 本轮是文字/权利要求修订，审查未要求修图，禁止调用 patent_drawing_generator。
+    - 必须复用并原样返回以下上一轮可访问附图元数据。
+    - 只有下一轮质量审查明确指出某张图缺失、损坏、重复、图文不符或附图实施例需要改变时，才允许重画。
+    - 上一轮可复用附图元数据：
+{reusable_drawings_json}"""
         task_context = str(base_task or "").strip()
         tech_content = "\n\n".join(
             part
             for part in [
                 f"当前撰写任务/修正要求：\n{task_context}" if task_context else "",
-                "已确认/共享公共信息：\n" + context.get_shared_agent_context_text(8000)
-                if context.get_shared_agent_context_text(8000)
-                else "",
-                context.original_description,
+                "已确认撰写上下文：\n" + confirmed_writer_context,
                 json.dumps(requirement_output or {}, ensure_ascii=False),
-                json.dumps(retrieval_output or {}, ensure_ascii=False),
+                ret_data,
             ]
             if part
         )
@@ -4747,8 +5296,8 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 【发明名称】
 {context.title or "待定"}
 
-【技术描述】
-{context.original_description}
+【已确认技术方案上下文】
+{confirmed_writer_context}
 
 【需求分析结果】
 {req_data}
@@ -4763,7 +5312,8 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
    - features: 从技术描述中提取的技术特征
    - protection_scope: 期望的保护范围
    - 注意：工具只返回骨架/特征顺序，正式权利要求由你生成
-   - 硬性规范：权利要求书由独权和从权组成；独权只能写成3步或4步；每个分号“；”和句号“。”后必须换行。
+   - 硬性规范：权利要求书由独权和从权组成；权利要求1只能写成3步或4步且不超过250字；每个分号“；”和句号“。”后必须换行。
+   - 如果发明名称、发明内容或保护范围包含“方法及系统”或“系统”，必须同时撰写方法独立权利要求和系统独立权利要求；系统独权应以模块/单元承接权利要求1的方法步骤。若只保护方法，则发明名称、摘要和发明内容不能写“系统”。
    
 2. 调用 description_writer 工具获取说明书各章节写作约束
    - section_type="technical_field": 技术领域
@@ -4772,11 +5322,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
    - section_type="detailed": 具体实施方式
    - 注意：工具只返回章节约束，正式说明书正文由你生成
    
- 3. 对涉及结构、装置、系统、流程或空间关系的发明，调用 patent_drawing_generator 工具生成对应附图
-    - tech_description: 依据权利要求、说明书附图说明和原始技术方案整理的绘图说明
-    - task_id: 当前工作流任务ID {context.task_id}
-    - title: 当前草稿中该图的真实附图标题
-    - description: 当前草稿中该图必须表达的具体对象、结构、步骤、连接关系或状态变化
+ {drawing_task_rule}
 
  4. 调用 support_checker 检查你生成的权利要求与说明书的支持关系
 
@@ -4785,11 +5331,13 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 - 不得把交底逐字稿中的时间戳、说话人、会议口语或格式性内容写入正文。
 - 说明书摘要必须包含：专利名称、技术领域、简化技术方案、技术效果，且不超过300字。
 - 技术领域必须具体，不能写成发明本身，也不能混入方案细节。
-- 背景技术必须基于检索报告中的真实现有技术，并避免泄露本发明的具体方案。
+	- 背景技术必须基于检索报告中的真实现有技术，并避免泄露本发明的具体方案；必须点名引用至少两个 confirmed_sources / web_evidence / non_patent_prior_art 中的真实来源标题、论文号、公开资料名称或 URL，例如 arXiv 论文、Microsoft Research 项目页、官方公开资料等，并说明这些来源没有解决的具体技术问题。不得只写“公开技术”“相关研究”等泛称，不得虚构专利号。
 - 发明内容必须包含技术问题、技术方案、有益效果，三者一一对应。
 - 附图至少按需要规划4幅；每幅图必须表达不同主题，不能只换标题或重复图片内容。
 - 附图说明不得重复图号或重复标题。
 - 具体实施方式必须与权利要求和附图对应，不能使用 Markdown 标题。
+- 具体实施方式必须显式按权利要求1的 S1、S2、S3（以及 S4，如有）逐项展开，不能缺少步骤编号。
+- 如果题名为“方法及系统”或正文包含系统保护主题，权利要求书中必须出现对应系统独立权利要求，不能只在说明书中描述系统。
 最终只输出严格 JSON，不要输出 Markdown、代码块或解释文字：
 {{
   "claims": {{
@@ -4827,7 +5375,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         description_data = {}
         abstract_text = ""
         docx_path = ""
-        drawings_data = []
+        drawings_data = list(reusable_drawings)
         final_response = ""
         last_failed_result: Optional[Dict[str, Any]] = None
 
@@ -4859,7 +5407,14 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             )
 
         for writer_attempt in range(3):
-            agent_result = await _run_agent_conversation(profile_id, task_prompt)
+            agent_result = await _run_agent_conversation(
+                profile_id,
+                task_prompt,
+                timeout_seconds=_configured_timeout_seconds(
+                    "writer_initial_timeout_seconds",
+                    WRITER_INITIAL_TIMEOUT_SECONDS,
+                ),
+            )
 
             if isinstance(agent_result, dict):
                 final_response = agent_result.get("final_response", "") or agent_result.get("content", "") or final_response
@@ -4959,7 +5514,11 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                             if abstract_text:
                                 _emit_writer_section_result("abstract", "说明书摘要", abstract_text)
 
-                        elif tool_name == "patent_drawing_generator" and tool_content.get("success"):
+                        elif (
+                            tool_name == "patent_drawing_generator"
+                            and tool_content.get("success")
+                            and allow_drawing_generation
+                        ):
                             drawings = tool_data.get("drawings", [])
                             if isinstance(drawings, list):
                                 drawings_data.extend(item for item in drawings if isinstance(item, dict))
@@ -5046,7 +5605,11 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
 
                 candidate_drawings = agent_structured_output.get("drawings")
                 if isinstance(candidate_drawings, list):
-                    drawings_data = [item for item in candidate_drawings if isinstance(item, dict)]
+                    candidate_drawing_items = [
+                        item for item in candidate_drawings if isinstance(item, dict)
+                    ]
+                    if allow_drawing_generation or candidate_drawing_items:
+                        drawings_data = candidate_drawing_items
                     if drawings_data:
                         _emit_writer_section_result(
                             "drawings",
@@ -5293,17 +5856,23 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         retrieval_output = self._latest_phase_output(
             context, WorkflowPhase.RETRIEVAL, "retrieval_report"
         )
+        confirmed_writer_context = self._build_confirmed_writer_context(
+            context,
+            requirement_output=requirement_output,
+            retrieval_output=retrieval_output,
+            limit=18000,
+        )
 
         repair_prompt = f"""上一轮专利撰写输出不完整，请作为专利撰写 Agent 继续补齐，不要从头重写。
 
-【原始技术描述】
-{context.original_description[:8000]}
+【已确认撰写上下文】
+{confirmed_writer_context}
 
 【需求分析】
 {json.dumps(requirement_output or {}, ensure_ascii=False)[:3000]}
 
 【检索报告】
-{json.dumps(retrieval_output or {}, ensure_ascii=False)[:3000]}
+{self._build_retrieval_summary_for_writer(retrieval_output, limit=12000)}
 
 【已完成权利要求】
 {json.dumps(claims_data or {}, ensure_ascii=False)[:6000]}
@@ -5331,7 +5900,14 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
   "abstract": "...",
   "drawings": []
 }}"""
-        raw = await _run_agent_conversation("patent.writer.v1", repair_prompt)
+        raw = await _run_agent_conversation(
+            "patent.writer.v1",
+            repair_prompt,
+            timeout_seconds=_configured_timeout_seconds(
+                "writer_revision_timeout_seconds",
+                WRITER_REVISION_TIMEOUT_SECONDS,
+            ),
+        )
         if isinstance(raw, dict):
             text = raw.get("final_response", "") or raw.get("content", "") or json.dumps(raw, ensure_ascii=False)
             structured = raw.get("structured_result") if isinstance(raw.get("structured_result"), dict) else None
@@ -6100,10 +6676,130 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 if isinstance(dbs, list) and dbs:
                     data["retrieval_databases"] = dbs
 
+            if "confirmed_sources" not in data:
+                confirmed_sources: List[Dict[str, Any]] = []
+                seen_sources: set[str] = set()
+
+                def add_source(item: Any, default_type: str = "") -> None:
+                    if isinstance(item, dict):
+                        title = str(item.get("title") or item.get("name") or item.get("reference_id") or item.get("url") or "").strip()
+                        url = str(item.get("url") or item.get("source_url") or "").strip()
+                        source = str(item.get("source") or item.get("source_type") or item.get("database") or default_type).strip()
+                        excerpt = str(
+                            item.get("key_excerpt")
+                            or item.get("abstract")
+                            or item.get("summary")
+                            or item.get("snippet")
+                            or item.get("rationale")
+                            or ""
+                        ).strip()
+                        why = str(item.get("why_it_matters") or item.get("differences") or item.get("relevance") or "").strip()
+                    else:
+                        title = str(item or "").strip()
+                        url = ""
+                        source = default_type
+                        excerpt = ""
+                        why = ""
+                    if not (title or url):
+                        return
+                    key = f"{source}|{title}|{url}"
+                    if key in seen_sources:
+                        return
+                    seen_sources.add(key)
+                    confirmed_sources.append({
+                        "title": title,
+                        "url": url,
+                        "source": source,
+                        "key_excerpt": excerpt,
+                        "why_it_matters": why,
+                    })
+
+                for field_name, default_type in (
+                    ("prior_art_references", "patent"),
+                    ("similar_patents", "patent"),
+                    ("web_evidence", "web"),
+                    ("non_patent_prior_art", "non_patent"),
+                    ("evidence_sources", "evidence"),
+                ):
+                    for item in self._as_nonempty_list(data.get(field_name)):
+                        add_source(item, default_type)
+
+                for assessment_key in ("novelty_assessment", "inventive_step_assessment"):
+                    assessment = data.get(assessment_key)
+                    if not isinstance(assessment, dict):
+                        continue
+                    for item in self._as_nonempty_list(assessment.get("related_prior_art")):
+                        add_source(item, "non_patent")
+
+                if confirmed_sources:
+                    data["confirmed_sources"] = confirmed_sources
+            data.setdefault("evidence_gaps", [])
+
         elif context_field == "review_report":
+            summary = data.get("review_summary")
+            if isinstance(summary, dict):
+                if "recommendation" not in data and summary.get("recommendation"):
+                    data["recommendation"] = summary.get("recommendation")
+                if "overall_score" not in data and summary.get("overall_score") is not None:
+                    data["overall_score"] = summary.get("overall_score")
             # score → overall_score (如果 Agent 用了 score 字段)
             if "score" in data and "overall_score" not in data:
                 data["overall_score"] = data["score"]
+            target_agent_phase_map = {
+                "patent_writer": "patent_writing",
+                "writer": "patent_writing",
+                "requirement_analyst": "requirement_analysis",
+                "brainstorm_partner": "requirement_analysis",
+                "retrieval_analyst": "retrieval_analysis",
+                "quality_reviewer": "system_failure",
+                "ceo": "system_failure",
+            }
+            for section_key in (
+                "formal_compliance_review",
+                "claims_review",
+                "description_review",
+                "consistency_review",
+                "drawing_review",
+                "drawings_review",
+                "figure_review",
+            ):
+                section = data.get(section_key)
+                if not isinstance(section, dict):
+                    continue
+                issues = section.get("issues")
+                if not isinstance(issues, list):
+                    continue
+                for issue in issues:
+                    if not isinstance(issue, dict) or issue.get("responsible_phase"):
+                        continue
+                    target_agent = str(issue.get("target_agent") or "").strip().lower()
+                    responsible_phase = target_agent_phase_map.get(target_agent)
+                    if responsible_phase:
+                        issue["responsible_phase"] = responsible_phase
+            for risk in data.get("examination_risks", []) or []:
+                if not isinstance(risk, dict) or risk.get("responsible_phase"):
+                    continue
+                target_agent = str(risk.get("target_agent") or "").strip().lower()
+                responsible_phase = target_agent_phase_map.get(target_agent)
+                if not responsible_phase:
+                    risk_text = " ".join(
+                        str(risk.get(key) or "")
+                        for key in (
+                            "risk_type",
+                            "description",
+                            "mitigation_suggestion",
+                            "mitigation",
+                            "suggestion",
+                        )
+                    )
+                    if any(token in risk_text for token in ("检索", "证据", "现有技术", "背景技术", "公开文献")):
+                        responsible_phase = "retrieval_analysis"
+                    elif any(token in risk_text for token in ("用户", "补充交底", "业务约束")):
+                        responsible_phase = "user_input"
+                    else:
+                        responsible_phase = "patent_writing"
+                if responsible_phase:
+                    risk["responsible_phase"] = responsible_phase
             # issues → 按类型分组到 formal_compliance / claims_review / description_review
             if "issues" in data and isinstance(data["issues"], list):
                 if "formal_compliance" not in data:

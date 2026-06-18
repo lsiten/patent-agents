@@ -17,7 +17,7 @@ from tools.registry import registry
 logger = logging.getLogger(__name__)
 
 
-def _run_async(coro):
+def _run_async(coro, timeout: int = 120):
     """在同步上下文中运行异步协程"""
     try:
         loop = asyncio.get_event_loop()
@@ -25,7 +25,7 @@ def _run_async(coro):
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 future = pool.submit(asyncio.run, coro)
-                return future.result(timeout=120)
+                return future.result(timeout=timeout)
         else:
             return loop.run_until_complete(coro)
     except RuntimeError:
@@ -263,7 +263,7 @@ def _handle_patent_docx_generator(args: Dict[str, Any], **kw) -> str:
 def _handle_patent_drawing_generator(args: Dict[str, Any], **kw) -> str:
     from src.agents.hermes.tools.patent_drawing_generator import PatentDrawingGeneratorTool
     tool = PatentDrawingGeneratorTool()
-    result = _run_async(tool.execute(**args))
+    result = _run_async(tool.execute(**args), timeout=240)
     return _json_result(result)
 
 
@@ -381,7 +381,7 @@ PATENT_TOOL_DEFINITIONS = [
                     "query": {"type": "string", "description": "检索查询关键词或技术描述"},
                     "sources": {
                         "type": "string",
-                        "description": "数据源(逗号分隔): google_patents,uspto,arxiv；留空使用全部可用真实数据源",
+                        "description": "数据源(逗号分隔): google_patents,uspto,arxiv；留空使用全部已配置并启用的真实数据源。未配置的专利库不会启用。",
                     },
                     "limit": {"type": "string", "description": "最大结果数量"},
                 },

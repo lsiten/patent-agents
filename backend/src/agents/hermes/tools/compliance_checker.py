@@ -5,11 +5,14 @@ Compliance Checker Tool - 形式合规检查工具
 import json
 import re
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
-from src.core.patent_compliance import validate_patent_document_structure
+from src.core.patent_compliance import (
+    build_patent_text_from_draft,
+    validate_patent_document_structure,
+)
 
 logger = get_logger(__name__)
 
@@ -40,7 +43,7 @@ class ComplianceCheckerTool(HermesTool):
         logger.info("Checking formal compliance")
 
         try:
-            text = patent_document or ""
+            text, drawings = self._normalize_input(patent_document, kwargs)
             issues = []
             for section in REQUIRED_SECTIONS:
                 if section not in text:
@@ -55,7 +58,7 @@ class ComplianceCheckerTool(HermesTool):
                 issues.append({"severity": "medium", "location": "附图说明", "issue": "存在附图说明章节但未发现图号", "suggestion": "补充附图编号和说明。"})
             manual_report = validate_patent_document_structure(
                 text,
-                drawings=kwargs.get("drawings") if isinstance(kwargs.get("drawings"), list) else None,
+                drawings=drawings,
             )
             for issue in manual_report.get("issues", []):
                 issues.append({
@@ -114,3 +117,33 @@ class ComplianceCheckerTool(HermesTool):
                 error=str(e),
                 start_time=start_time,
             )
+
+    def _normalize_input(self, patent_document: Any, kwargs: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]]]:
+        """Accept either plain patent text or structured draft JSON.
+
+        Quality Agent often passes the whole draft as JSON. Checking the raw
+        JSON string would falsely report missing Chinese sections, so convert
+        structured drafts into the same patent text used by hard-rule validators.
+        """
+        drawings = kwargs.get("drawings") if isinstance(kwargs.get("drawings"), list) else []
+        if isinstance(patent_document, dict):
+            draft = patent_document
+            if not drawings and isinstance(draft.get("drawings"), list):
+                drawings = draft.get("drawings") or []
+            return build_patent_text_from_draft(draft), drawings
+
+        text = patent_document or ""
+        if isinstance(text, str):
+            stripped = text.strip()
+            if stripped.startswith("{") and stripped.endswith("}"):
+                try:
+                    draft = json.loads(stripped)
+                    if isinstance(draft, dict):
+                        if not drawings and isinstance(draft.get("drawings"), list):
+                            drawings = draft.get("drawings") or []
+                        return build_patent_text_from_draft(draft), drawings
+                except json.JSONDecodeError:
+                    pass
+            return stripped, drawings
+
+        return str(text), drawings

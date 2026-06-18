@@ -30,7 +30,7 @@ class PatentSearchTool(HermesTool):
                 ),
                 "sources": HermesToolParameter(
                     type="string",
-                    description="数据源，逗号分隔: google_patents,uspto,arxiv；留空则使用全部可用真实数据源",
+                    description="数据源，逗号分隔: google_patents,uspto,arxiv；留空则使用全部已配置并启用的真实数据源。专利库未配置时不会启用；可先查专利库，再查 arxiv 论文源。",
                     required=False,
                 ),
                 "limit": HermesToolParameter(
@@ -72,6 +72,14 @@ class PatentSearchTool(HermesTool):
                 for source_id, status in source_status.items()
                 if str(source_id).strip()
             }
+            public_source_status = {
+                source_id: {
+                    "available": bool(status.get("success")),
+                    "count": int(status.get("count") or 0),
+                    "reason": status.get("error") or "",
+                }
+                for source_id, status in source_status.items()
+            }
 
             results: List[Dict[str, Any]] = []
             for ref in references[:max_results]:
@@ -112,7 +120,7 @@ class PatentSearchTool(HermesTool):
                 "sources": actual_sources_used,
                 "actual_sources_used": actual_sources_used,
                 "source_result_counts": source_result_counts,
-                "source_status": source_status,
+                "source_status": public_source_status,
                 "unavailable_or_empty_sources": unavailable_or_empty_sources,
                 "skipped_sources": skipped_sources,
                 "empty_sources": empty_sources,
@@ -121,9 +129,11 @@ class PatentSearchTool(HermesTool):
                 "total_found": len(results),
                 "search_strategy": "real_data_source_query",
                 "source_handling_policy": (
-                    "Unavailable or disabled sources were skipped and recorded. "
-                    "Do not block the phase when other verifiable evidence exists; "
-                    "if no verifiable evidence exists, revise keywords and try other real sources."
+                    "Unavailable, disabled or unconfigured sources were skipped and recorded. "
+                    "When configured patent sources return no evidence, try academic sources such as arxiv. "
+                    "When academic sources are also insufficient, use web_access tools to inspect authoritative public pages. "
+                    "Only ask the user for specific missing papers/public materials after reliable evidence, public knowledge, "
+                    "and physically plausible engineering inference are still insufficient."
                 ),
                 "keywords_used": [query],
             }
