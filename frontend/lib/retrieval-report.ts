@@ -4,6 +4,9 @@ export interface RetrievalPatentInput {
   patent_number?: unknown;
   publication_number?: unknown;
   document_id?: unknown;
+  source_id?: unknown;
+  doi?: unknown;
+  arxiv_id?: unknown;
   title?: unknown;
   name?: unknown;
   source?: unknown;
@@ -72,6 +75,12 @@ export function buildPatentUrl(patentId: string, source: string): string {
   if (sourceLower === 'arxiv') {
     return `https://arxiv.org/abs/${encodeURIComponent(id)}`;
   }
+  if (sourceLower === 'doi') {
+    return `https://doi.org/${encodeURIComponent(id)}`;
+  }
+  if (!sourceLower && !/^[A-Z]{2,}\d|^\d{4}/i.test(id)) {
+    return '';
+  }
 
   const cleanId = id.replace(/[\s/]/g, '');
   return `https://patents.google.com/patent/${cleanId}`;
@@ -79,7 +88,11 @@ export function buildPatentUrl(patentId: string, source: string): string {
 
 export function getRetrievalPatentReferences(report: Record<string, unknown>): NormalizedRetrievalPatent[] {
   const candidateFields = [
+    report.confirmed_sources,
     report.prior_art_references,
+    report.web_evidence,
+    report.non_patent_prior_art,
+    report.evidence_sources,
     report.similar_patents,
     report.key_references,
     report.references,
@@ -113,9 +126,12 @@ export function getRetrievalPatentReferences(report: Record<string, unknown>): N
       str(ref.patent_id) ||
       str(ref.patent_number) ||
       str(ref.publication_number) ||
-      str(ref.document_id)
+      str(ref.document_id) ||
+      str(ref.source_id) ||
+      str(ref.arxiv_id) ||
+      str(ref.doi)
     );
-    const source = str(ref.source) || str(ref.database);
+    const source = str(ref.source) || str(ref.database) || (str(ref.doi) ? 'doi' : str(ref.arxiv_id) ? 'arxiv' : '');
     const url = str(ref.url) || buildPatentUrl(patentId, source);
     const differences = normalizeTextList(ref.key_differences ?? ref.differences ?? ref.distinguishing_features);
     const similarities = normalizeTextList(ref.key_similarities ?? ref.matching_features ?? ref.key_features);

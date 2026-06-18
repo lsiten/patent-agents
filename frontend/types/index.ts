@@ -192,6 +192,7 @@ export type AgentLogEntryType =
   | 'dispatch'       // CEO调度子agent
   | 'thinking'       // agent思考过程
   | 'tool_start'     // 工具调用开始
+  | 'tool_delta'     // 工具调用过程/流式参数
   | 'tool_end'       // 工具调用完成
   | 'content'        // agent最终输出
   | 'progress'       // 阶段进度变化
@@ -210,6 +211,7 @@ export interface AgentLogEntry {
   // tool_start / tool_end
   tool_name?: string;
   tool_params?: Record<string, unknown>;
+  tool_delta?: string;
   tool_result?: string;
   tool_success?: boolean;
   // content
@@ -230,7 +232,19 @@ export interface AgentInfo {
 export type AgentWorkStatus = 'running' | 'completed' | 'failed';
 
 export interface AgentWorkEvent {
-  event_type: 'agent.work.started' | 'agent.work.completed' | 'agent.work.failed' | 'agent.work.thinking';
+  event_type:
+    | 'agent.work.started'
+    | 'agent.work.completed'
+    | 'agent.work.failed'
+    | 'agent.work.thinking'
+    | 'workflow.phase_round.started'
+    | 'workflow.phase_round.completed'
+    | 'workflow.quality_gate.completed'
+    | 'workflow.shared_facts.updated'
+    | 'workflow.human_input.requested'
+    | 'workflow.run.started'
+    | 'workflow.run.finished'
+    | string;
   task_id: string;
   conversation_id?: string;
   agent_id: string;
@@ -265,7 +279,22 @@ export interface AgentEvent {
   id: string;
   sequence: number;
   call_id: string;
-  type: 'thinking' | 'tool_call_start' | 'tool_call_end' | 'skill_use' | 'status' | 'dispatch';
+  type:
+    | 'thinking'
+    | 'tool_call_start'
+    | 'tool_call_delta'
+    | 'tool_call_end'
+    | 'skill_use'
+    | 'status'
+    | 'dispatch'
+    | 'workflow.phase_round.started'
+    | 'workflow.phase_round.completed'
+    | 'workflow.quality_gate.completed'
+    | 'workflow.shared_facts.updated'
+    | 'workflow.human_input.requested'
+    | 'workflow.run.started'
+    | 'workflow.run.finished'
+    | string;
   agent_name: string;
   timestamp: string;
   message: string;

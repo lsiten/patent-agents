@@ -510,9 +510,32 @@ export default function WorkflowPage() {
     let logIdCounter = 0;
 
     const createLogId = () => `log_${Date.now()}_${logIdCounter++}`;
+    const createStableLogId = (
+      eventType: string,
+      parsed: Record<string, unknown>,
+      data: Record<string, unknown>,
+      stableSeed: string
+    ) => {
+      const stateDelta = data.state_delta && typeof data.state_delta === 'object' && !Array.isArray(data.state_delta)
+        ? data.state_delta as Record<string, unknown>
+        : {};
+      return [
+        eventType,
+        data.tool_call_id,
+        data.message_id,
+        data.node || data.phase_node || stateDelta.current_node,
+        data.round || stateDelta.current_round,
+        parsed.timestamp,
+        stableSeed,
+      ].filter(Boolean).join(':') || createLogId();
+    };
 
-    const addLog = (entry: Omit<AgentLogEntry, 'id'>) => {
-      setAgentLogs((prev) => [...prev, { ...entry, id: createLogId() }]);
+    const addLog = (entry: Omit<AgentLogEntry, 'id'>, stableId?: string) => {
+      setAgentLogs((prev) => {
+        const id = stableId || createLogId();
+        if (prev.some((item) => item.id === id)) return prev;
+        return [...prev, { ...entry, id }];
+      });
     };
 
     const clearEventSource = () => {
@@ -540,7 +563,7 @@ export default function WorkflowPage() {
             agent_name: data.agent_name || parsed.agent || 'Agent',
             type: 'thinking',
             message: thought,
-          });
+          }, createStableLogId('agent.thinking', parsed, data, thought.slice(0, 120)));
         } catch {}
       };
 
@@ -554,7 +577,23 @@ export default function WorkflowPage() {
             type: 'tool_start',
             tool_name: data.tool_name || '',
             tool_params: data.parameters || {},
-          });
+          }, createStableLogId('agent.tool_call_start', parsed, data, String(data.tool_name || '')));
+        } catch {}
+      };
+
+      const onToolCallDelta = (e: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          const data = parsed.data || parsed;
+          const delta = data.delta || data.content || data.message || data.display_message || '';
+          addLog({
+            timestamp: parsed.timestamp || new Date().toISOString(),
+            agent_name: data.agent_name || parsed.agent || 'Agent',
+            type: 'tool_delta',
+            tool_name: data.tool_name || data.name || '',
+            tool_delta: typeof delta === 'string' ? delta : JSON.stringify(delta),
+            message: typeof delta === 'string' ? delta : JSON.stringify(delta),
+          }, createStableLogId('agent.tool_call_delta', parsed, data, String(delta).slice(0, 120)));
         } catch {}
       };
 
@@ -569,7 +608,7 @@ export default function WorkflowPage() {
             tool_name: data.tool_name || '',
             tool_result: data.result || '',
             tool_success: data.success !== false,
-          });
+          }, createStableLogId('agent.tool_call_end', parsed, data, String(data.tool_name || '')));
         } catch {}
       };
 
@@ -583,7 +622,7 @@ export default function WorkflowPage() {
             type: 'dispatch',
             dispatch_to: data.to_agent || '',
             dispatch_task: data.task_description || '',
-          });
+          }, createStableLogId('agent.dispatch', parsed, data, String(data.to_agent || data.task_description || '')));
         } catch {}
       };
 
@@ -597,7 +636,7 @@ export default function WorkflowPage() {
             type: 'content',
             content: data.content || '',
             phase: data.phase || '',
-          });
+          }, createStableLogId('agent.content', parsed, data, String(data.phase || data.content || '').slice(0, 120)));
         } catch {}
       };
 
@@ -611,7 +650,7 @@ export default function WorkflowPage() {
             type: 'content',
             content: data.message || parsed.message || `已沉淀技能：${data.skill || ''}`,
             phase: 'skill_sedimentation',
-          });
+          }, createStableLogId('agent.skill_sedimented', parsed, data, String(data.skill || '')));
         } catch {}
       };
 
@@ -625,7 +664,31 @@ export default function WorkflowPage() {
             type: 'progress',
             message: data.message || parsed.message || `阶段 ${data.state} ${data.progress}%`,
             phase: data.state || '',
-          });
+          }, createStableLogId('workflow.progress_updated', parsed, data, String(data.state || data.message || '')));
+        } catch {}
+      };
+
+      const onWorkflowEvent = (e: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(e.data);
+          const data = parsed.data || parsed;
+          const eventType = parsed.event_type || parsed.type || data.event_type || data.agui_type || 'workflow.event';
+          addLog({
+            timestamp: parsed.timestamp || new Date().toISOString(),
+            agent_name: data.agent_name || parsed.agent || 'Workflow Engine',
+            type: eventType === 'workflow.human_input.requested' ? 'error' : 'progress',
+            message: data.display_message || parsed.message || data.message || eventType,
+            phase: data.phase || data.phase_node || data.state_delta?.current_node || '',
+          }, createStableLogId(eventType, parsed, data, String(data.display_message || parsed.message || data.message || '')));
+          if (
+            eventType.includes('phase_round') ||
+            eventType.includes('quality_gate') ||
+            eventType.includes('shared_facts') ||
+            eventType.includes('human_input') ||
+            eventType.includes('run.finished')
+          ) {
+            void loadWorkflow();
+          }
         } catch {}
       };
 
@@ -636,11 +699,19 @@ export default function WorkflowPage() {
 
       es.addEventListener('agent.thinking', onThinking);
       es.addEventListener('agent.tool_call_start', onToolCallStart);
+      es.addEventListener('agent.tool_call_delta', onToolCallDelta);
       es.addEventListener('agent.tool_call_end', onToolCallEnd);
       es.addEventListener('agent.dispatch', onDispatch);
       es.addEventListener('agent.content', onContent);
       es.addEventListener('agent.skill_sedimented', onSkillSedimented);
       es.addEventListener('workflow.progress_updated', onProgress);
+      es.addEventListener('workflow.phase_round.started', onWorkflowEvent);
+      es.addEventListener('workflow.phase_round.completed', onWorkflowEvent);
+      es.addEventListener('workflow.quality_gate.completed', onWorkflowEvent);
+      es.addEventListener('workflow.shared_facts.updated', onWorkflowEvent);
+      es.addEventListener('workflow.human_input.requested', onWorkflowEvent);
+      es.addEventListener('workflow.run.started', onWorkflowEvent);
+      es.addEventListener('workflow.run.finished', onWorkflowEvent);
       es.addEventListener('done', onDone);
 
       es.onerror = () => {
@@ -652,8 +723,6 @@ export default function WorkflowPage() {
         }
         const delay = Math.min(SSE_INITIAL_DELAY * Math.pow(2, retryCount - 1), SSE_MAX_DELAY);
         clearEventSource();
-        // 重连前清空日志，避免后端重放事件导致重复
-        setAgentLogs([]);
         retryTimer = setTimeout(connect, delay);
       };
     }
@@ -813,6 +882,12 @@ export default function WorkflowPage() {
       draft: ['writing', 'patent_writing'],
       review: ['review', 'quality_review', 'iteration'],
     };
+    const nodeAliases: Record<typeof type, string[]> = {
+      requirement: ['requirement_analysis'],
+      retrieval: ['retrieval'],
+      draft: ['writing'],
+      review: ['quality_review'],
+    };
 
     const getPhaseOutputs = (phaseNames: string[]): Record<string, unknown>[] => {
       if (!workflow) return [];
@@ -846,7 +921,35 @@ export default function WorkflowPage() {
         });
     };
 
-    const phaseOutputs = getPhaseOutputs(phaseAliases[type]);
+    const getCheckpointRoundOutputs = (nodes: string[]): Record<string, unknown>[] => {
+      if (!workflow?.phase_rounds) return [];
+      return nodes.flatMap((node) => {
+        const rounds = workflow.phase_rounds[node];
+        if (!Array.isArray(rounds)) return [];
+        return rounds
+          .filter((round): round is Record<string, unknown> => Boolean(round && typeof round === 'object' && !Array.isArray(round)))
+          .map((round) => {
+            const output = round.output && typeof round.output === 'object' && !Array.isArray(round.output)
+              ? round.output as Record<string, unknown>
+              : {};
+            return {
+              ...output,
+              __round_meta: {
+                phase: node,
+                success: round.status === 'success' || round.status === 'completed',
+                duration_seconds: typeof round.duration_seconds === 'number' ? round.duration_seconds : 0,
+                issues: Array.isArray(round.issues) ? round.issues : [],
+                artifact_path: typeof round.artifact_path === 'string' ? round.artifact_path : '',
+                shared_facts_version: typeof round.shared_facts_version === 'number' ? round.shared_facts_version : 0,
+              },
+            };
+          });
+      });
+    };
+
+    const historyOutputs = getPhaseOutputs(phaseAliases[type]);
+    const checkpointOutputs = getCheckpointRoundOutputs(nodeAliases[type]);
+    const phaseOutputs = checkpointOutputs.length > historyOutputs.length ? checkpointOutputs : historyOutputs;
     const effectiveOutput = phaseOutputs[phaseOutputs.length - 1] ?? output;
 
     if (!hasOutput(effectiveOutput)) {

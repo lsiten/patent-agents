@@ -834,6 +834,7 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
         task_id="writer-retry-recovers",
         user_id="test-user",
         description="一种入口预配置多屏协同姿态并连续处理跨屏画面的方法。",
+        confirmed_preflight={"patent_title": "一种多显示面姿态协同处理方法"},
     )
     writer_attempts = 0
 
@@ -988,7 +989,12 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
                             "success": True,
                             "data": {
                                 "section_type": "background",
-                                "content": "现有多屏协同显示空间难以根据入口姿态预配置跨屏画面。",
+                                "content": (
+                                    "现有沉浸式多屏显示空间通常通过固定屏幕阵列提供环绕式画面输出。\n"
+                                    "公开资料 arXiv:multi-display-mapping 记载了多显示面画面映射控制，"
+                                    "其侧重静态几何关系下的画面拼接。\n"
+                                    "上述公开技术仍难以根据入口姿态预配置跨屏画面并保持显示连续性。"
+                                ),
                             },
                         },
                         ensure_ascii=False,
@@ -1003,7 +1009,11 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
                             "success": True,
                             "data": {
                                 "section_type": "summary",
-                                "content": "系统根据入口预配置屏幕姿态重映射跨屏画面。",
+                                "content": (
+                                    "本发明要解决的技术问题是固定多屏空间难以适配入口姿态变化导致的跨屏画面不连续。\n"
+                                    "本发明的技术方案包括获取显示面姿态信息、确定相邻显示面映射关系、生成连续显示画面并输出至对应显示面。\n"
+                                    "本发明的有益效果在于提升多显示面显示连续性。"
+                                ),
                             },
                         },
                         ensure_ascii=False,
@@ -1018,7 +1028,12 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
                             "success": True,
                             "data": {
                                 "section_type": "detailed",
-                                "content": "入口终端获取空间配置后，生成多屏姿态参数并对跨屏视频画面进行重映射。",
+                                "content": (
+                                    "S1、入口终端获取各显示面的显示面姿态信息。\n"
+                                    "S2、根据显示面姿态信息确定相邻显示面映射关系。\n"
+                                    "S3、基于相邻显示面映射关系生成连续显示画面。\n"
+                                    "S4、将连续显示画面输出至对应显示面。"
+                                ),
                             },
                         },
                         ensure_ascii=False,
@@ -1033,7 +1048,11 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
                             "success": True,
                             "data": {
                                 "file_path": "",
-                                "abstract": "多显示面姿态协同处理方法，获取显示面姿态信息并生成连续显示画面，提高多显示面显示连续性。",
+                                "abstract": (
+                                    "一种多显示面姿态协同处理方法，涉及沉浸式多屏显示视频处理技术领域，"
+                                    "包括获取显示面姿态信息、确定相邻显示面映射关系、生成连续显示画面并输出至对应显示面，"
+                                    "实现多显示面画面连续性提升。"
+                                ),
                             },
                         },
                         ensure_ascii=False,

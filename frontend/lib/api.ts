@@ -192,6 +192,11 @@ export interface WorkflowResponse {
     review_report: Record<string, unknown>;
   };
   quality_remediation?: Record<string, unknown>;
+  shared_agent_context: Record<string, unknown>;
+  shared_facts_version: number;
+  shared_facts_history: Array<Record<string, unknown>>;
+  phase_rounds: Record<string, Array<Record<string, unknown>>>;
+  latest_graph_checkpoint_path?: string;
   agent_loop?: AgentLoopSnapshot;
   sedimented_skills: SedimentedSkill[];
 }
@@ -332,6 +337,22 @@ function parseWorkflowResponse(value: unknown): WorkflowResponse {
       review_report: safeRecord(outputs.review_report),
     },
     quality_remediation: isRecord(value.quality_remediation) ? value.quality_remediation : undefined,
+    shared_agent_context: safeRecord(value.shared_agent_context),
+    shared_facts_version:
+      typeof value.shared_facts_version === 'number' ? value.shared_facts_version : 0,
+    shared_facts_history: Array.isArray(value.shared_facts_history)
+      ? value.shared_facts_history.filter(isRecord)
+      : [],
+    phase_rounds: Object.fromEntries(
+      Object.entries(safeRecord(value.phase_rounds)).map(([key, rounds]) => [
+        key,
+        Array.isArray(rounds) ? rounds.filter(isRecord) : [],
+      ])
+    ),
+    latest_graph_checkpoint_path:
+      typeof value.latest_graph_checkpoint_path === 'string'
+        ? value.latest_graph_checkpoint_path
+        : undefined,
     agent_loop: parseAgentLoopSnapshot(value.agent_loop),
     sedimented_skills: parseSedimentedSkills(value.sedimented_skills),
   };

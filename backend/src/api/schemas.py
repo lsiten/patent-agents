@@ -110,6 +110,11 @@ class WorkflowResponse(BaseModel):
     outputs: Dict[str, Dict[str, Any]]
     target_country: str = "中国"
     quality_remediation: Optional[Dict[str, Any]] = None
+    shared_agent_context: Dict[str, Any] = Field(default_factory=dict)
+    shared_facts_version: int = 0
+    shared_facts_history: List[Dict[str, Any]] = Field(default_factory=list)
+    phase_rounds: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)
+    latest_graph_checkpoint_path: Optional[str] = None
     agent_loop: Optional[Dict[str, Any]] = None
     sedimented_skills: List[Dict[str, Any]] = Field(default_factory=list)
 

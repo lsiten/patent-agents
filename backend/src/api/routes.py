@@ -793,6 +793,27 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
             if isinstance(context.metadata.get("quality_remediation"), dict)
             else None
         ),
+        shared_agent_context=(
+            context.shared_agent_context
+            if isinstance(context.shared_agent_context, dict)
+            else {}
+        ),
+        shared_facts_version=int(context.metadata.get("shared_facts_version") or 0),
+        shared_facts_history=(
+            context.metadata.get("shared_facts_history")
+            if isinstance(context.metadata.get("shared_facts_history"), list)
+            else []
+        ),
+        phase_rounds=(
+            context.metadata.get("phase_rounds")
+            if isinstance(context.metadata.get("phase_rounds"), dict)
+            else {}
+        ),
+        latest_graph_checkpoint_path=(
+            str(context.metadata.get("latest_graph_checkpoint_path"))
+            if context.metadata.get("latest_graph_checkpoint_path")
+            else None
+        ),
         agent_loop=agent_loop or None,
         sedimented_skills=sedimented_skills,
     )

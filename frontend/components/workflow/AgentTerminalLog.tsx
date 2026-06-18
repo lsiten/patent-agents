@@ -151,6 +151,38 @@ function ToolEndEntry({ entry }: { entry: AgentLogEntry }) {
   );
 }
 
+function ToolDeltaEntry({ entry }: { entry: AgentLogEntry }) {
+  const [expanded, setExpanded] = useState(false);
+  const delta = entry.tool_delta || entry.message || '';
+  const needsExpand = delta.length > 180 || delta.split('\n').length > 3;
+
+  return (
+    <div className="min-w-0 border-l-2 border-amber-500/40 pl-10">
+      <div className="flex min-w-0 items-center gap-1">
+        <span className="min-w-0 break-words text-xs font-mono text-amber-300">
+          ⚡ 过程: {entry.tool_name || '工具调用'}
+        </span>
+        {needsExpand && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-amber-300/70 hover:text-amber-300"
+          >
+            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          </button>
+        )}
+      </div>
+      {delta && (
+        <pre className={clsx(
+          'mt-0.5 min-w-0 whitespace-pre-wrap break-all font-mono text-xs text-amber-100/80',
+          !expanded && needsExpand && 'line-clamp-3'
+        )}>
+          {delta}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function ContentEntry({ entry }: { entry: AgentLogEntry }) {
   const [expanded, setExpanded] = useState(false);
   const content = entry.content || '';
@@ -207,6 +239,8 @@ function LogEntryContent({ entry }: { entry: AgentLogEntry }) {
       return <ThinkingEntry entry={entry} />;
     case 'tool_start':
       return <ToolStartEntry entry={entry} />;
+    case 'tool_delta':
+      return <ToolDeltaEntry entry={entry} />;
     case 'tool_end':
       return <ToolEndEntry entry={entry} />;
     case 'content':
@@ -260,8 +294,8 @@ export function AgentTerminalLog({ entries, className }: AgentTerminalLogProps) 
   const shouldShowHeader = (entry: AgentLogEntry, index: number): boolean => {
     if (index === 0) return true;
     const prev = filteredEntries[index - 1];
-    // tool_end 紧跟 tool_start 不显示header
-    if (entry.type === 'tool_end') return false;
+    // 工具过程紧跟工具调用不重复显示 header
+    if (entry.type === 'tool_end' || entry.type === 'tool_delta') return false;
     return prev.agent_name !== entry.agent_name;
   };
 

@@ -7,6 +7,10 @@ import {
   CheckCircle2,
   Loader2,
   Info,
+  GitBranch,
+  ShieldCheck,
+  Database,
+  MessageSquareWarning,
   ChevronDown,
   ChevronRight,
   Timer,
@@ -21,8 +25,16 @@ interface AgentActivityLogProps {
 const eventIcons: Record<string, React.ReactNode> = {
   thinking: <Brain className="w-3 h-3 text-purple-500" />,
   tool_call_start: <Zap className="w-3 h-3 text-amber-500" />,
+  tool_call_delta: <Zap className="w-3 h-3 text-amber-500" />,
   tool_call_end: <CheckCircle2 className="w-3 h-3 text-green-500" />,
   status: <Info className="w-3 h-3 text-blue-500" />,
+  'workflow.phase_round.started': <GitBranch className="w-3 h-3 text-blue-500" />,
+  'workflow.phase_round.completed': <CheckCircle2 className="w-3 h-3 text-green-500" />,
+  'workflow.quality_gate.completed': <ShieldCheck className="w-3 h-3 text-brand-green-dark" />,
+  'workflow.shared_facts.updated': <Database className="w-3 h-3 text-brand-cyan-dark" />,
+  'workflow.human_input.requested': <MessageSquareWarning className="w-3 h-3 text-orange-500" />,
+  'workflow.run.started': <GitBranch className="w-3 h-3 text-blue-500" />,
+  'workflow.run.finished': <CheckCircle2 className="w-3 h-3 text-green-500" />,
 };
 
 function formatTime(iso: string): string {
@@ -45,8 +57,20 @@ function getEventMessage(event: AgentEvent): string {
       return '思考中...';
     case 'tool_call_start':
       return `调用工具: ${event.data?.name ?? 'unknown'}`;
+    case 'tool_call_delta':
+      return `工具过程: ${event.data?.name ?? event.data?.tool_name ?? 'unknown'}`;
     case 'tool_call_end':
       return `工具完成: ${event.data?.name ?? 'unknown'}`;
+    case 'workflow.phase_round.started':
+      return event.message || `阶段第 ${event.data?.round ?? ''} 轮开始`;
+    case 'workflow.phase_round.completed':
+      return event.message || `阶段第 ${event.data?.round ?? ''} 轮完成`;
+    case 'workflow.quality_gate.completed':
+      return event.message || `质量门${event.data?.passed ? '通过' : '未通过'}`;
+    case 'workflow.shared_facts.updated':
+      return event.message || `公共事实更新到 v${event.data?.shared_facts_version ?? ''}`;
+    case 'workflow.human_input.requested':
+      return event.message || '需要用户补充信息';
     default:
       return event.type;
   }
@@ -121,7 +145,7 @@ export function AgentActivityLog({ events, className = '' }: AgentActivityLogPro
               className="flex items-start gap-2 rounded-md px-1 py-0.5 text-[11px] leading-relaxed hover:bg-canvas/70"
             >
               <span className="flex-shrink-0 mt-0.5">
-                {event.type === 'tool_call_start' ? (
+                {event.type === 'tool_call_start' || event.type === 'workflow.phase_round.started' ? (
                   <Loader2 className="w-3 h-3 text-amber-500 animate-spin" />
                 ) : (
                   eventIcons[event.type] || (
