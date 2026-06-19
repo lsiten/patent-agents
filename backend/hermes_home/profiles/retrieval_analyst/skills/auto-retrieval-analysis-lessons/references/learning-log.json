@@ -1,311 +1,8 @@
 [
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.831567",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.837802",
-    "iteration_count": 1,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T16:29:55.852979",
-    "iteration_count": 5,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.864911",
-    "iteration_count": 8,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.869765",
-    "iteration_count": 3,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T16:29:55.873833",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "unknown",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.878297",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.882577",
-    "iteration_count": 2,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.887633",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.892480",
-    "iteration_count": 1,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T16:29:55.897149",
-    "iteration_count": 1,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.901463",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.905540",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "cancelled",
-    "generated_at": "2026-06-19T16:29:55.910879",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.916837",
-    "iteration_count": 0,
-    "review_recommendation": "reject",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认"
-    ],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T16:29:55.921960",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "unknown",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.926619",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.936872",
-    "iteration_count": 0,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T16:29:55.947484",
-    "iteration_count": 12,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "摘要需包含专利名称、技术领域、简化方案和技术效果",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "unknown",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.956900",
-    "iteration_count": 0,
-    "review_recommendation": "revise",
-    "review_issue_categories": [
-      "标题需清楚、简要且与技术主题一致",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认"
-    ],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.966281",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T16:33:36.228870",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T16:33:36.296497",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:05:51.653338",
+    "generated_at": "2026-06-19T17:52:40.485550",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -321,7 +18,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:05:51.668393",
+    "generated_at": "2026-06-19T17:52:40.509444",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -337,7 +34,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:05:51.689147",
+    "generated_at": "2026-06-19T17:52:40.543355",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -353,7 +50,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:05:51.722289",
+    "generated_at": "2026-06-19T17:52:40.570496",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -369,7 +66,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:05:52.369040",
+    "generated_at": "2026-06-19T17:52:40.594898",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -385,7 +82,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:05:52.409243",
+    "generated_at": "2026-06-19T17:52:40.622095",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -401,7 +98,375 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:05:52.443457",
+    "generated_at": "2026-06-19T17:52:40.647111",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:52:40.684718",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:52:40.712902",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:52:40.745120",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:52:40.770926",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.057329",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.101971",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.151512",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.177271",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.208143",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.241136",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.306624",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.362218",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.401456",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.467705",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.507800",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.532355",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.559786",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.590431",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.617861",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.652273",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.683647",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.717993",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:55:21.742962",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [

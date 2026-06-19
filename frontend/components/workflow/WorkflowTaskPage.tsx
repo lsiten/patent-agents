@@ -284,6 +284,26 @@ function createHistoryLogs(workflow: WorkflowResponse | null, taskId: string): A
   return logs;
 }
 
+function dedupeConsecutiveToolResults(entries: AgentLogEntry[]): AgentLogEntry[] {
+  const deduped: AgentLogEntry[] = [];
+  for (const entry of entries) {
+    const previous = deduped[deduped.length - 1];
+    if (
+      previous &&
+      previous.type === 'tool_end' &&
+      entry.type === 'tool_end' &&
+      previous.agent_name === entry.agent_name &&
+      previous.tool_name === entry.tool_name &&
+      previous.tool_result === entry.tool_result &&
+      previous.tool_success === entry.tool_success
+    ) {
+      continue;
+    }
+    deduped.push(entry);
+  }
+  return deduped;
+}
+
 function getStatusLabel(workflow: WorkflowResponse | null): string {
   if (!workflow) return '加载中...';
 
@@ -435,6 +455,7 @@ export default function WorkflowPage() {
         try {
           const parsed = JSON.parse(e.data);
           const data = parsed.data || parsed;
+          if (!data.result && !data.tool_result) return;
           addLog({
             timestamp: parsed.timestamp || new Date().toISOString(),
             agent_name: data.agent_name || parsed.agent || 'Agent',
@@ -611,7 +632,7 @@ export default function WorkflowPage() {
   const historyLogs = useMemo(() => (taskId ? createHistoryLogs(workflow, taskId) : []), [workflow, taskId]);
   // SSE事件优先；如果有实时事件则只用SSE数据（更详细），否则用历史回放
   const allLogs = useMemo(
-    () => (agentLogs.length > 0 ? agentLogs : historyLogs),
+    () => dedupeConsecutiveToolResults(agentLogs.length > 0 ? agentLogs : historyLogs),
     [historyLogs, agentLogs]
   );
   const isInitialized = workflow?.current_state === 'initialized';

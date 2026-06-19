@@ -141,7 +141,6 @@ class WorkflowAgentRuntimeMixin:
                         "agent_name": agent_name,
                         "tool_name": tool_name,
                         "parameters": event_data.get("parameters", {}),
-                        "result": result_str,
                         "success": success,
                     })
                     tool_results.append({
@@ -291,7 +290,6 @@ class WorkflowAgentRuntimeMixin:
                             "agent_name": agent_name,
                             "tool_name": tool_name,
                             "parameters": event_data.get("parameters", {}),
-                            "result": result_str,
                             "success": success,
                         })
                         tool_results.append({

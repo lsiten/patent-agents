@@ -4,11 +4,12 @@ from datetime import datetime
 import json
 import asyncio
 import time
+from pathlib import Path
 
 import pytest
 
 from src.api import routes
-from src.core.workflow_engine import PhaseResult, WorkflowPhase
+from src.core.workflow_engine import PhaseResult, WorkflowPhase, WorkflowState
 
 
 @pytest.fixture(autouse=True)
@@ -424,6 +425,51 @@ def test_workflow_response_normalizes_phase_result_output():
     assert response.model_dump()["phase_history"][0]["output"]["tech_field"] == (
         "multi-screen adaptive display video"
     )
+
+
+def test_workflow_response_recovers_outputs_from_successful_phase_history(monkeypatch):
+    task_id = "task-phase-history-fallback"
+    context = routes.workflow_engine.create_workflow(
+        task_id=task_id,
+        user_id="test_user",
+        description="Original invention description",
+    )
+    context.current_phase = WorkflowState.COMPLETED
+    context.retrieval_report = {}
+    context.patent_draft = {}
+    context.review_report = {}
+    docx_path = Path("/tmp/generated-patent.docx")
+    monkeypatch.setattr(routes, "_find_final_docx", lambda _task_id: docx_path)
+    context.phase_history = [
+        PhaseResult(
+            phase=WorkflowPhase.RETRIEVAL,
+            success=True,
+            duration_seconds=1.2,
+            output={"overall_patentability": "medium", "similar_patents": []},
+        ),
+        PhaseResult(
+            phase=WorkflowPhase.WRITING,
+            success=True,
+            duration_seconds=2.3,
+            output={"title": "Generated Patent Title", "claims": {"independent_claim": "claim"}},
+        ),
+        PhaseResult(
+            phase=WorkflowPhase.REVIEW,
+            success=True,
+            duration_seconds=3.4,
+            output={"score": 95, "recommendation": "approve"},
+        ),
+    ]
+
+    response = routes._workflow_context_to_response(context).model_dump()
+
+    assert response["outputs"]["retrieval_report"]["overall_patentability"] == "medium"
+    assert response["outputs"]["patent_draft"]["title"] == "Generated Patent Title"
+    assert response["outputs"]["patent_draft"]["docx_path"] == str(docx_path)
+    assert response["outputs"]["patent_draft"]["final_document"]["download_url"] == (
+        f"/api/v1/workflows/{task_id}/export/docx"
+    )
+    assert response["outputs"]["review_report"]["score"] == 95
 
 
 def test_restart_linked_workflow_prefers_uploaded_disclosure_over_placeholder(

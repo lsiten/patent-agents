@@ -698,22 +698,52 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
             logger.warning(f"回填 Hermes 技能沉淀失败: {e}")
 
     # 读取时归一化 — 确保旧数据也能适配前端格式
-    req_norm = workflow_engine._normalize_phase_output("requirement_analysis", context.requirement_analysis or {})
-    ret_norm = (
-        workflow_engine._normalize_phase_output("retrieval_report", context.retrieval_report or {})
-        if _current_output_is_not_superseded(context, "retrieval_report")
-        else {}
+    req_current = context.requirement_analysis if isinstance(context.requirement_analysis, dict) else {}
+    ret_current = context.retrieval_report if isinstance(context.retrieval_report, dict) else {}
+    pat_current = context.patent_draft if isinstance(context.patent_draft, dict) else {}
+    rev_current = context.review_report if isinstance(context.review_report, dict) else {}
+
+    req_output = req_current or _latest_successful_phase_output(context, WorkflowPhase.REQUIREMENT)
+    ret_output = _resolve_current_phase_output(
+        context,
+        "retrieval_report",
+        WorkflowPhase.RETRIEVAL,
+        ret_current,
     )
-    pat_norm = (
-        workflow_engine._normalize_phase_output("patent_draft", context.patent_draft or {})
-        if _current_output_is_not_superseded(context, "patent_draft")
-        else {}
+    pat_output = _resolve_current_phase_output(
+        context,
+        "patent_draft",
+        WorkflowPhase.WRITING,
+        pat_current,
     )
-    rev_norm = (
-        workflow_engine._normalize_phase_output("review_report", context.review_report or {})
-        if _current_output_is_not_superseded(context, "review_report")
-        else {}
+    rev_output = _resolve_current_phase_output(
+        context,
+        "review_report",
+        WorkflowPhase.REVIEW,
+        rev_current,
     )
+
+    final_docx_path = _resolve_final_document_path(context, pat_output)
+    if final_docx_path and isinstance(pat_output, dict):
+        pat_output = {
+            **pat_output,
+            "docx_path": final_docx_path,
+            "final_document": {
+                **(
+                    pat_output.get("final_document")
+                    if isinstance(pat_output.get("final_document"), dict)
+                    else {}
+                ),
+                "file_path": final_docx_path,
+                "filename": Path(final_docx_path).name,
+                "download_url": f"/api/v1/workflows/{context.task_id}/export/docx",
+            },
+        }
+
+    req_norm = workflow_engine._normalize_phase_output("requirement_analysis", req_output or {})
+    ret_norm = workflow_engine._normalize_phase_output("retrieval_report", ret_output or {})
+    pat_norm = workflow_engine._normalize_phase_output("patent_draft", pat_output or {})
+    rev_norm = workflow_engine._normalize_phase_output("review_report", rev_output or {})
 
     phase_output_fields = {
         WorkflowPhase.REQUIREMENT: "requirement_analysis",
@@ -891,6 +921,62 @@ def _last_phase_history_index(context: WorkflowContext, phase: WorkflowPhase) ->
     return latest
 
 
+def _latest_successful_phase_output(
+    context: WorkflowContext,
+    phase: WorkflowPhase,
+) -> Dict[str, Any]:
+    """Return the latest durable successful output for a phase.
+
+    The in-memory/current output fields are optimization snapshots. The phase
+    history is the durable record used to restore pages after refreshes or API
+    process restarts.
+    """
+    expected_phase = getattr(phase, "value", phase)
+    for result in reversed(context.phase_history or []):
+        result_phase = getattr(result.phase, "value", result.phase)
+        if result_phase != expected_phase or not result.success:
+            continue
+        if isinstance(result.output, dict) and result.output:
+            return result.output
+    return {}
+
+
+def _resolve_current_phase_output(
+    context: WorkflowContext,
+    output_name: str,
+    phase: WorkflowPhase,
+    current_output: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Resolve the displayable current output without losing durable rounds."""
+    latest_output = _latest_successful_phase_output(context, phase)
+    if current_output and _current_output_is_not_superseded(context, output_name):
+        return {**latest_output, **current_output} if latest_output else current_output
+    return latest_output
+
+
+def _resolve_final_document_path(context: WorkflowContext, draft_output: Dict[str, Any]) -> Optional[str]:
+    """Find the generated DOCX path from current metadata, draft output, or exports."""
+    candidates: List[Any] = [
+        context.metadata.get("final_document_path") if isinstance(context.metadata, dict) else None,
+        draft_output.get("docx_path") if isinstance(draft_output, dict) else None,
+        draft_output.get("working_docx_path") if isinstance(draft_output, dict) else None,
+    ]
+    final_document = draft_output.get("final_document") if isinstance(draft_output, dict) else None
+    if isinstance(final_document, dict):
+        candidates.append(final_document.get("file_path"))
+    found_docx = _find_final_docx(context.task_id)
+    if found_docx:
+        candidates.append(str(found_docx))
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = str(candidate)
+        if path.endswith(".docx"):
+            return path
+    return None
+
+
 def _current_output_is_not_superseded(
     context: WorkflowContext,
     output_name: str,
@@ -1055,6 +1141,8 @@ def _recover_context_from_export_artifacts(context: WorkflowContext) -> None:
 
     if final_docx:
         draft = context.patent_draft if isinstance(context.patent_draft, dict) else {}
+        if not draft:
+            draft = _latest_successful_phase_output(context, WorkflowPhase.WRITING)
         if not draft:
             draft = {
                 "claims": {"independent_claim": "", "dependent_claims": []},
