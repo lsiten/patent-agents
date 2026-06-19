@@ -1,11 +1,36 @@
 [
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:07:52.350455",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.762833",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.767881",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.782606",
+    "iteration_count": 2,
+    "review_recommendation": "reject",
     "review_issue_categories": [
+      "摘要需包含专利名称、技术领域、简化方案和技术效果",
       "权利要求需短句分行、独权3或4步、从权逐项限定",
       "说明书需充分公开可实施细节并避免Markdown和交底噪声",
       "附图需按当前专利内容逐图差异化生成并插入DOCX",
@@ -19,11 +44,270 @@
   },
   {
     "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.798338",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.804048",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.819213",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.824257",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.830968",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.837144",
+    "iteration_count": 1,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.852526",
+    "iteration_count": 5,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.864398",
+    "iteration_count": 8,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.869341",
+    "iteration_count": 3,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.873383",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "needs_attention",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.877789",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.882146",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.887068",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.891851",
+    "iteration_count": 1,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:07:55.352302",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
+    "generated_at": "2026-06-19T16:29:55.896593",
+    "iteration_count": 1,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.900986",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.905116",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "cancelled",
+    "generated_at": "2026-06-19T16:29:55.910438",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.916356",
+    "iteration_count": 0,
+    "review_recommendation": "reject",
     "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认"
+    ],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.921363",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "needs_attention",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.926160",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.936210",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
       "权利要求需短句分行、独权3或4步、从权逐项限定",
       "说明书需充分公开可实施细节并避免Markdown和交底噪声",
       "附图需按当前专利内容逐图差异化生成并插入DOCX",
@@ -33,21 +317,65 @@
     "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
     "phase_status": "success",
     "has_innovation_points": false,
-    "has_technical_problem": true
+    "has_technical_problem": false
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:07:58.366659",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.947016",
+    "iteration_count": 12,
+    "review_recommendation": "revise",
     "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "摘要需包含专利名称、技术领域、简化方案和技术效果",
       "权利要求需短句分行、独权3或4步、从权逐项限定",
       "说明书需充分公开可实施细节并避免Markdown和交底噪声",
       "附图需按当前专利内容逐图差异化生成并插入DOCX",
       "最终DOCX路径、图片资源和下载可用性必须确认",
       "检索报告需支撑区别特征和创造性论证"
     ],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "unknown",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.956427",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认"
+    ],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.965819",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:33:36.228240",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
     "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
     "phase_status": "success",
     "has_innovation_points": false,
@@ -56,484 +384,10 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:01.349853",
-    "iteration_count": 6,
+    "generated_at": "2026-06-19T16:33:36.295290",
+    "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:04.333189",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:07.333173",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:10.345687",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:13.392024",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:16.333643",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:19.334874",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:20.151123",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:20.182360",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:23.162682",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:26.183020",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:29.158661",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:32.165289",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:35.151224",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:38.157835",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:41.170086",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:45.211523",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:45.238970",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:48.226658",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:51.212453",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:54.221631",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:57.213779",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:09:00.232642",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:09:03.213297",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:09:06.224969",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:09:09.217412",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:09:12.224547",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
+    "review_issue_categories": [],
     "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
     "phase_status": "success",
     "has_innovation_points": false,

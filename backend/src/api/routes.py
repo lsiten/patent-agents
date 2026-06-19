@@ -88,6 +88,9 @@ from .workflow_event_protocol import (
     agent_activity_from_workflow_event as _agent_activity_from_workflow_event,
     build_agent_activity_event as _build_agent_activity_event,
 )
+from .routers import dashboard as dashboard_routes
+from .routers import search as search_routes
+from .routers import system as system_routes
 
 
 _EXPORTS_ROOT = Path(__file__).resolve().parents[2] / "exports"
@@ -160,6 +163,9 @@ def _repair_truncated_json(json_str: str) -> dict | None:
 
 
 router = APIRouter(tags=["patent-agents"])
+router.include_router(search_routes.router)
+router.include_router(system_routes.router)
+router.include_router(dashboard_routes.router)
 
 
 def _mark_workflow_resume_running(context: WorkflowContext) -> None:
@@ -2966,239 +2972,6 @@ async def cancel_task(task_id: str):
     return {"status": "success", "message": "任务已取消"}
 
 
-@router.post("/search/patents", response_model=SearchResponse)
-async def search_patents(request: SearchPatentRequest):
-    """搜索现有技术专利"""
-    import time
-    start_time = time.time()
-
-    data_source_manager = get_data_source_manager()
-    results = await data_source_manager.search_all(request)
-
-    response_results = [
-        PriorArtReferenceResponse(
-            reference_id=r.reference_id,
-            title=r.title,
-            publication_date=r.publication_date,
-            applicant=r.applicant,
-            abstract=r.abstract,
-            similarity_score=r.similarity_score,
-            source=r.source,
-            url=r.url,
-        )
-        for r in results
-    ]
-
-    return SearchResponse(
-        total=len(results),
-        results=response_results,
-        query=request.query,
-        search_time=time.time() - start_time,
-    )
-
-
-@router.get("/knowledge/search", response_model=KnowledgeBaseSearchResponse)
-async def search_knowledge_base(query: str, top_k: int = 5):
-    """搜索本地知识库中的专利"""
-    kb = get_knowledge_base()
-    patents = kb.search_similar(query, top_k)
-
-    return KnowledgeBaseSearchResponse(
-        total=len(patents),
-        patents=patents,
-        query=query,
-    )
-
-
-# ── 系统配置辅助函数 ──
-
-# 环境变量 → .env 文件映射
-_CONFIG_ENV_FILE_MAP: Dict[str, str] = {
-    "development": ".env",
-    "testing": ".env.testing",
-    "production": ".env.production",
-}
-
-# 供应商 → 环境变量名映射（GET 和 PUT 共用）
-_LLM_ENV_MAP: Dict[str, Dict[str, str]] = {
-    "openai": {"api_key": "LLM_OPENAI_API_KEY", "base_url": "LLM_OPENAI_BASE_URL", "model_id": "LLM_OPENAI_MODEL"},
-    "anthropic": {"api_key": "LLM_ANTHROPIC_API_KEY", "base_url": "LLM_ANTHROPIC_BASE_URL", "model_id": "LLM_ANTHROPIC_MODEL"},
-    "spark": {"api_key": "LLM_SPARK_API_KEY", "base_url": "LLM_SPARK_BASE_URL", "model_id": "LLM_SPARK_MODEL"},
-}
-_IMG_ENV_MAP: Dict[str, Dict[str, str]] = {
-    "azure_aoai": {"api_key": "IMAGE_GEN_AZURE_AOAI_API_KEY", "base_url": "IMAGE_GEN_AZURE_AOAI_BASE_URL", "model_id": "IMAGE_GEN_AZURE_AOAI_MODEL_ID"},
-    "openai": {"api_key": "IMAGE_GEN_OPENAI_API_KEY", "base_url": "IMAGE_GEN_OPENAI_BASE_URL", "model_id": "IMAGE_GEN_OPENAI_MODEL_ID"},
-}
-
-
-def _get_env_file_path() -> tuple:
-    """返回 (env_file_path, environment_name)，根据当前 ENVIRONMENT 变量路由"""
-    env = os.getenv("ENVIRONMENT", "development")
-    filename = _CONFIG_ENV_FILE_MAP.get(env, ".env")
-    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    return os.path.join(backend_dir, filename), env
-
-
-def _get_env_value(values: dict, *keys: str) -> str:
-    """按优先级顺序尝试多个 key，返回第一个非空值"""
-    for key in keys:
-        val = values.get(key)
-        if val:
-            return val
-    return ""
-
-
-def _mask_key(key: Optional[str]) -> str:
-    """掩码 API key"""
-    if not key:
-        return ""
-    if len(key) <= 12:
-        return key[:4] + "****"
-    return key[:8] + "****"
-
-
-def _read_config_from_env_file(env_path: str) -> SystemConfigResponse:
-    """从指定 .env 文件读取配置并构建响应"""
-    from dotenv import dotenv_values
-
-    values = dotenv_values(env_path)
-
-    # 文字 LLM 供应商
-    llm_providers: Dict[str, ProviderConfigResponse] = {}
-    for provider, mapping in _LLM_ENV_MAP.items():
-        api_key = _get_env_value(values, mapping["api_key"])
-        base_url = _get_env_value(values, mapping["base_url"])
-        model_id = _get_env_value(values, mapping["model_id"])
-
-        llm_providers[provider] = ProviderConfigResponse(
-            base_url=base_url,
-            model_id=model_id,
-            api_key_masked=_mask_key(api_key),
-            configured=bool(api_key),
-        )
-
-    # 生图供应商
-    img_providers: Dict[str, ProviderConfigResponse] = {}
-    for provider, mapping in _IMG_ENV_MAP.items():
-        api_key = _get_env_value(values, mapping["api_key"])
-        base_url = _get_env_value(values, mapping["base_url"])
-        model_id = _get_env_value(values, mapping["model_id"])
-        img_providers[provider] = ProviderConfigResponse(
-            base_url=base_url,
-            model_id=model_id,
-            api_key_masked=_mask_key(api_key),
-            configured=bool(api_key),
-        )
-
-    # active provider（兼容旧变量名）
-    llm_active = _get_env_value(values, "LLM_ACTIVE_PROVIDER") or "openai"
-    img_active = _get_env_value(values, "IMAGE_GEN_ACTIVE_PROVIDER") or "azure_aoai"
-
-    return SystemConfigResponse(
-        text_llm=ModelConfigSectionResponse(
-            active_provider=llm_active,
-            providers=llm_providers,
-        ),
-        image_gen=ModelConfigSectionResponse(
-            active_provider=img_active,
-            providers=img_providers,
-        ),
-    )
-
-
-@router.get("/system/config", response_model=SystemConfigResponse)
-async def get_system_config():
-    """获取系统大模型配置（从对应环境的 .env 文件直接读取）"""
-    env_path, _ = _get_env_file_path()
-    if not os.path.isfile(env_path):
-        raise HTTPException(status_code=400, detail=f"配置文件不存在: {os.path.basename(env_path)}")
-    return _read_config_from_env_file(env_path)
-
-
-@router.put("/system/config", response_model=SystemConfigResponse)
-async def update_system_config(body: SystemConfigUpdateRequest):
-    """更新系统大模型配置（写入对应环境的 .env 文件）"""
-    from dotenv import set_key
-
-    env_path, _ = _get_env_file_path()
-    if not os.path.isfile(env_path):
-        raise HTTPException(status_code=400, detail=f"配置文件不存在: {os.path.basename(env_path)}")
-
-    # 写入函数
-    def apply_updates(section: str, env_map: Dict[str, Dict[str, str]], updates: Optional[ModelConfigSectionUpdate]) -> None:
-        if not updates:
-            return
-        if updates.active_provider is not None:
-            set_key(env_path, f"{section}_ACTIVE_PROVIDER", updates.active_provider)
-        if updates.providers:
-            for provider, cfg in updates.providers.items():
-                mapping = env_map.get(provider)
-                if not mapping:
-                    continue
-                if cfg.base_url is not None and mapping.get("base_url"):
-                    set_key(env_path, mapping["base_url"], cfg.base_url)
-                if cfg.api_key is not None and mapping.get("api_key"):
-                    set_key(env_path, mapping["api_key"], cfg.api_key)
-                if cfg.model_id is not None and mapping.get("model_id"):
-                    set_key(env_path, mapping["model_id"], cfg.model_id)
-
-    apply_updates("LLM", _LLM_ENV_MAP, body.text_llm)
-    apply_updates("IMAGE_GEN", _IMG_ENV_MAP, body.image_gen)
-
-    # 让配置立即生效（无需重启服务）
-    try:
-        from src.core.config import reload_settings
-        reload_settings()
-    except Exception as e:
-        logger.warning(f"热重载配置失败（不影响文件写入）: {e}")
-
-    # 写入后从文件重新读取，确保返回最新状态
-    return _read_config_from_env_file(env_path)
-
-
-@router.get("/system/config/env-info")
-async def get_system_config_env_info():
-    """获取当前环境配置信息（环境名称、文件名、是否存在）"""
-    env_path, env_name = _get_env_file_path()
-    return {
-        "environment": env_name,
-        "env_file": os.path.basename(env_path),
-        "env_file_exists": os.path.isfile(env_path),
-    }
-
-
-@router.get("/system/status", response_model=SystemStatusResponse)
-async def get_system_status():
-    """获取系统状态"""
-    async with workflow_lock:
-        active_tasks = sum(
-            1 for t in tasks_store.values()
-            if t.current_state not in [WorkflowState.COMPLETED, WorkflowState.FAILED]
-        )
-
-    kb = get_knowledge_base()
-
-    return SystemStatusResponse(
-        status="running",
-        active_tasks=active_tasks,
-        agents=[
-            {"name": "CEO Agent", "description": "全局流程调度", "status": "idle"},
-            {"name": "需求分析Agent", "description": "技术需求结构化", "status": "idle"},
-            {"name": "检索分析Agent", "description": "专利性评估", "status": "idle"},
-            {"name": "专利撰写Agent", "description": "申请文件生成", "status": "idle"},
-            {"name": "质量审查Agent", "description": "合规性检查", "status": "idle"},
-        ],
-        knowledge_base_count=len(kb.list_all_patents()),
-        data_sources=["google_patents", "uspto", "arxiv"],
-    )
-
-
-@router.get("/health")
-async def health_check():
-    """健康检查"""
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
-
-
 # ============ 聊天消息相关 ============
 
 def generate_brainstorm_response(content: str, phase: str = "initial"):
@@ -5621,27 +5394,6 @@ async def get_conversation_workflow_status(conv_id: str):
         "workflow_id": linked_id,
         "status": context.current_phase.value,
         "message_count": len(context.message_history) if hasattr(context, "message_history") else 0,
-    }
-
-
-# ============ 统计数据相关 ============
-@router.get("/stats/dashboard")
-async def get_dashboard_stats():
-    """获取仪表盘统计数据"""
-    async with workflow_lock:
-        tasks = list(tasks_store.values())
-
-    return {
-        "total_tasks": len(tasks),
-        "completed_tasks": sum(1 for t in tasks if t.current_state == WorkflowState.COMPLETED),
-        "in_progress_tasks": sum(
-            1 for t in tasks
-            if t.current_state not in [WorkflowState.COMPLETED, WorkflowState.FAILED]
-        ),
-        "failed_tasks": sum(1 for t in tasks if t.current_state == WorkflowState.FAILED),
-        "active_agents": 5,
-        "avg_completion_time": "2.5 hours",
-        "success_rate": 94.5,
     }
 
 

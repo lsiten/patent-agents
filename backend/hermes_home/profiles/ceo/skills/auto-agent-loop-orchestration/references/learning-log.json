@@ -1,11 +1,433 @@
 [
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:07:52.348721",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.761966",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.766851",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.781797",
+    "iteration_count": 2,
+    "review_recommendation": "reject",
     "review_issue_categories": [
+      "摘要需包含专利名称、技术领域、简化方案和技术效果",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.797537",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.803385",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.818573",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.823686",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.830329",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.836281",
+    "iteration_count": 1,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.851899",
+    "iteration_count": 5,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.863533",
+    "iteration_count": 8,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.868760",
+    "iteration_count": 3,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.872835",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.877190",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.881611",
+    "iteration_count": 2,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.886459",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.891327",
+    "iteration_count": 1,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T16:29:55.896054",
+    "iteration_count": 1,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.900260",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.904658",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "cancelled",
+    "generated_at": "2026-06-19T16:29:55.909714",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.915829",
+    "iteration_count": 0,
+    "review_recommendation": "reject",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认"
+    ],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.920752",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.925434",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.935522",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "附图需按当前专利内容逐图差异化生成并插入DOCX",
+      "最终DOCX路径、图片资源和下载可用性必须确认",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:29:55.946509",
+    "iteration_count": 12,
+    "review_recommendation": "revise",
+    "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
+      "摘要需包含专利名称、技术领域、简化方案和技术效果",
       "权利要求需短句分行、独权3或4步、从权逐项限定",
       "说明书需充分公开可实施细节并避免Markdown和交底噪声",
       "附图需按当前专利内容逐图差异化生成并插入DOCX",
@@ -23,17 +445,49 @@
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:07:55.350947",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.955729",
+    "iteration_count": 0,
+    "review_recommendation": "revise",
     "review_issue_categories": [
+      "标题需清楚、简要且与技术主题一致",
       "权利要求需短句分行、独权3或4步、从权逐项限定",
       "说明书需充分公开可实施细节并避免Markdown和交底噪声",
       "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
+      "最终DOCX路径、图片资源和下载可用性必须确认"
     ],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "awaiting_user_decision",
+    "generated_at": "2026-06-19T16:29:55.965178",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T16:33:36.227515",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
     "loop_topology": [
       "coordinator-worker",
@@ -46,610 +500,10 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:07:58.363218",
-    "iteration_count": 6,
+    "generated_at": "2026-06-19T16:33:36.294481",
+    "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:01.348031",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:04.332139",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:07.332180",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:10.344023",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:13.390543",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:16.332877",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:19.333921",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:20.150257",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:20.181575",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:23.160249",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:26.181760",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:29.157549",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:32.164224",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:35.150419",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:38.156929",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:41.166531",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:45.210065",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:45.238214",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:48.224890",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:51.211692",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:54.220941",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:08:57.213092",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:09:00.214811",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:09:03.212585",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:09:06.224240",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:09:09.216499",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T11:09:12.222400",
-    "iteration_count": 6,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
+    "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
     "loop_topology": [
       "coordinator-worker",

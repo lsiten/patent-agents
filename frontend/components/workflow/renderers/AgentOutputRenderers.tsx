@@ -1,0 +1,1235 @@
+'use client';
+
+/**
+ * Agent Output Renderers — 可视化展示每个 Agent 的输出结果
+ *
+ * 每个 Agent 输出对应一个专用渲染器:
+ * - RequirementAnalysisView: 需求分析结果（技术领域/创新点/应用场景等）
+ * - RetrievalReportView: 检索报告（专利性评分/风险因素/来源分析）
+ * - PatentDraftView: 申请文件（文件列表/预览/下载）
+ * - QualityReviewView: 审查意见（评分/问题列表/修改建议）
+ */
+
+import {
+  AlertTriangle,
+  CheckCircle,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  FileText,
+  Lightbulb,
+  Search,
+  Shield,
+  Star,
+  Zap,
+} from 'lucide-react';
+import { useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
+import { workflowApi } from '@/lib/api';
+import { normalizeQualityScoreForDisplay } from '@/lib/quality-review-score';
+import { getRetrievalPatentReferences } from '@/lib/retrieval-report';
+import type { PatentDrawing } from '@/types';
+
+// ─── Utilities ──────────────────────────────────────────────────────────────
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function str(value: unknown, defaultValue = ''): string {
+  return typeof value === 'string' ? value : defaultValue;
+}
+
+function fieldText(value: unknown, keys: string[] = []): string {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+
+  if (isRecord(value)) {
+    for (const key of keys) {
+      const nested = value[key];
+      if (typeof nested === 'string' && nested.trim()) return nested;
+      if (typeof nested === 'number' && Number.isFinite(nested)) return String(nested);
+    }
+  }
+
+  return '';
+}
+
+function num(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function arr(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function parseJsonLikeObject(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const candidates = [
+    trimmed,
+    ...Array.from(trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi), (match) => match[1]),
+  ];
+
+  const firstObjectStart = trimmed.indexOf('{');
+  const lastObjectEnd = trimmed.lastIndexOf('}');
+  if (firstObjectStart >= 0 && lastObjectEnd > firstObjectStart) {
+    candidates.push(trimmed.slice(firstObjectStart, lastObjectEnd + 1));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (isRecord(parsed)) return parsed;
+    } catch {
+      // Try the next likely JSON fragment.
+    }
+  }
+
+  return null;
+}
+
+function unwrapAgentOutput(data: Record<string, unknown>): Record<string, unknown> {
+  for (const key of ['final_response', 'raw_response', 'output', 'full_response']) {
+    const value = data[key];
+    if (isRecord(value)) {
+      return { ...data, ...value };
+    }
+    if (typeof value === 'string') {
+      const parsed = parseJsonLikeObject(value);
+      if (parsed) {
+        return { ...data, ...parsed };
+      }
+    }
+  }
+
+  return data;
+}
+
+function textListItem(value: unknown, keys: string[]): string {
+  if (typeof value === 'string') return value;
+  if (isRecord(value)) {
+    const parts = keys.map((key) => fieldText(value[key])).filter(Boolean);
+    return parts.join('：');
+  }
+  return '';
+}
+
+function stringList(value: unknown, keys: string[] = []): string[] {
+  return arr(value)
+    .map((item) => textListItem(item, keys) || complianceIssueLabel(item) || str(item))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function complianceIssueLabel(issue: unknown): string {
+  if (typeof issue === 'string') return issue;
+  if (!isRecord(issue)) return '';
+  const location = str(issue.location || issue.section);
+  const description = str(issue.issue || issue.description || issue.message);
+  const suggestion = str(issue.suggestion || issue.fix || issue.recommendation);
+  return [
+    location ? `【${location}】` : '',
+    description,
+    suggestion ? `建议：${suggestion}` : '',
+  ].filter(Boolean).join(' ');
+}
+
+const complianceMetricLabels: Record<string, string> = {
+  claim_count: '权利要求数量',
+  dependent_claim_count: '从属权利要求数量',
+  independent_step_count: '独权步骤数',
+  independent_length: '独权字数',
+  figure_references: '正文引用附图',
+  drawing_count: '已生成附图',
+  has_transcript_artifacts: '逐字稿残留',
+  has_markdown: 'Markdown残留',
+  title_length: '发明名称字数',
+  abstract_length: '摘要字数',
+  technical_field_length: '技术领域字数',
+  background_length: '背景技术字数',
+  summary_length: '发明内容字数',
+  drawings_description_length: '附图说明字数',
+  detailed_length: '具体实施方式字数',
+};
+
+function complianceMetricLabel(key: string): string {
+  return complianceMetricLabels[key] || key;
+}
+
+function complianceMetricValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.map((item) => String(item)).join('、') : '无';
+  }
+  if (typeof value === 'boolean') {
+    return value ? '是' : '否';
+  }
+  if (value === null || typeof value === 'undefined') {
+    return '无';
+  }
+  return String(value);
+}
+
+function collectComplianceIssues(data: Record<string, unknown>): string[] {
+  const reports = [
+    data.manual_compliance,
+    data.hard_rule_report,
+    data.manual_rule_report,
+    data.claim_rules,
+    data.document_rules,
+  ].filter(isRecord);
+
+  const issues: string[] = [];
+  reports.forEach((report) => {
+    let hasDetailedIssues = false;
+    const directIssues = stringList(report.issues);
+    if (directIssues.length > 0) {
+      hasDetailedIssues = true;
+      directIssues.forEach((issue) => issues.push(issue));
+    }
+    if (isRecord(report.claim_rules)) {
+      const claimIssues = stringList(report.claim_rules.issues);
+      if (claimIssues.length > 0) {
+        hasDetailedIssues = true;
+        claimIssues.forEach((issue) => issues.push(issue));
+      }
+    }
+    if (isRecord(report.document_rules)) {
+      const documentIssues = stringList(report.document_rules.issues);
+      if (documentIssues.length > 0) {
+        hasDetailedIssues = true;
+        documentIssues.forEach((issue) => issues.push(issue));
+      }
+    }
+    if (!hasDetailedIssues) {
+      stringList(report.high_priority_issues).forEach((issue) => issues.push(issue));
+    }
+  });
+
+  return Array.from(new Set(issues.map((issue) => issue.trim()).filter(Boolean)));
+}
+
+function CompliancePanel({ data }: { data: Record<string, unknown> }) {
+  const parsed = unwrapAgentOutput(data);
+  const issues = collectComplianceIssues(parsed);
+  const manualCompliance = isRecord(parsed.manual_compliance) ? parsed.manual_compliance : {};
+  const claimRules = isRecord(manualCompliance.claim_rules) ? manualCompliance.claim_rules : {};
+  const documentRules = isRecord(manualCompliance.document_rules) ? manualCompliance.document_rules : {};
+  const claimMetrics = isRecord(claimRules.metrics) ? claimRules.metrics : {};
+  const documentMetrics = isRecord(documentRules.metrics) ? documentRules.metrics : {};
+
+  if (issues.length === 0 && Object.keys(claimMetrics).length === 0 && Object.keys(documentMetrics).length === 0) {
+    return null;
+  }
+
+  return (
+    <section>
+      <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+        <Shield className="w-4 h-4 text-brand-green-dark" />
+        规范硬规则检查
+      </h4>
+      <div className="rounded-lg border border-hairline bg-surface-feature p-md">
+        <div className="mb-sm flex flex-wrap gap-sm">
+          {Object.entries(claimMetrics).map(([key, value]) => (
+            <Badge key={`claim-${key}`} variant="gray" className="normal-case tracking-normal">
+              {complianceMetricLabel(key)}：{complianceMetricValue(value)}
+            </Badge>
+          ))}
+          {Object.entries(documentMetrics).map(([key, value]) => (
+            <Badge key={`doc-${key}`} variant="gray" className="normal-case tracking-normal">
+              {complianceMetricLabel(key)}：{complianceMetricValue(value)}
+            </Badge>
+          ))}
+        </div>
+        {issues.length > 0 ? (
+          <ul className="space-y-xs">
+            {issues.map((issue, index) => (
+              <li key={index} className="flex items-start gap-2 text-body-sm text-red-700">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-accent-orange" />
+                <span>{issue}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-body-sm text-brand-green-dark">本轮未发现可机械校验的硬规则问题。</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ratingBadge(rating: unknown) {
+  const r = str(rating);
+  const config: Record<string, { label: string; variant: 'green' | 'orange' | 'gray' }> = {
+    high: { label: '高', variant: 'green' },
+    medium: { label: '中', variant: 'orange' },
+    low: { label: '低', variant: 'gray' },
+    excellent: { label: '优秀', variant: 'green' },
+    good: { label: '良好', variant: 'green' },
+    pass: { label: '通过', variant: 'green' },
+    needs_revision: { label: '需修改', variant: 'orange' },
+    revise: { label: '需修改', variant: 'orange' },
+    reject: { label: '不通过', variant: 'orange' },
+  };
+  const c = config[r.toLowerCase()] || { label: r || '未知', variant: 'gray' as const };
+  return <Badge variant={c.variant}>{c.label}</Badge>;
+}
+
+function statusLabel(value: unknown): string {
+  const raw = str(value);
+  const normalized = raw.toLowerCase();
+  const labels: Record<string, string> = {
+    needs_revision: '需修改',
+    revise: '需修改',
+    approve: '通过',
+    pass: '通过',
+    reject: '不通过',
+    high: '高',
+    medium: '中',
+    low: '低',
+  };
+  return labels[normalized] || raw;
+}
+
+function downloadText(filename: string, content: string) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function normalizePatentDrawing(value: unknown, taskId: string): PatentDrawing | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const figureNumber = str(value.figure_number || value.figureNumber).trim();
+  const title = str(value.title).trim();
+  const description = str(value.description).trim();
+  const artifactPathOrUrl = str(value.artifact_url || value.artifactUrl).trim();
+  const artifactUrl = artifactPathOrUrl ? workflowApi.artifactUrl(taskId, artifactPathOrUrl) : '';
+
+  if (!figureNumber && !title && !description && !artifactUrl) {
+    return null;
+  }
+
+  return {
+    figure_number: figureNumber,
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(str(value.file_path).trim() ? { file_path: str(value.file_path).trim() } : {}),
+    ...(artifactUrl ? { artifact_url: artifactUrl } : {}),
+    ...(str(value.mime_type).trim() ? { mime_type: str(value.mime_type).trim() } : {}),
+  };
+}
+
+function drawingAltText(drawing: PatentDrawing): string {
+  return [drawing.figure_number, drawing.title, drawing.description]
+    .filter((part): part is string => Boolean(part))
+    .join('，');
+}
+
+// ─── 1. 需求分析视图 ────────────────────────────────────────────────────────
+
+interface RequirementAnalysisViewProps {
+  data: Record<string, unknown>;
+}
+
+export function RequirementAnalysisView({ data }: RequirementAnalysisViewProps) {
+  if (!data || Object.keys(data).length === 0) return null;
+
+  const parsedData = unwrapAgentOutput(data);
+  const techFieldData = isRecord(parsedData.tech_field) ? parsedData.tech_field : {};
+  const techField = fieldText(parsedData.tech_field, ['primary_domain', 'domain', 'name'])
+    || fieldText(parsedData.technical_field, ['primary_domain', 'domain', 'name'])
+    || fieldText(parsedData.field, ['primary_domain', 'domain', 'name']);
+  const secondaryDomains = arr(techFieldData.secondary_domains).map((item) => str(item)).filter(Boolean);
+  const ipcSuggestions = arr(techFieldData.ipc_suggestions).map((item) => str(item)).filter(Boolean);
+  const corePrinciple = fieldText(parsedData.core_principle, ['content', 'principle', 'summary']);
+  const technicalProblem = fieldText(parsedData.technical_problem, ['content', 'problem', 'summary']);
+  const beneficialEffects = arr(parsedData.beneficial_effects)
+    .map((effect) => textListItem(effect, ['effect', 'technical_basis', 'description']))
+    .filter(Boolean);
+  const features = arr(parsedData.key_innovative_features).filter(isRecord);
+  const scenarios = arr(parsedData.application_scenarios)
+    .map((scenario) => textListItem(scenario, ['scenario', 'potential_value', 'description']))
+    .filter(Boolean);
+  const patentType = isRecord(parsedData.patent_type_recommendation) ? parsedData.patent_type_recommendation : {};
+  const gaps = arr(parsedData.information_gaps)
+    .map((gap) => textListItem(gap, ['gap', 'suggestion', 'importance']))
+    .filter(Boolean);
+  const sanitizedInput = isRecord(parsedData.sanitized_disclosure)
+    ? str(parsedData.sanitized_disclosure.cleaned_text)
+    : str(parsedData.cleaned_text);
+  const approvedTerms = stringList(parsedData.approved_terms);
+  const forbiddenTerms = stringList(parsedData.forbidden_terms);
+  const claimSkeleton = stringList(parsedData.claim_skeleton, ['step', 'action', 'output', 'description']);
+  const drawingPlan = stringList(parsedData.drawing_plan, ['figure_number', 'title', 'purpose', 'description']);
+
+  return (
+    <div className="space-y-lg">
+      {/* 技术领域 */}
+      <section>
+        <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+          <Search className="w-4 h-4 text-brand-cyan-dark" />
+          技术领域
+        </h4>
+        <p className="text-body-md text-steel bg-surface-feature rounded-lg p-md">{techField || '待分析'}</p>
+        {secondaryDomains.length > 0 && (
+          <div className="flex flex-wrap gap-sm mt-sm">
+            {secondaryDomains.map((domain, i) => (
+              <Badge key={i} variant="green-soft">{domain}</Badge>
+            ))}
+          </div>
+        )}
+        {ipcSuggestions.length > 0 && (
+          <ul className="mt-sm space-y-xs">
+            {ipcSuggestions.map((item, i) => (
+              <li key={i} className="text-body-sm text-steel flex items-start gap-2">
+                <span className="text-brand-cyan-dark">•</span>
+                {item}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* 核心原理 */}
+      {corePrinciple && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <Lightbulb className="w-4 h-4 text-brand-cyan-dark" />
+            核心原理
+          </h4>
+          <p className="text-body-md text-steel bg-surface-feature rounded-lg p-md">{corePrinciple}</p>
+        </section>
+      )}
+
+      {/* 技术问题 */}
+      {technicalProblem && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-accent-orange" />
+            要解决的技术问题
+          </h4>
+          <p className="text-body-md text-steel bg-surface-feature rounded-lg p-md">{technicalProblem}</p>
+        </section>
+      )}
+
+      {/* 关键创新特征 */}
+      {features.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <Star className="w-4 h-4 text-brand-cyan-dark" />
+            关键创新特征
+          </h4>
+          <div className="space-y-sm">
+            {features.map((f, i) => (
+              <div key={i} className="border border-hairline rounded-lg p-md">
+                <div className="flex items-start gap-2">
+                  <span className="w-6 h-6 rounded-full bg-brand-cyan text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+                    {i + 1}
+                  </span>
+                  <div>
+                    <p className="text-body-sm-medium font-medium text-ink">
+                      {str(f.name || f.feature_name) || `创新特征 ${i + 1}`}
+                    </p>
+                    <p className="text-body-sm text-steel mt-xs">{str(f.description)}</p>
+                    {str(f.technical_significance) && (
+                      <p className="text-caption text-muted mt-xs">技术意义：{str(f.technical_significance)}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 应用场景 */}
+      {scenarios.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm">应用场景</h4>
+          <div className="flex flex-wrap gap-sm">
+            {scenarios.map((s, i) => (
+              <Badge key={i} variant="green-soft">{s}</Badge>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 有益效果 */}
+      {beneficialEffects.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm">有益效果</h4>
+          <ul className="space-y-xs">
+            {beneficialEffects.map((e, i) => (
+              <li key={i} className="text-body-sm text-steel flex items-start gap-2">
+                <CheckCircle className="w-4 h-4 text-brand-cyan-dark flex-shrink-0 mt-0.5" />
+                {e}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* 专利类型推荐 */}
+      {str(patentType.suggested_type) && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm">专利类型推荐</h4>
+          <div className="bg-surface-feature rounded-lg p-md">
+            <div className="flex items-center gap-2 mb-xs">
+              <Badge variant="green">{str(patentType.suggested_type)}</Badge>
+            </div>
+            {str(patentType.rationale) && (
+              <p className="text-body-sm text-steel">{str(patentType.rationale)}</p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* 信息缺口 */}
+      {gaps.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-accent-orange" />
+            待补充信息
+          </h4>
+          <ul className="space-y-xs">
+            {gaps.map((g, i) => (
+              <li key={i} className="text-body-sm text-steel flex items-start gap-2">
+                <span className="text-accent-orange">•</span>
+                {g}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {(sanitizedInput || approvedTerms.length > 0 || forbiddenTerms.length > 0) && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <Shield className="w-4 h-4 text-brand-green-dark" />
+            交底清洗与术语边界
+          </h4>
+          {sanitizedInput && (
+            <p className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg bg-surface-feature p-md text-body-sm text-steel">
+              {sanitizedInput}
+            </p>
+          )}
+          <div className="mt-sm flex flex-wrap gap-sm">
+            {approvedTerms.map((term, i) => (
+              <Badge key={`approved-${i}`} variant="green-soft">推荐：{term}</Badge>
+            ))}
+            {forbiddenTerms.map((term, i) => (
+              <Badge key={`forbidden-${i}`} variant="orange">禁用：{term}</Badge>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {claimSkeleton.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <FileText className="w-4 h-4 text-brand-green-dark" />
+            权利要求骨架
+          </h4>
+          <ol className="space-y-xs list-decimal list-inside">
+            {claimSkeleton.map((step, i) => (
+              <li key={i} className="text-body-sm text-steel">{step}</li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {drawingPlan.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <FileText className="w-4 h-4 text-brand-green-dark" />
+            附图计划
+          </h4>
+          <ul className="space-y-xs">
+            {drawingPlan.map((drawing, i) => (
+              <li key={i} className="text-body-sm text-steel flex items-start gap-2">
+                <CheckCircle className="w-4 h-4 text-brand-green-dark flex-shrink-0 mt-0.5" />
+                {drawing}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <CompliancePanel data={parsedData} />
+    </div>
+  );
+}
+
+// ─── 2. 检索报告视图 ────────────────────────────────────────────────────────
+
+interface RetrievalReportViewProps {
+  data: Record<string, unknown>;
+}
+
+export function RetrievalReportView({ data }: RetrievalReportViewProps) {
+  if (!data || Object.keys(data).length === 0) return null;
+
+  const [expandedRef, setExpandedRef] = useState<number | null>(null);
+
+  const parsedData = unwrapAgentOutput(data);
+
+  // 从 retrieval_strategy 中提取关键词和数据源
+  const retrievalStrategy = isRecord(parsedData.retrieval_strategy) ? parsedData.retrieval_strategy : {};
+  const retrievalKeywords = arr(retrievalStrategy.keywords || parsedData.retrieval_keywords).map((k) => str(k)).filter(Boolean);
+  const retrievalDatabases = arr(retrievalStrategy.databases_used || parsedData.retrieval_databases).map((d) => str(d)).filter(Boolean);
+
+  const novelty = isRecord(parsedData.novelty_assessment) ? parsedData.novelty_assessment : {};
+  const inventiveStep = isRecord(parsedData.inventive_step_assessment) ? parsedData.inventive_step_assessment : {};
+  const utility = isRecord(parsedData.utility_assessment) ? parsedData.utility_assessment : {};
+  const overallPatentability = str(parsedData.overall_patentability);
+  const conclusion = str(parsedData.conclusion);
+  const riskFactors = arr(parsedData.risk_factors).filter(isRecord);
+  const recommendations = arr(parsedData.writing_recommendations).map((r) => str(r)).filter(Boolean);
+
+  const priorArtReferences = getRetrievalPatentReferences(parsedData);
+
+  const ratingScore = (rating: unknown) => {
+    switch (str(rating)) {
+      case 'high': return 90;
+      case 'medium': return 70;
+      case 'low': return 45;
+      default: return 0;
+    }
+  };
+
+  const dbDisplayName: Record<string, string> = {
+    'USPTO': '美国专利商标局',
+    'Google Patents': 'Google 专利',
+    'arXiv': 'arXiv 学术论文',
+    'uspto': '美国专利商标局',
+    'google_patents': 'Google 专利',
+    'arxiv': 'arXiv 学术论文',
+  };
+
+  return (
+    <div className="space-y-lg">
+      {/* 检索条件 */}
+      {retrievalKeywords.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <Search className="w-4 h-4 text-brand-cyan-dark" />
+            检索关键词
+          </h4>
+          <div className="flex flex-wrap gap-sm">
+            {retrievalKeywords.map((kw, i) => (
+              <Badge key={i} variant="green-soft">{kw}</Badge>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 数据源 */}
+      {retrievalDatabases.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <Shield className="w-4 h-4 text-brand-cyan-dark" />
+            检索数据源
+          </h4>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-sm">
+            {retrievalDatabases.map((db, i) => (
+              <div key={i} className="flex items-center gap-2 p-sm border border-hairline rounded-lg bg-surface-feature">
+                <CheckCircle className="w-4 h-4 text-brand-cyan-dark flex-shrink-0" />
+                <span className="text-body-sm text-ink">{dbDisplayName[db] || db}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 检索到的对比文献 */}
+      {priorArtReferences.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <FileText className="w-4 h-4 text-brand-cyan-dark" />
+            对比文献 ({priorArtReferences.length})
+          </h4>
+          <div className="space-y-sm">
+            {priorArtReferences.map((ref, i) => {
+              const relevance = ref.riskLevel === 'high' ? 'high' : ref.riskLevel === 'medium' ? 'medium' : 'low';
+              const isExpanded = expandedRef === i;
+              const relevanceColor = relevance === 'high' ? 'border-orange-200' :
+                relevance === 'medium' ? 'border-yellow-200' : 'border-hairline';
+              return (
+                <div key={i} className={`border rounded-lg overflow-hidden ${relevanceColor}`}>
+                  <button
+                    className="w-full flex items-center justify-between p-md hover:bg-surface-feature transition-colors text-left"
+                    onClick={() => setExpandedRef(isExpanded ? null : i)}
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <span className="text-body-sm-medium text-muted flex-shrink-0">#{i + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-body-sm-medium font-medium text-ink truncate">{ref.title}</p>
+                        <div className="flex items-center gap-2 mt-xs">
+                          {ref.patentId && <span className="text-caption text-muted">{ref.patentId}</span>}
+                          {ref.source && <Badge variant="gray">{ref.source}</Badge>}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                      <Badge variant={relevance === 'high' ? 'orange' : relevance === 'medium' ? 'gray' : 'green'}>
+                        {relevance === 'high' ? '高相关' : relevance === 'medium' ? '中相关' : '低相关'}
+                      </Badge>
+                      {isExpanded ? <ChevronUp className="w-4 h-4 text-muted" /> : <ChevronDown className="w-4 h-4 text-muted" />}
+                    </div>
+                  </button>
+                  {isExpanded && (
+                    <div className="border-t border-hairline p-md bg-surface space-y-sm">
+                      {/* 检索元信息 */}
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-caption text-muted">
+                        {ref.applicant && (
+                          <span>申请人：<span className="text-ink">{ref.applicant}</span></span>
+                        )}
+                        {ref.publicationDate && (
+                          <span>公开日：<span className="text-ink">{ref.publicationDate}</span></span>
+                        )}
+                        {ref.source && (
+                          <span>来源：<span className="text-ink">{dbDisplayName[ref.source] || ref.source}</span></span>
+                        )}
+                      </div>
+                      {ref.abstract && (
+                        <div>
+                          <p className="text-caption font-medium text-muted mb-xs">摘要</p>
+                          <p className="text-body-sm text-steel">{ref.abstract}</p>
+                        </div>
+                      )}
+                      {ref.differences.length > 0 && (
+                        <div>
+                          <p className="text-caption font-medium text-muted mb-xs">与本发明的区别</p>
+                          <p className="text-body-sm text-steel">{ref.differences.join('；')}</p>
+                        </div>
+                      )}
+                      {ref.url && (
+                        <div className="pt-sm">
+                          <a
+                            href={ref.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-body-sm font-medium text-brand-cyan-dark hover:underline"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            查看原文
+                            <span className="text-xs">↗</span>
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* 专利性评分概览 */}
+      <section>
+        <h4 className="text-body-md-medium font-medium text-ink mb-md">专利性评估</h4>
+        <div className="grid grid-cols-3 gap-md">
+          {[
+            { icon: Zap, name: '新颖性', assessment: novelty },
+            { icon: Lightbulb, name: '创造性', assessment: inventiveStep },
+            { icon: Shield, name: '实用性', assessment: utility },
+          ].map(({ icon: Icon, name, assessment }) => (
+            <div key={name} className="border border-hairline rounded-lg p-md text-center">
+              <Icon className="w-6 h-6 mx-auto mb-sm text-brand-cyan-dark" />
+              <p className="text-body-sm-medium font-medium text-ink mb-xs">{name}</p>
+              <div className="mb-sm">{ratingBadge(assessment.rating)}</div>
+              <div className="w-full bg-hairline-soft rounded-full h-2">
+                <div
+                  className="bg-brand-cyan h-2 rounded-full transition-all"
+                  style={{ width: `${ratingScore(assessment.rating)}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+        {overallPatentability && (
+          <div className="mt-md p-md bg-surface-feature rounded-lg flex items-center justify-between">
+            <span className="text-body-sm-medium font-medium text-ink">综合专利性</span>
+            {ratingBadge(overallPatentability)}
+          </div>
+        )}
+      </section>
+
+      {/* 评估理由 */}
+      <section>
+        <h4 className="text-body-md-medium font-medium text-ink mb-sm">评估分析</h4>
+        <div className="space-y-sm">
+          {[
+            { name: '新颖性分析', rationale: str(novelty.rationale) },
+            { name: '创造性分析', rationale: str(inventiveStep.rationale) },
+            { name: '实用性分析', rationale: str(utility.rationale) },
+          ].filter(item => item.rationale).map(({ name, rationale }) => (
+            <div key={name} className="border border-hairline rounded-lg p-md">
+              <p className="text-body-sm-medium font-medium text-ink mb-xs">{name}</p>
+              <p className="text-body-sm text-steel">{rationale}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* 风险因素 */}
+      {riskFactors.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-accent-orange" />
+            风险因素 ({riskFactors.length})
+          </h4>
+          <div className="space-y-sm">
+            {riskFactors.map((risk, i) => {
+              const severity = str(risk.severity);
+              const severityColor = severity === 'critical' ? 'bg-red-50 border-red-200' :
+                severity === 'high' ? 'bg-orange-50 border-orange-200' :
+                'bg-yellow-50 border-yellow-200';
+              return (
+                <div key={i} className={`border rounded-lg p-md ${severityColor}`}>
+                  <div className="flex items-center gap-2 mb-xs">
+                    <Badge variant={severity === 'critical' || severity === 'high' ? 'orange' : 'gray'}>
+                      {severity === 'critical' ? '严重' : severity === 'high' ? '高' : severity === 'medium' ? '中' : '低'}
+                    </Badge>
+                    <span className="text-body-sm-medium font-medium text-ink">{str(risk.type)}</span>
+                  </div>
+                  <p className="text-body-sm text-steel">{str(risk.description)}</p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* 撰写建议 */}
+      {recommendations.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm">撰写建议</h4>
+          <ul className="space-y-xs">
+            {recommendations.map((r, i) => (
+              <li key={i} className="text-body-sm text-steel flex items-start gap-2">
+                <Lightbulb className="w-4 h-4 text-brand-cyan-dark flex-shrink-0 mt-0.5" />
+                {r}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* 结论 */}
+      {conclusion && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm">结论</h4>
+          <p className="text-body-md text-steel bg-surface-feature rounded-lg p-md">{conclusion}</p>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ─── 3. 申请文件视图 ────────────────────────────────────────────────────────
+
+interface PatentDraftViewProps {
+  data: Record<string, unknown>;
+  taskId: string;
+  title?: string;
+}
+
+export function PatentDraftView({ data, taskId, title }: PatentDraftViewProps) {
+  if (!data || Object.keys(data).length === 0) return null;
+
+  const [expandedSection, setExpandedSection] = useState<string | null>(null);
+
+  const parsedData = unwrapAgentOutput(data);
+
+  const claims = isRecord(parsedData.claims) ? parsedData.claims : {};
+  const description = isRecord(parsedData.description) ? parsedData.description : {};
+  const abstract = str(parsedData.abstract);
+  const drawings = arr(parsedData.drawings)
+    .map((drawing) => normalizePatentDrawing(drawing, taskId))
+    .filter((drawing): drawing is PatentDrawing => drawing !== null);
+
+  const independentClaim = str(claims.independent_claim);
+  const dependentClaims = arr(claims.dependent_claims).map((c) => str(c)).filter(Boolean);
+
+  const sections = [
+    { id: 'claims', name: '权利要求书', icon: FileText, content: [independentClaim, ...dependentClaims].filter(Boolean).join('\n\n') },
+    { id: 'tech_field', name: '技术领域', icon: Search, content: str(description.technical_field) },
+    { id: 'background', name: '背景技术', icon: FileText, content: str(description.background_art) },
+    { id: 'summary', name: '发明内容', icon: Lightbulb, content: str(description.summary_of_invention) },
+    { id: 'detailed', name: '具体实施方式', icon: FileText, content: str(description.detailed_description) },
+    { id: 'abstract', name: '说明书摘要', icon: FileText, content: abstract },
+  ].filter(s => s.content);
+
+  const fullText = sections.map(s => `【${s.name}】\n${s.content}`).join('\n\n');
+
+  return (
+    <div className="space-y-lg">
+      {/* 文件列表 */}
+      <section>
+        <div className="flex items-center justify-between mb-md">
+          <h4 className="text-body-md-medium font-medium text-ink">生成文件</h4>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              if (!title?.trim()) return;
+              const link = document.createElement('a');
+              link.href = workflowApi.exportDocx(taskId);
+              link.download = `${title.trim()}.docx`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }}
+            disabled={!title?.trim()}
+          >
+            <Download className="w-4 h-4 mr-1" />
+            下载 DOCX
+          </Button>
+        </div>
+
+        <div className="space-y-sm">
+          {sections.map((section) => {
+            const Icon = section.icon;
+            const isExpanded = expandedSection === section.id;
+            return (
+              <div key={section.id} className="border border-hairline rounded-lg overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between p-md hover:bg-surface-feature transition-colors"
+                  onClick={() => setExpandedSection(isExpanded ? null : section.id)}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-surface-feature flex items-center justify-center">
+                      <Icon className="w-4 h-4 text-brand-cyan-dark" />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-body-sm-medium font-medium text-ink">{section.name}</p>
+                      <p className="text-caption text-muted">{section.content.length} 字</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadText(`${taskId}-${section.name}.txt`, section.content);
+                      }}
+                    >
+                      <Download className="w-3 h-3" />
+                    </Button>
+                    {isExpanded ? <ChevronUp className="w-4 h-4 text-muted" /> : <ChevronDown className="w-4 h-4 text-muted" />}
+                  </div>
+                </button>
+                {isExpanded && (
+                  <div className="border-t border-hairline p-md bg-surface">
+                    <div className="text-body-sm text-steel whitespace-pre-wrap leading-relaxed max-h-[400px] overflow-y-auto">
+                      {section.content}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {drawings.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-md">附图</h4>
+          <div className="grid gap-md md:grid-cols-2">
+            {drawings.map((drawing, index) => {
+              const imageUrl = drawing.artifact_url || drawing.artifactUrl || '';
+              const figureLabel = drawing.figure_number || `附图 ${index + 1}`;
+              const altText = drawingAltText(drawing) || figureLabel;
+
+              return (
+                <article key={`${figureLabel}-${index}`} className="border border-hairline rounded-lg overflow-hidden bg-surface">
+                  {imageUrl && (
+                    <a href={imageUrl} target="_blank" rel="noopener noreferrer" aria-label={`打开${figureLabel}附图`}>
+                      <div className="bg-surface-feature border-b border-hairline p-md">
+                        <img
+                          src={imageUrl}
+                          alt={altText}
+                          className="w-full max-h-[320px] object-contain rounded-lg bg-surface"
+                        />
+                      </div>
+                    </a>
+                  )}
+                  <div className="p-md space-y-sm">
+                    <div>
+                      <p className="text-body-sm-medium font-medium text-ink">{figureLabel}</p>
+                      {drawing.title && <p className="text-body-sm text-steel mt-xs">{drawing.title}</p>}
+                    </div>
+                    {drawing.description && (
+                      <p className="text-body-sm text-steel leading-relaxed">{drawing.description}</p>
+                    )}
+                    {imageUrl && (
+                      <a
+                        href={imageUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download
+                        className="inline-flex items-center gap-1 text-body-sm-medium font-medium text-brand-cyan-dark hover:underline"
+                      >
+                        <Download className="w-3 h-3" />
+                        打开 / 下载附图
+                      </a>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <CompliancePanel data={parsedData} />
+    </div>
+  );
+}
+
+// ─── 4. 审查意见视图 ────────────────────────────────────────────────────────
+
+interface QualityReviewViewProps {
+  data: Record<string, unknown>;
+  roundIndex?: number;
+}
+
+export function QualityReviewView({ data, roundIndex }: QualityReviewViewProps) {
+  if (!data || Object.keys(data).length === 0) return null;
+
+  const parsedData = unwrapAgentOutput(data);
+  const reviewSummaryData = isRecord(parsedData.review_summary) ? parsedData.review_summary : {};
+  const overallScore = normalizeQualityScoreForDisplay(
+    num(parsedData.overall_score) ?? num(reviewSummaryData.overall_score)
+  );
+  const overallRating = statusLabel(parsedData.overall_rating || reviewSummaryData.overall_rating);
+  const recommendation = str(parsedData.recommendation || reviewSummaryData.recommendation);
+  const reviewSummary = str(parsedData.review_summary) || str(reviewSummaryData.reviewer_notes);
+  const revisionSuggestions = [
+    ...arr(parsedData.revision_suggestions),
+    ...arr(parsedData.detailed_revision_suggestions),
+  ].map((s) => textListItem(s, ['issue', 'suggestion', 'target_section', 'priority'])).filter(Boolean);
+
+  const formalCompliance = isRecord(parsedData.formal_compliance)
+    ? parsedData.formal_compliance
+    : isRecord(parsedData.formal_compliance_review)
+      ? parsedData.formal_compliance_review
+      : {};
+  const formalIssues = arr(formalCompliance.issues).filter(isRecord);
+
+  const claimsReview = isRecord(parsedData.claims_review) ? parsedData.claims_review : {};
+  const claimsIssues = arr(claimsReview.issues).filter(isRecord);
+
+  const descriptionReview = isRecord(parsedData.description_review) ? parsedData.description_review : {};
+  const descriptionIssues = arr(descriptionReview.issues).filter(isRecord);
+
+  const examinationRisks = arr(parsedData.examination_risks).filter(isRecord);
+  const allIssues = [...formalIssues, ...claimsIssues, ...descriptionIssues, ...examinationRisks];
+
+  const recommendationConfig: Record<string, { label: string; color: string }> = {
+    approve: { label: '通过', color: 'text-brand-cyan-dark bg-green-50' },
+    revise: { label: '需修改', color: 'text-accent-orange bg-orange-50' },
+    needs_revision: { label: '需修改', color: 'text-accent-orange bg-orange-50' },
+    reject: { label: '不通过', color: 'text-red-500 bg-red-50' },
+  };
+  const recConfig = recommendationConfig[recommendation] || { label: recommendation, color: 'text-muted bg-hairline-soft' };
+
+  const scoreColor = (overallScore ?? 0) >= 80 ? 'text-brand-cyan-dark' :
+    (overallScore ?? 0) >= 60 ? 'text-accent-orange' : 'text-red-500';
+
+  return (
+    <div className="space-y-lg">
+      {roundIndex !== undefined && (
+        <div className="flex items-center gap-2 mb-sm">
+          <Badge variant="green-soft">第 {roundIndex + 1} 轮审查</Badge>
+        </div>
+      )}
+
+      {/* 评分概览 */}
+      <section className="flex items-center gap-xl p-lg bg-surface-feature rounded-lg">
+        {overallScore !== null && (
+          <div className="text-center">
+            <div className={`text-display-lg font-euclid font-semibold ${scoreColor}`}>
+              {overallScore}
+            </div>
+            <p className="text-caption text-muted">总分</p>
+          </div>
+        )}
+        <div className="flex-1">
+          <div className="flex items-center gap-3 mb-sm">
+            <span className={`px-3 py-1 rounded-full text-body-sm-medium font-medium ${recConfig.color}`}>
+              {recConfig.label}
+            </span>
+            {overallRating && <Badge variant="gray">{overallRating}</Badge>}
+          </div>
+          {reviewSummary && (
+            <p className="text-body-sm text-steel">{reviewSummary}</p>
+          )}
+        </div>
+      </section>
+
+      <CompliancePanel data={parsedData} />
+
+      {/* 问题列表 */}
+      {allIssues.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-md flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-accent-orange" />
+            审查问题 ({allIssues.length})
+          </h4>
+          <div className="space-y-sm">
+            {allIssues.map((issue, i) => {
+              const severity = str(issue.severity);
+              const severityLabel = severity === 'critical' ? '严重' : severity === 'high' ? '高' : severity === 'medium' ? '中' : '低';
+              const severityColor = severity === 'critical' ? 'border-red-200 bg-red-50' :
+                severity === 'high' ? 'border-orange-200 bg-orange-50' :
+                'border-yellow-200 bg-yellow-50';
+              return (
+                <div key={i} className={`border rounded-lg p-md ${severityColor}`}>
+                  <div className="flex items-center justify-between mb-xs">
+                    <Badge variant={severity === 'critical' || severity === 'high' ? 'orange' : 'gray'}>
+                      {severityLabel}
+                    </Badge>
+                    <span className="text-caption text-muted">{str(issue.location)}</span>
+                  </div>
+                  <p className="text-body-sm text-ink mb-xs">{str(issue.description)}</p>
+                  {str(issue.suggestion) && (
+                    <p className="text-body-sm text-steel">
+                      <strong>建议：</strong>{str(issue.suggestion)}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* 修改建议 */}
+      {revisionSuggestions.length > 0 && (
+        <section>
+          <h4 className="text-body-md-medium font-medium text-ink mb-sm flex items-center gap-2">
+            <Lightbulb className="w-4 h-4 text-brand-cyan-dark" />
+            修改建议
+          </h4>
+          <ol className="space-y-sm list-decimal list-inside">
+            {revisionSuggestions.map((s, i) => (
+              <li key={i} className="text-body-sm text-steel">{s}</li>
+            ))}
+          </ol>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ─── 5. 多轮展示容器 ────────────────────────────────────────────────────────
+
+interface MultiRoundViewProps {
+  rounds: Record<string, unknown>[];
+  renderRound: (data: Record<string, unknown>, index: number) => React.ReactNode;
+  label: string;
+}
+
+export function MultiRoundView({ rounds, renderRound, label }: MultiRoundViewProps) {
+  if (rounds.length <= 1) {
+    return <>{rounds[0] ? renderRound(rounds[0], 0) : null}</>;
+  }
+
+  return (
+    <Tabs defaultValue="round-0" className="min-w-0">
+      <TabsList variant="pill" className="mb-md max-w-full overflow-x-auto pb-1">
+        {rounds.map((round, index) => {
+          const meta = isRecord(round.__round_meta) ? round.__round_meta : {};
+          const success = meta.success !== false;
+          return (
+            <TabsTrigger
+              key={`tab-${index}`}
+              value={`round-${index}`}
+              variant="pill"
+              className="flex-shrink-0"
+            >
+              {label}第 {index + 1} 轮
+              <span className={success ? 'ml-2 text-brand-green-dark' : 'ml-2 text-red-500'}>
+                {success ? '已完成' : '有问题'}
+              </span>
+            </TabsTrigger>
+          );
+        })}
+      </TabsList>
+
+      {rounds.map((round, index) => (
+        <TabsContent key={`content-${index}`} value={`round-${index}`} className="pt-0">
+          <RoundMetaHeader round={round} index={index} label={label} />
+          {renderRound(round, index)}
+        </TabsContent>
+      ))}
+    </Tabs>
+  );
+}
+
+function RoundMetaHeader({
+  round,
+  index,
+  label,
+}: {
+  round: Record<string, unknown>;
+  index: number;
+  label: string;
+}) {
+  const meta = isRecord(round.__round_meta) ? round.__round_meta : {};
+  const success = meta.success !== false;
+  const duration = num(meta.duration_seconds);
+  const issues = arr(meta.issues).map((item) => str(item)).filter(Boolean);
+  const warnings = arr(meta.warnings).map((item) => str(item)).filter(Boolean);
+
+  return (
+    <div className="mb-md rounded-lg border border-hairline bg-surface p-md">
+      <div className="flex flex-wrap items-center gap-sm">
+        <Badge variant={success ? 'green-soft' : 'red-soft'}>
+          {label}第 {index + 1} 轮
+        </Badge>
+        <Badge variant="gray">
+          {success ? '已完成' : '需处理'}
+        </Badge>
+        {duration !== null && (
+          <span className="text-caption text-steel">
+            用时 {duration.toFixed(2)} 秒
+          </span>
+        )}
+      </div>
+      {issues.length > 0 && (
+        <div className="mt-sm space-y-1">
+          {issues.map((issue, issueIndex) => (
+            <p key={issueIndex} className="text-body-sm text-red-700">
+              {issue}
+            </p>
+          ))}
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div className="mt-sm space-y-1">
+          {warnings.map((warning, warningIndex) => (
+            <p key={warningIndex} className="text-body-sm text-orange-700">
+              {warning}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
