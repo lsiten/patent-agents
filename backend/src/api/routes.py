@@ -14,7 +14,6 @@ from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 
 from .schemas import (
-    AgentEventInfo,
     ChatMessageRequest,
     CreateTaskRequest,
     TaskResponse,
@@ -60,7 +59,6 @@ from .schemas import (
 from ..models.domain import PatentTask
 from ..models.enums import WorkflowState
 from ..core.workflow_engine import (
-    PatentWorkflowEngine,
     PhaseResult,
     WorkflowContext,
     WorkflowPhase,
@@ -70,6 +68,26 @@ from ..knowledge.base import get_knowledge_base
 from ..data_sources.base import get_data_source_manager
 from ..infrastructure.persistence import get_store
 from .schemas import WorkflowEventResponse, OrgNodeResponse
+from . import runtime_state as api_runtime
+from .runtime_state import (
+    CONVERSATION_STREAM_HEARTBEAT_SECONDS,
+    cancel_workflow_background_task as _cancel_workflow_background_task,
+    conversation_event_queues,
+    conversation_stream_finalization_tasks,
+    conversations_lock,
+    conversations_store,
+    task_events,
+    tasks_store,
+    track_workflow_background_task as _track_workflow_background_task,
+    workflow_background_tasks,
+    workflow_background_task_running as _workflow_background_task_running,
+    workflow_engine,
+    workflow_lock,
+)
+from .workflow_event_protocol import (
+    agent_activity_from_workflow_event as _agent_activity_from_workflow_event,
+    build_agent_activity_event as _build_agent_activity_event,
+)
 
 
 _EXPORTS_ROOT = Path(__file__).resolve().parents[2] / "exports"
@@ -142,61 +160,6 @@ def _repair_truncated_json(json_str: str) -> dict | None:
 
 
 router = APIRouter(tags=["patent-agents"])
-
-
-# 内存存储 - 生产环境请替换为数据库
-tasks_store: Dict[str, PatentTask] = {}
-task_events: Dict[str, List[WorkflowEventResponse]] = {}
-workflow_lock = asyncio.Lock()
-workflow_background_tasks: Dict[str, asyncio.Task[Any]] = {}
-
-# 对话会话存储
-conversations_store: Dict[str, dict] = {}
-conversations_lock = asyncio.Lock()
-CONVERSATION_STREAM_HEARTBEAT_SECONDS = 15.0
-conversation_event_queues: Dict[str, List[Dict[str, Any]]] = {}
-conversation_stream_finalization_tasks: set[asyncio.Task[Any]] = set()
-
-workflow_engine = PatentWorkflowEngine()
-organization_tree_store: OrgNodeResponse | None = None
-
-
-def _track_workflow_background_task(task_id: str, coro: Any) -> asyncio.Task[Any]:
-    """Track workflow coroutines so cancellation can stop real background work."""
-    existing = workflow_background_tasks.get(task_id)
-    if existing and not existing.done():
-        existing.cancel()
-
-    task = asyncio.create_task(coro)
-    workflow_background_tasks[task_id] = task
-
-    def _cleanup(done_task: asyncio.Task[Any]) -> None:
-        if workflow_background_tasks.get(task_id) is done_task:
-            workflow_background_tasks.pop(task_id, None)
-        if done_task.cancelled():
-            return
-        try:
-            exc = done_task.exception()
-        except asyncio.CancelledError:
-            return
-        if exc:
-            logger.exception("Workflow background task failed", task_id=task_id, error=exc)
-
-    task.add_done_callback(_cleanup)
-    return task
-
-
-def _cancel_workflow_background_task(task_id: str) -> bool:
-    task = workflow_background_tasks.pop(task_id, None)
-    if not task or task.done():
-        return False
-    task.cancel()
-    return True
-
-
-def _workflow_background_task_running(task_id: str) -> bool:
-    task = workflow_background_tasks.get(task_id)
-    return bool(task and not task.done())
 
 
 def _mark_workflow_resume_running(context: WorkflowContext) -> None:
@@ -528,10 +491,12 @@ def _restore_workflow_disclosure_from_conversation(context: WorkflowContext) -> 
 
 
 async def _persist_org_tree() -> None:
-    if organization_tree_store is None:
+    if api_runtime.organization_tree_store is None:
         return
     try:
-        await _get_persist_store().save("org_tree", "root", organization_tree_store.model_dump(mode="json"))
+        await _get_persist_store().save(
+            "org_tree", "root", api_runtime.organization_tree_store.model_dump(mode="json")
+        )
     except Exception as e:
         logger.warning(f"保存组织架构到数据库失败: {e}")
 
@@ -685,8 +650,7 @@ async def restore_stores_from_db() -> None:
     try:
         org_val = await store.load("org_tree", "root")
         if org_val is not None:
-            global organization_tree_store
-            organization_tree_store = OrgNodeResponse.model_validate(org_val)
+            api_runtime.organization_tree_store = OrgNodeResponse.model_validate(org_val)
     except Exception as e:
         logger.warning(f"恢复组织架构失败: {e}")
 
@@ -1562,93 +1526,6 @@ def _append_workflow_terminal_event(task_id: str, context: WorkflowContext, comp
             event_type="workflow.failed",
             data={"state": context.current_phase.value},
         )
-
-
-def _build_agent_activity_event(
-    *,
-    event_type: str,
-    agent_name: str,
-    sequence: int,
-    call_id: str,
-    message: str,
-    data: Dict[str, Any],
-    event_id: str | None = None,
-) -> Dict[str, Any]:
-    event = AgentEventInfo(
-        id=event_id or str(uuid.uuid4()),
-        sequence=sequence,
-        call_id=call_id,
-        type=event_type,
-        agent_name=agent_name,
-        timestamp=datetime.now().isoformat(),
-        message=message,
-        data=data,
-    )
-    return event.model_dump(mode="json")
-
-
-def _agent_activity_from_workflow_event(event: Dict[str, Any]) -> Dict[str, Any] | None:
-    """Convert workflow/agent engine events to chat activity-log entries."""
-    raw_type = str(event.get("event_type") or "")
-    agent_name = str(event.get("agent_name") or event.get("agent_id") or "workflow_engine")
-    task_id = str(event.get("task_id") or "workflow")
-
-    activity_type = ""
-    message = str(event.get("message") or "")
-    data: Dict[str, Any] = {}
-    call_id = str(event.get("call_id") or task_id)
-
-    if raw_type == "agent.tool_call_start":
-        tool_name = str(event.get("tool_name") or (event.get("data") or {}).get("name") or "unknown")
-        params = event.get("parameters") or (event.get("data") or {}).get("parameters") or {}
-        activity_type = "tool_call_start"
-        message = message or f"调用工具: {tool_name}"
-        data = {"name": tool_name, "parameters": params}
-        call_id = f"{task_id}:{agent_name}:{tool_name}"
-    elif raw_type == "agent.tool_call_end":
-        tool_name = str(event.get("tool_name") or (event.get("data") or {}).get("name") or "unknown")
-        result = event.get("result") or (event.get("data") or {}).get("result") or ""
-        success = event.get("success", (event.get("data") or {}).get("success", True))
-        activity_type = "tool_call_end"
-        message = message or f"工具完成: {tool_name}"
-        data = {"name": tool_name, "result": str(result)[:1200], "success": bool(success)}
-        call_id = f"{task_id}:{agent_name}:{tool_name}"
-    elif raw_type == "agent.thinking":
-        thought = str(event.get("thought") or message or "")
-        activity_type = "thinking"
-        message = message or thought
-        data = {"message": thought}
-    elif raw_type == "agent.content":
-        content = str(event.get("content") or message or "")
-        activity_type = "content"
-        message = message or content
-        data = {"message": content, "phase": event.get("phase")}
-    elif raw_type == "agent.skill_sedimented":
-        payload = event.get("data") if isinstance(event.get("data"), dict) else {}
-        skill = str(event.get("skill") or payload.get("skill") or "")
-        activity_type = "content"
-        message = message or f"已沉淀技能：{skill}"
-        data = {
-            "message": message,
-            "skill": skill,
-            "skill_path": event.get("skill_path") or payload.get("skill_path"),
-            "log_path": event.get("log_path") or payload.get("log_path"),
-        }
-    elif raw_type.startswith("workflow."):
-        activity_type = "status"
-        message = message or raw_type
-        data = {"kind": raw_type, "message": message}
-    else:
-        return None
-
-    return _build_agent_activity_event(
-        event_type=activity_type,
-        agent_name=agent_name,
-        sequence=int(time.time() * 1000) % 1_000_000_000,
-        call_id=call_id,
-        message=message,
-        data=data,
-    )
 
 
 def _agent_work_message(conv_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
@@ -4311,17 +4188,16 @@ async def get_hermes_agent_info(agent_id: str) -> dict:
 @router.get("/organization/tree", response_model=OrgNodeResponse)
 async def get_organization_tree() -> OrgNodeResponse:
     """获取组织架构树"""
-    if organization_tree_store is not None:
-        return organization_tree_store
+    if api_runtime.organization_tree_store is not None:
+        return api_runtime.organization_tree_store
     return _profile_organization_tree()
 
 
 @router.put("/organization/tree", response_model=OrganizationUpdateResponse)
 async def update_organization_tree(tree: OrgNodeResponse) -> OrganizationUpdateResponse:
     """更新组织架构树"""
-    global organization_tree_store
     _validate_org_tree(tree)
-    organization_tree_store = tree
+    api_runtime.organization_tree_store = tree
     await _persist_org_tree()
     return {"status": "success", "message": "组织架构已更新", "tree": tree}
 

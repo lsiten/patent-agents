@@ -6,15 +6,13 @@
 架构：CEO Agent 通过 dispatch_specialist 工具动态调度各专业 Agent，
 本引擎仅负责状态管理、进度追踪和前端 API 兼容。
 """
-from pathlib import Path as _Path
 import asyncio
 import hashlib
 import json
 import re
 import time
-from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from pathlib import Path as _Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, TypeVar
 from urllib.parse import urlparse
 
@@ -30,6 +28,15 @@ from src.core.events import (
     AgentDispatchEvent,
     AgentContentEvent,
 )
+from src.core.agui_events import EVENT_TYPE_MAP, ensure_agui_payload
+from src.core.workflow_artifacts import (
+    get_phase_dir as _get_phase_dir,
+    get_task_dir as _get_task_dir,
+    persist_phase_result as _persist_phase_result,
+    persist_workflow_checkpoint as _persist_workflow_checkpoint,
+)
+from src.core.workflow_contracts import phase_contract_summary
+from src.core.workflow_models import PhaseResult, WorkflowContext, WorkflowPhase, WorkflowState
 from src.core.llm_client import LLMError
 from src.core.patent_compliance import (
     build_patent_text_from_draft,
@@ -45,22 +52,6 @@ try:
 except Exception:
     _app_settings = None
 
-
-# ═══════════════════════════════════════════════════════════════════
-# 专利任务目录管理 — 每个 task_id 独立目录，子目录按阶段组织
-# ═══════════════════════════════════════════════════════════════════
-
-from pathlib import Path as _Path
-
-_BACKEND_DIR = _Path(__file__).resolve().parent.parent.parent
-
-# 阶段 → 子目录映射
-_PHASE_DIR_MAP = {
-    "requirement_analysis": "requirement",
-    "retrieval_report": "retrieval",
-    "patent_draft": "draft",
-    "review_report": "review",
-}
 
 _CONTEXT_FIELD_TO_NODE = {
     "brainstorming_output": "brainstorm",
@@ -81,69 +72,7 @@ _WORKFLOW_STATE_TO_NODE = {
     "failed": "failed",
 }
 
-_AGUI_EVENT_MAP = {
-    "agent.thinking": "TEXT_MESSAGE_CONTENT",
-    "agent.content": "TEXT_MESSAGE_CONTENT",
-    "agent.dispatch": "STATE_DELTA",
-    "agent.tool_call_start": "TOOL_CALL_START",
-    "agent.tool_call_delta": "TOOL_CALL_ARGS",
-    "agent.tool_call_end": "TOOL_CALL_END",
-    "workflow.phase_round.started": "PHASE_ROUND_STARTED",
-    "workflow.phase_round.completed": "PHASE_ROUND_COMPLETED",
-    "workflow.quality_gate.completed": "QUALITY_GATE_COMPLETED",
-    "workflow.shared_facts.updated": "SHARED_FACTS_UPDATED",
-    "workflow.human_input.requested": "HUMAN_INPUT_REQUESTED",
-    "workflow.run.started": "RUN_STARTED",
-    "workflow.run.finished": "RUN_FINISHED",
-    "workflow.state.delta": "STATE_DELTA",
-}
-
-
-def _get_task_dir(task_id: str) -> _Path:
-    """获取专利任务根目录（绝对路径）"""
-    task_dir = _BACKEND_DIR / "exports" / task_id
-    task_dir.mkdir(parents=True, exist_ok=True)
-    return task_dir
-
-
-def _get_phase_dir(task_id: str, phase_field: str) -> _Path:
-    """获取某阶段的子目录"""
-    sub = _PHASE_DIR_MAP.get(phase_field, phase_field)
-    phase_dir = _get_task_dir(task_id) / sub
-    phase_dir.mkdir(parents=True, exist_ok=True)
-    return phase_dir
-
-
-def _persist_phase_result(task_id: str, phase_field: str, data: dict) -> str:
-    """将阶段结果持久化为 JSON 文件，返回文件绝对路径"""
-    phase_dir = _get_phase_dir(task_id, phase_field)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{phase_field}_{timestamp}.json"
-    file_path = phase_dir / filename
-    file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    # 同时写一个 latest.json 方便快速读取
-    latest_path = phase_dir / "latest.json"
-    latest_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    return str(file_path)
-
-
-def _persist_workflow_checkpoint(task_id: str, checkpoint: dict) -> str:
-    """Persist LangGraph-style workflow checkpoint snapshots.
-
-    Phase artifacts are still stored in phase directories. This checkpoint file
-    records graph state, route decisions, shared-facts versions and per-round
-    references so UI reloads can reconstruct the workflow without guessing.
-    """
-    checkpoint_dir = _get_task_dir(task_id) / "checkpoints"
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    reason = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(checkpoint.get("reason") or "checkpoint"))
-    file_path = checkpoint_dir / f"{timestamp}_{reason[:80]}.json"
-    payload = json.dumps(checkpoint, ensure_ascii=False, indent=2, default=str)
-    file_path.write_text(payload, encoding="utf-8")
-    latest_path = checkpoint_dir / "latest.json"
-    latest_path.write_text(payload, encoding="utf-8")
-    return str(file_path)
+_AGUI_EVENT_MAP = {event_type: agui_type.value for event_type, agui_type in EVENT_TYPE_MAP.items()}
 
 
 def _get_agent_factory():
@@ -256,189 +185,6 @@ SPECIALIST_AGENT_ACTIONS = {
     "quality_reviewer": "审查专利申请文件质量",
 }
 
-
-
-class WorkflowState(str, Enum):
-    """工作流状态枚举"""
-    INITIALIZED = "initialized"
-    # 头脑风暴阶段
-    BRAINSTORMING = "brainstorming"
-    # 需求分析阶段
-    REQUIREMENT_ANALYSIS = "requirement_analysis"
-    # 检索分析阶段
-    RETRIEVAL_ANALYSIS = "retrieval_analysis"
-    # 专利撰写阶段
-    PATENT_WRITING = "patent_writing"
-    # 质量审查阶段
-    QUALITY_REVIEW = "quality_review"
-    # 迭代修正阶段
-    ITERATION = "iteration"
-    # 等待用户决策
-    AWAITING_USER_DECISION = "awaiting_user_decision"
-    # 已完成
-    COMPLETED = "completed"
-    # 失败
-    FAILED = "failed"
-    # 用户取消
-    CANCELLED = "cancelled"
-
-
-class WorkflowPhase(str, Enum):
-    """工作流阶段"""
-    BRAINSTORM = "brainstorm"
-    REQUIREMENT = "requirement"
-    RETRIEVAL = "retrieval"
-    WRITING = "writing"
-    REVIEW = "review"
-
-
-@dataclass
-class PhaseResult:
-    """阶段执行结果"""
-    phase: WorkflowPhase
-    success: bool
-    duration_seconds: float
-    output: Dict[str, Any] = field(default_factory=dict)
-    issues: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-
-    @property
-    def has_issues(self) -> bool:
-        return len(self.issues) > 0
-
-
-class WorkflowContext:
-    """
-    工作流上下文
-    在各阶段之间传递数据
-    """
-
-    def __init__(self, task_id: str, user_id: str, target_country: str = "中国"):
-        self.task_id = task_id
-        self.user_id = user_id
-        self.target_country = target_country
-        self.created_at = datetime.now()
-        self.updated_at = self.created_at
-
-        # 专利标题（仅接收用户明确给出的发明名称或 Agent 产出的标题）
-        self.title: str = ""
-
-        # 原始输入
-        self.original_description: str = ""
-        self.additional_materials: Dict[str, Any] = {}
-
-        # 各阶段输出
-        self.brainstorming_output: Dict[str, Any] = {}
-        self.requirement_analysis: Dict[str, Any] = {}
-        self.retrieval_report: Dict[str, Any] = {}
-        self.patent_draft: Dict[str, Any] = {}
-        self.review_report: Dict[str, Any] = {}
-
-        # 元数据
-        self.iteration_count: int = 0
-        self.max_iterations: int = 3  # 软提示阈值；质量未达标时仍继续自动修正
-        self.current_phase: WorkflowState = WorkflowState.INITIALIZED
-        self.phase_history: List[PhaseResult] = []
-        self.metadata: Dict[str, Any] = {}
-        self.shared_agent_context: Dict[str, Any] = {}
-        self.is_paused: bool = False
-
-        # 迭代修正反馈
-        self.latest_revision_suggestions: List[str] = []
-        self.latest_review_score: float = 0.0
-
-        # 消息历史
-        self.message_history: List[Dict[str, Any]] = []
-
-    def add_message(self, role: str, content: str, **kwargs) -> None:
-        """添加消息到历史"""
-        now = datetime.now()
-        self.message_history.append({
-            "role": role,
-            "content": content,
-            "timestamp": now.isoformat(),
-            **kwargs,
-        })
-        if role == "user" and content:
-            supplements = self.shared_agent_context.setdefault("user_supplements", [])
-            if isinstance(supplements, list):
-                supplements.append({
-                    "content": content[:4000],
-                    "timestamp": now.isoformat(),
-                })
-        self.updated_at = now
-
-    def add_phase_result(self, result: PhaseResult) -> None:
-        """添加阶段执行结果"""
-        self.phase_history.append(result)
-        self.updated_at = datetime.now()
-
-    def get_combined_input(self) -> str:
-        """获取整合后的输入（原始描述 + 头脑风暴讨论）"""
-        parts = [self.original_description]
-
-        if self.metadata.get("patent_type_preference"):
-            parts.append(f"\n\n用户偏好的专利类型: {self.metadata['patent_type_preference']}")
-
-        shared_context_text = self.get_shared_agent_context_text()
-        if shared_context_text:
-            parts.append("\n\n已确认/共享公共信息:\n" + shared_context_text)
-
-        if self.brainstorming_output and "summary" in self.brainstorming_output:
-            parts.append("\n\n补充信息:\n" + self.brainstorming_output["summary"])
-
-        # 添加消息历史中的关键信息
-        key_messages = [
-            m["content"] for m in self.message_history
-            if m.get("role") in ["user", "assistant"] and len(m["content"]) > 50
-        ]
-        if key_messages:
-            parts.append("\n\n讨论摘要:\n" + "\n".join(key_messages[-5:]))
-
-        return "\n".join(parts)
-
-    def get_shared_agent_context_text(self, limit: int = 10000) -> str:
-        """Format confirmed facts and shared stage outputs for every Agent prompt."""
-        if not self.shared_agent_context:
-            return ""
-        return json.dumps(self.shared_agent_context, ensure_ascii=False, indent=2)[:limit]
-
-    def merge_shared_agent_context(self, key: str, value: Any) -> None:
-        if value in (None, "", [], {}):
-            return
-        old_value = self.shared_agent_context.get(key)
-        if old_value == value:
-            return
-        previous_version = int(self.metadata.get("shared_facts_version") or 0)
-        new_version = previous_version + 1
-        self.shared_agent_context[key] = value
-        self.shared_agent_context["_version"] = new_version
-        history = self.metadata.setdefault("shared_facts_history", [])
-        if isinstance(history, list):
-            history.append({
-                "version": new_version,
-                "key": key,
-                "timestamp": datetime.now().isoformat(),
-                "previous_preview": json.dumps(old_value, ensure_ascii=False, default=str)[:1200]
-                if old_value not in (None, "", [], {})
-                else "",
-                "value_preview": json.dumps(value, ensure_ascii=False, default=str)[:2000],
-            })
-            del history[:-100]
-        self.metadata["shared_facts_version"] = new_version
-        self.metadata["shared_agent_context"] = self.shared_agent_context
-        self.updated_at = datetime.now()
-
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
-        return {
-            "task_id": self.task_id,
-            "user_id": self.user_id,
-            "current_state": self.current_phase.value,
-            "iteration_count": self.iteration_count,
-            "phase_count": len(self.phase_history),
-            "phases_completed": [p.phase.value for p in self.phase_history],
-        }
 
 
 # ============ 阶段-Profile 映射 ============
@@ -613,35 +359,22 @@ class PatentWorkflowEngine:
         data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         payload = dict(data or {})
-        agui_type = _AGUI_EVENT_MAP.get(event_type, "STATE_DELTA")
         node = (
             payload.get("node")
             or payload.get("phase_node")
             or self._node_for_state(payload.get("phase") or context.current_phase)
         )
-        call_name = (
-            payload.get("tool_name")
-            or payload.get("name")
-            or payload.get("tool")
-            or payload.get("skill")
-            or event_type
+        return ensure_agui_payload(
+            payload=payload,
+            event_type=event_type,
+            run_id=context.task_id,
+            agent_name=agent_name,
+            node=node,
+            status=getattr(context.current_phase, "value", str(context.current_phase)),
+            current_round=payload.get("round") or context.iteration_count,
+            shared_facts_version=int(context.metadata.get("shared_facts_version") or 0),
+            message=message,
         )
-        call_id_src = f"{context.task_id}:{node}:{agent_name}:{call_name}:{payload.get('iteration_count') or payload.get('round') or ''}"
-        call_id = hashlib.sha1(call_id_src.encode("utf-8")).hexdigest()[:16]
-        payload.setdefault("agui_type", agui_type)
-        payload.setdefault("run_id", context.task_id)
-        payload.setdefault("message_id", f"{context.task_id}:{node}:{payload.get('round') or context.iteration_count}")
-        payload.setdefault("parent_message_id", f"{context.task_id}:{node}")
-        payload.setdefault("tool_call_id", call_id)
-        payload.setdefault("state_delta", {
-            "status": getattr(context.current_phase, "value", str(context.current_phase)),
-            "current_node": node,
-            "current_round": payload.get("round") or context.iteration_count,
-            "shared_facts_version": int(context.metadata.get("shared_facts_version") or 0),
-        })
-        payload.setdefault("display_message", message)
-        payload.setdefault("agent_name", agent_name)
-        return payload
 
     def _record_phase_round(
         self,
@@ -687,81 +420,7 @@ class PatentWorkflowEngine:
         return record
 
     def _phase_contract_summary(self, context_field: str) -> Dict[str, Any]:
-        contracts = {
-            "requirement_analysis": {
-                "node": "requirement_analysis",
-                "inputs": [
-                    "user_disclosure",
-                    "brainstorm_output",
-                    "shared_facts",
-                    "retrieval_evidence",
-                    "previous_feedback",
-                ],
-                "required_outputs": [
-                    "tech_field",
-                    "technical_problem",
-                    "key_innovative_features",
-                    "information_gaps",
-                    "retrieval_feedback_review",
-                    "shared_facts_delta",
-                ],
-                "gate": "must_resolve_before_writing 为空或可由检索继续解决",
-            },
-            "retrieval_report": {
-                "node": "retrieval",
-                "inputs": [
-                    "requirement_gaps",
-                    "shared_facts",
-                    "previous_failed_queries",
-                ],
-                "required_outputs": [
-                    "retrieval_strategy",
-                    "retrieval_keywords",
-                    "sources_used",
-                    "retrieval_results",
-                    "resolved_questions",
-                    "unresolved_questions",
-                ],
-                "gate": "检索源不可用需记录并跳过；证据不足需调整检索式继续或明确转用户",
-            },
-            "patent_draft": {
-                "node": "writing",
-                "inputs": [
-                    "shared_facts",
-                    "requirement_analysis",
-                    "retrieval_report",
-                    "review_feedback",
-                    "writing_rules",
-                ],
-                "required_outputs": [
-                    "claims",
-                    "description",
-                    "abstract",
-                    "drawings",
-                    "docx_draft_path",
-                ],
-                "gate": "权利要求和说明书完整；附图由真实专利内容生成；DOCX 草稿可刷新",
-            },
-            "review_report": {
-                "node": "quality_review",
-                "inputs": [
-                    "patent_draft",
-                    "docx_draft",
-                    "drawings",
-                    "shared_facts",
-                    "manual_rules",
-                ],
-                "required_outputs": [
-                    "score",
-                    "recommendation",
-                    "issues",
-                    "root_cause",
-                    "route_to",
-                ],
-                "gate": "score >= 90 且无 high/critical 阻塞问题",
-            },
-        }
-        return contracts.get(context_field, {"node": context_field})
+        return phase_contract_summary(context_field)
 
     def _invalidate_downstream_outputs(
         self,
@@ -1075,6 +734,38 @@ class PatentWorkflowEngine:
         checkpoint_callback: Optional[Callable[[WorkflowContext, str], None | Awaitable[None]]] = None,
         force_start_from: Optional[WorkflowState] = None,
     ) -> WorkflowContext:
+        """Execute the patent workflow through the official LangGraph runtime."""
+        if context.metadata.get("_langgraph_runtime_active"):
+            return await self._execute_langgraph_domain_pipeline(
+                context,
+                phase_callback=phase_callback,
+                event_callback=event_callback,
+                agent_event_callback=agent_event_callback,
+                checkpoint_callback=checkpoint_callback,
+                force_start_from=force_start_from,
+            )
+
+        from src.core.workflow_graph import PatentWorkflowGraphRuntime
+
+        runtime = PatentWorkflowGraphRuntime(self)
+        return await runtime.run(
+            context,
+            phase_callback=phase_callback,
+            event_callback=event_callback,
+            agent_event_callback=agent_event_callback,
+            checkpoint_callback=checkpoint_callback,
+            force_start_from=force_start_from,
+        )
+
+    async def _execute_langgraph_domain_pipeline(
+        self,
+        context: WorkflowContext,
+        phase_callback: Optional[Callable[[WorkflowState, PhaseResult], None | Awaitable[None]]] = None,
+        event_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
+        agent_event_callback: Optional[Callable[[Dict[str, Any]], None | Awaitable[None]]] = None,
+        checkpoint_callback: Optional[Callable[[WorkflowContext, str], None | Awaitable[None]]] = None,
+        force_start_from: Optional[WorkflowState] = None,
+    ) -> WorkflowContext:
         """
         执行完整工作流 — 顺序调用各专业 Agent
 
@@ -1369,9 +1060,15 @@ class PatentWorkflowEngine:
 
                 # 发射 Agent 输出完成事件
                 if event_callback:
+                    event_callback(agent_display_name, "agent.message.start",
+                        f"{agent_display_name} 输出开始",
+                        {"agent_name": agent_display_name, "phase": phase_state.value})
                     event_callback(agent_display_name, "agent.content",
                         f"📄 输出",
                         {"agent_name": agent_display_name, "content": agent_text if agent_text else "", "phase": phase_state.value})
+                    event_callback(agent_display_name, "agent.message.end",
+                        f"{agent_display_name} 输出结束",
+                        {"agent_name": agent_display_name, "phase": phase_state.value})
                 else:
                     await publish_event(AgentContentEvent(
                         task_id=context.task_id,
@@ -1602,10 +1299,31 @@ class PatentWorkflowEngine:
                 if context.review_report:
                     # 审查未通过 — 提取问题并进入补救分流
                     context.iteration_count += 1
-                    review_issues = self._extract_review_issues(context.review_report)
+                    active_review_report = (
+                        context.review_report if isinstance(context.review_report, dict) else {}
+                    )
+                    review_issues = self._extract_review_issues(active_review_report)
                     context.latest_revision_suggestions = review_issues
-                    context.latest_review_score = self._extract_normalized_review_score(context.review_report) or 0.0
-                    remediation_path = self._classify_remediation_path(context.review_report, context)
+                    context.latest_review_score = (
+                        self._extract_normalized_review_score(active_review_report) or 0.0
+                    )
+                    last_writer_failure = context.metadata.get("last_writer_failure")
+                    force_writer_retry = (
+                        isinstance(last_writer_failure, dict)
+                        and last_writer_failure.get("needs_same_agent_retry") is True
+                    )
+                    if force_writer_retry:
+                        # A transport/tool execution failure is not a new patent-quality
+                        # conclusion. Retry the responsible writer Agent with the same
+                        # review feedback instead of rerouting to requirement/retrieval.
+                        remediation_path = "WRITE_MORE"
+                        last_writer_failure["needs_same_agent_retry"] = False
+                        context.metadata["last_writer_failure"] = last_writer_failure
+                    else:
+                        remediation_path = self._classify_remediation_path(
+                            active_review_report,
+                            context,
+                        )
                     if event_callback:
                         event_callback(
                             "质量审查 Agent",
@@ -1620,7 +1338,7 @@ class PatentWorkflowEngine:
                                 "issues": review_issues,
                                 "route_to": remediation_path,
                                 "review_report": self._summarize_for_checkpoint(
-                                    context.review_report,
+                                    active_review_report,
                                     limit=8000,
                                 ),
                             },
@@ -1682,7 +1400,11 @@ class PatentWorkflowEngine:
                         break
 
                     if remediation_path == "NEEDS_USER_INPUT":
-                        self._enter_quality_remediation_hold(context, context.review_report, remediation_path)
+                        self._enter_quality_remediation_hold(
+                            context,
+                            active_review_report,
+                            remediation_path,
+                        )
                         context.current_phase = WorkflowState.AWAITING_USER_DECISION
                         if event_callback:
                             remediation = context.metadata.get("quality_remediation", {})
@@ -1784,9 +1506,30 @@ class PatentWorkflowEngine:
                     revision_started_at = time.perf_counter()
                     context.current_phase = WorkflowState.PATENT_WRITING
                     await self._publish_progress_event(context, WorkflowState.PATENT_WRITING, "running")
+                    writing_node = self._node_for_context_field("patent_draft")
+                    writing_round = self._phase_round_index(context, writing_node)
+                    if event_callback:
+                        event_callback(
+                            "专利撰写 Agent",
+                            "workflow.phase_round.started",
+                            f"专利撰写 Agent 第{writing_round}轮修正开始",
+                            {
+                                "phase": WorkflowState.PATENT_WRITING.value,
+                                "phase_node": writing_node,
+                                "round": writing_round,
+                                "context_field": "patent_draft",
+                                "input_contract": self._phase_contract_summary("patent_draft"),
+                                "remediation": True,
+                                "quality_iteration": context.iteration_count,
+                                "remediation_path": remediation_path,
+                            },
+                        )
+                    await checkpoint(
+                        f"quality_revision_writing_round_{context.iteration_count}_running"
+                    )
 
                     review_requires_drawing_changes = self._review_requires_drawing_changes(
-                        context.review_report
+                        active_review_report
                     )
                     revision_prompt = self._build_revision_prompt(
                         context,
@@ -1881,14 +1624,6 @@ class PatentWorkflowEngine:
                             "drawings": [],
                             "docx_path": "",
                         }
-                    context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
-                    contract_issues = self._validate_phase_contract("patent_draft", context_data)
-                    if contract_issues:
-                        context_data = self._build_phase_contract_error(
-                            "patent_draft",
-                            context_data,
-                            contract_issues,
-                        )
                     if isinstance(context_data, dict) and context_data.get("_agent_failed") is not True:
                         context_data = self._apply_review_suggestions_to_draft(
                             context,
@@ -1918,6 +1653,16 @@ class PatentWorkflowEngine:
                             event_callback=event_callback,
                         )
                         context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
+                        context_data["_writer_postprocessed"] = True
+                        contract_issues = self._validate_phase_contract("patent_draft", context_data)
+                        if contract_issues:
+                            context_data = self._build_phase_contract_error(
+                                "patent_draft",
+                                context_data,
+                                contract_issues,
+                            )
+                    else:
+                        context_data = self._clear_stale_writer_failure_if_reviewable(context_data)
                         contract_issues = self._validate_phase_contract("patent_draft", context_data)
                         if contract_issues:
                             context_data = self._build_phase_contract_error(
@@ -1932,20 +1677,50 @@ class PatentWorkflowEngine:
                         isinstance(context_data, dict)
                         and context_data.get("_agent_failed") is True
                     )
+                    saved_path = None
                     if not writer_failed:
                         context.patent_draft = context_data
                         self._update_shared_context_from_phase(context, "patent_draft", context_data)
                         # 持久化修正后的撰写结果。失败/超时输出不能覆盖上一轮有效草稿。
                         try:
-                            _persist_phase_result(context.task_id, "patent_draft", context_data if isinstance(context_data, dict) else {"output": str(context_data)})
+                            saved_path = _persist_phase_result(context.task_id, "patent_draft", context_data if isinstance(context_data, dict) else {"output": str(context_data)})
                         except Exception:
                             pass
+                        context.metadata.pop("last_writer_failure", None)
                     else:
                         context.metadata["last_writer_failure"] = {
                             "iteration_count": context.iteration_count,
                             "error": str(context_data.get("_agent_error") or "专利撰写 Agent 修正失败"),
                             "duration_seconds": revision_duration,
+                            "needs_same_agent_retry": True,
                         }
+                    writing_round_record = self._record_phase_round(
+                        context,
+                        node=writing_node,
+                        context_field="patent_draft",
+                        status="failed" if writer_failed else "completed",
+                        output=context_data if isinstance(context_data, dict) else {"output": str(context_data)},
+                        duration_seconds=revision_duration,
+                        issues=[
+                            str(context_data.get("_agent_error", ""))
+                        ] if writer_failed and isinstance(context_data, dict) else [],
+                        artifact_path=saved_path,
+                    )
+                    if event_callback:
+                        event_callback(
+                            "专利撰写 Agent",
+                            "workflow.phase_round.completed",
+                            f"专利撰写 Agent 第{writing_round_record.get('round')}轮修正{'失败' if writer_failed else '完成'}",
+                            {
+                                "phase": WorkflowState.PATENT_WRITING.value,
+                                "phase_node": writing_node,
+                                "round": writing_round_record.get("round"),
+                                "round_record": writing_round_record,
+                                "output_contract": self._phase_contract_summary("patent_draft"),
+                                "remediation": True,
+                                "quality_iteration": context.iteration_count,
+                            },
+                        )
                     context.add_phase_result(PhaseResult(
                         phase=WorkflowPhase.WRITING,
                         success=not writer_failed,
@@ -1988,6 +1763,26 @@ class PatentWorkflowEngine:
                     review_started_at = time.perf_counter()
                     context.current_phase = WorkflowState.QUALITY_REVIEW
                     await self._publish_progress_event(context, WorkflowState.QUALITY_REVIEW, "running")
+                    review_node = self._node_for_context_field("review_report")
+                    review_round = self._phase_round_index(context, review_node)
+                    if event_callback:
+                        event_callback(
+                            "质量审查 Agent",
+                            "workflow.phase_round.started",
+                            f"质量审查 Agent 第{review_round}轮复审开始",
+                            {
+                                "phase": WorkflowState.QUALITY_REVIEW.value,
+                                "phase_node": review_node,
+                                "round": review_round,
+                                "context_field": "review_report",
+                                "input_contract": self._phase_contract_summary("review_report"),
+                                "remediation": True,
+                                "quality_iteration": context.iteration_count,
+                            },
+                        )
+                    await checkpoint(
+                        f"quality_review_round_{context.iteration_count + 1}_running"
+                    )
 
                     review_prompt = self._build_phase_prompt(context, WorkflowState.QUALITY_REVIEW)
 
@@ -2024,18 +1819,50 @@ class PatentWorkflowEngine:
                     context.review_report = context_data
                     self._update_shared_context_from_phase(context, "review_report", context_data)
                     # 持久化审查结果
+                    review_saved_path = None
                     try:
-                        _persist_phase_result(context.task_id, "review_report", context_data if isinstance(context_data, dict) else {"output": str(context_data)})
+                        review_saved_path = _persist_phase_result(context.task_id, "review_report", context_data if isinstance(context_data, dict) else {"output": str(context_data)})
                     except Exception:
                         pass
+                    review_failed = (
+                        isinstance(context_data, dict)
+                        and context_data.get("_agent_failed") is True
+                    )
+                    review_round_record = self._record_phase_round(
+                        context,
+                        node=review_node,
+                        context_field="review_report",
+                        status="failed" if review_failed else "completed",
+                        output=context_data if isinstance(context_data, dict) else {"output": str(context_data)},
+                        duration_seconds=review_duration,
+                        issues=[
+                            str(context_data.get("_agent_error", ""))
+                        ] if review_failed and isinstance(context_data, dict) else [],
+                        artifact_path=review_saved_path,
+                    )
+                    if event_callback:
+                        event_callback(
+                            "质量审查 Agent",
+                            "workflow.phase_round.completed",
+                            f"质量审查 Agent 第{review_round_record.get('round')}轮复审{'失败' if review_failed else '完成'}",
+                            {
+                                "phase": WorkflowState.QUALITY_REVIEW.value,
+                                "phase_node": review_node,
+                                "round": review_round_record.get("round"),
+                                "round_record": review_round_record,
+                                "output_contract": self._phase_contract_summary("review_report"),
+                                "remediation": True,
+                                "quality_iteration": context.iteration_count,
+                            },
+                        )
                     context.add_phase_result(PhaseResult(
                         phase=WorkflowPhase.REVIEW,
-                        success=not (isinstance(context_data, dict) and context_data.get("_agent_failed") is True),
+                        success=not review_failed,
                         duration_seconds=review_duration,
                         output=context_data if isinstance(context_data, dict) else {},
                         issues=[
                             str(context_data.get("_agent_error", ""))
-                        ] if isinstance(context_data, dict) and context_data.get("_agent_failed") is True else [],
+                        ] if review_failed else [],
                     ))
                     await self._publish_progress_event(context, WorkflowState.QUALITY_REVIEW, "completed")
                     if phase_callback:
@@ -2658,6 +2485,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
         if not isinstance(draft, dict):
             return str(draft)[:4000]
 
+        drawing_file_validation = self._validate_drawing_files_for_review(draft)
         claims = draft.get("claims") or {}
         description = draft.get("description") or {}
         summary = {
@@ -2696,11 +2524,164 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                 "审查附图是否与权利要求、附图说明、具体实施方式中的结构/流程一致。",
                 "需要附图但未生成、图号不一致、附图无法访问或图文不匹配，均应判定为 high/critical 问题并要求撰写 Agent 补图或修正。",
                 "当前质量审查发生在最终 DOCX 生成前，docx_path 为空不是缺陷；通过后工作流才生成最终 DOCX。",
+                "本地附图文件可访问性以 drawing_file_validation 为准；不要因浏览器远程调试端口未连接而把已存在的本地附图判为 system_failure。",
             ],
+            "drawing_file_validation": drawing_file_validation,
             "abstract": str(draft.get("abstract") or "")[:800],
             "docx_path": draft.get("docx_path") or "",
         }
         return json.dumps(summary, ensure_ascii=False)
+
+    def _validate_drawing_files_for_review(self, draft: Dict[str, Any]) -> Dict[str, Any]:
+        """Return deterministic drawing-file facts for the reviewer.
+
+        This is not a quality judgment. It only reports local file facts so the
+        quality Agent does not need browser remote-debug access to inspect files
+        generated by the writer tool.
+        """
+        drawings = draft.get("drawings", []) if isinstance(draft, dict) else []
+        if not isinstance(drawings, list):
+            drawings = []
+        items: List[Dict[str, Any]] = []
+        digests: Dict[str, str] = {}
+        issues: List[Dict[str, str]] = []
+
+        for drawing in drawings:
+            if not isinstance(drawing, dict):
+                continue
+            figure_number = str(drawing.get("figure_number") or drawing.get("figureNumber") or "")
+            file_path = str(drawing.get("file_path") or drawing.get("path") or "")
+            item: Dict[str, Any] = {
+                "figure_number": figure_number,
+                "file_path": file_path,
+                "exists": False,
+                "is_file": False,
+                "size_bytes": 0,
+                "sha256": "",
+            }
+            if not file_path:
+                issues.append({
+                    "figure_number": figure_number,
+                    "issue": "附图缺少本地文件路径",
+                })
+                items.append(item)
+                continue
+            try:
+                path = _Path(file_path)
+                item["exists"] = path.exists()
+                item["is_file"] = path.is_file()
+                if path.is_file():
+                    data = path.read_bytes()
+                    item["size_bytes"] = len(data)
+                    import hashlib
+
+                    digest = hashlib.sha256(data).hexdigest()
+                    item["sha256"] = digest
+                    if not data:
+                        issues.append({
+                            "figure_number": figure_number,
+                            "issue": "附图文件为空",
+                        })
+                    if digest in digests:
+                        issues.append({
+                            "figure_number": figure_number,
+                            "issue": f"附图文件内容与{digests[digest]}完全相同",
+                        })
+                    else:
+                        digests[digest] = figure_number
+                else:
+                    issues.append({
+                        "figure_number": figure_number,
+                        "issue": "附图文件路径不存在或不是文件",
+                    })
+            except Exception as exc:
+                issues.append({
+                    "figure_number": figure_number,
+                    "issue": f"附图文件校验异常：{str(exc)[:120]}",
+                })
+            items.append(item)
+
+        return {
+            "checked_by": "workflow_local_file_validator",
+            "drawing_count": len(items),
+            "all_files_accessible": bool(items) and not issues,
+            "all_files_non_empty": all(int(item.get("size_bytes") or 0) > 0 for item in items) if items else False,
+            "all_file_hashes_distinct": len({item.get("sha256") for item in items if item.get("sha256")}) == len(items) if items else False,
+            "items": items,
+            "issues": issues,
+        }
+
+    def _review_has_false_drawing_access_system_failure(
+        self,
+        context: WorkflowContext,
+        review_report: Dict[str, Any],
+    ) -> bool:
+        if not isinstance(review_report, dict) or not isinstance(context.patent_draft, dict):
+            return False
+        validation = self._validate_drawing_files_for_review(context.patent_draft)
+        if not validation.get("all_files_accessible"):
+            return False
+        text = "\n".join(self._iter_phase_text_values(review_report))
+        drawing_markers = ("附图", "图片", "图1", "图2", "图3", "图4", "图5", "drawing", "figure")
+        browser_markers = ("浏览器", "远程调试", "remote", "debug", "web_access", "CDP")
+        return any(marker in text for marker in drawing_markers) and any(
+            marker in text for marker in browser_markers
+        )
+
+    def _downgrade_false_drawing_access_system_failures(
+        self,
+        context: WorkflowContext,
+        review_report: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Do not let browser-debug availability override real local file facts."""
+        if not self._review_has_false_drawing_access_system_failure(context, review_report):
+            return review_report
+        merged = dict(review_report)
+        for section_key in (
+            "formal_compliance_review",
+            "claims_review",
+            "description_review",
+            "consistency_review",
+            "drawing_review",
+            "drawings_review",
+            "figure_review",
+        ):
+            section = merged.get(section_key)
+            if not isinstance(section, dict) or not isinstance(section.get("issues"), list):
+                continue
+            updated_issues = []
+            for issue in section.get("issues") or []:
+                if not isinstance(issue, dict):
+                    updated_issues.append(issue)
+                    continue
+                issue_text = "\n".join(self._iter_phase_text_values(issue))
+                is_false_access_issue = (
+                    str(issue.get("responsible_phase") or "").strip().lower() == "system_failure"
+                    and any(marker in issue_text for marker in ("浏览器", "远程调试", "web_access", "remote", "debug", "CDP"))
+                    and any(marker in issue_text for marker in ("附图", "图片", "图1", "图2", "图3", "图4", "图5", "drawing", "figure"))
+                )
+                if is_false_access_issue:
+                    patched = dict(issue)
+                    patched["severity"] = "low"
+                    patched["responsible_phase"] = "patent_writing"
+                    patched["description"] = (
+                        str(patched.get("description") or "")
+                        + "；工作流已通过本地文件校验确认附图文件存在、非空且文件内容不重复，"
+                        "浏览器远程调试未连接不作为阻断项。"
+                    )
+                    patched["source"] = "downgraded_by_workflow_local_file_validator"
+                    updated_issues.append(patched)
+                else:
+                    updated_issues.append(issue)
+            section = dict(section)
+            section["issues"] = updated_issues
+            merged[section_key] = section
+        if str(merged.get("root_cause") or "").strip().lower() == "system_failure":
+            merged["root_cause"] = "content_incomplete"
+        merged["drawing_file_validation"] = self._validate_drawing_files_for_review(
+            context.patent_draft
+        )
+        return merged
 
     def _check_review_needs_revision(self, review_report: Dict[str, Any]) -> bool:
         """检查质量审查报告是否有需要修正的严重/高级别问题
@@ -3176,9 +3157,6 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             "角度阈值",
             "角度区间",
             "场景模式",
-            "对应关系",
-            "映射关系",
-            "映射表",
             "显示模板参数",
             "执行机构",
             "执行机构型号",
@@ -3279,6 +3257,106 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             for item in gaps
             if not self._is_nonblocking_prewriting_gap(item, retrieval_report)
         ]
+
+    def _successful_phase_round_count(
+        self,
+        context: WorkflowContext,
+        phase: WorkflowPhase,
+    ) -> int:
+        expected_phase = getattr(phase, "value", phase)
+        return sum(
+            1
+            for result in context.phase_history
+            if getattr(result.phase, "value", result.phase) == expected_phase and result.success
+        )
+
+    def _source_limitation_gap_text(self, item: Any) -> str:
+        if isinstance(item, (dict, list)):
+            return "\n".join(self._iter_phase_text_values(item))
+        return str(item or "")
+
+    def _is_source_limitation_or_prior_art_gap(self, item: Any) -> bool:
+        text = self._source_limitation_gap_text(item)
+        if not text.strip():
+            return True
+        source_limitation_markers = (
+            "网页正文读取",
+            "远程调试",
+            "调试端口",
+            "浏览器未连接",
+            "浏览器连接",
+            "web_access",
+            "网页读取失败",
+            "网页访问失败",
+            "无法访问",
+            "不可用",
+            "未配置",
+            "未启用",
+            "HTTP 503",
+            "解析失败",
+            "无结果",
+            "未取得",
+            "未获得",
+            "未命中",
+            "未见直接",
+            "直接证据",
+            "可核验专利",
+            "专利对比文件",
+            "最接近对比文件",
+            "最接近专利",
+            "Google Patents",
+            "USPTO",
+            "CNIPA",
+            "中国专利库",
+            "专利库",
+            "专利源",
+            "公开网页证据",
+            "证据补强",
+            "真伪核验",
+            "交叉核验",
+        )
+        return any(marker in text for marker in source_limitation_markers)
+
+    def _retrieval_limitations_are_carriable(
+        self,
+        context: WorkflowContext,
+        retrieval_report: Dict[str, Any],
+    ) -> bool:
+        """Workflow policy: do not let unavailable sources create an endless loop.
+
+        Professional Agents still own the technical conclusion. This only says
+        that after multiple real retrieval rounds plus requirement review, source
+        limitations/no-hit records are carried into drafting and quality review
+        instead of blocking forever.
+        """
+        if not isinstance(retrieval_report, dict):
+            return False
+        if self._successful_phase_round_count(context, WorkflowPhase.RETRIEVAL) < 2:
+            return False
+        if not self._retrieval_has_requirement_review(context):
+            return False
+        if not (
+            self._has_real_retrieval_evidence(retrieval_report)
+            or self._has_auditable_negative_retrieval(retrieval_report)
+        ):
+            return False
+
+        limitation_items: List[Any] = []
+        strategy = retrieval_report.get("retrieval_strategy")
+        if isinstance(strategy, dict):
+            limitation_items.extend(self._as_nonempty_list(strategy.get("unavailable_sources")))
+            limitation_items.extend(self._as_nonempty_list(strategy.get("empty_sources")))
+            limitation_items.extend(self._as_nonempty_list(strategy.get("skipped_sources")))
+        for field_name in (
+            "evidence_gaps",
+            "unavailable_sources",
+            "empty_sources",
+            "skipped_sources",
+            "source_limitations",
+        ):
+            limitation_items.extend(self._as_nonempty_list(retrieval_report.get(field_name)))
+
+        return any(self._is_source_limitation_or_prior_art_gap(item) for item in limitation_items)
 
     def _workflow_confirms_public_status(self, context: WorkflowContext) -> bool:
         """Return whether startup discussion already captured the invention public status."""
@@ -4002,12 +4080,34 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                         "只要其他真实来源已有可核验证据，不作为进入撰写的硬阻断。"
                     ),
                 }
-        if self._uses_public_web_evidence(ret) and not self._has_professional_or_official_verification(ret):
+        retrieval_limitations_are_carriable = self._retrieval_limitations_are_carriable(
+            context,
+            ret,
+        )
+        if (
+            self._uses_public_web_evidence(ret)
+            and not self._has_professional_or_official_verification(ret)
+            and not retrieval_limitations_are_carriable
+        ):
             blockers.append({
                 "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
                 "severity": "high",
                 "message": "检索报告使用了公开网页或 Google Patents 候选证据，但没有专业/官方来源交叉核验，必须继续核验真伪。",
             })
+        elif (
+            self._uses_public_web_evidence(ret)
+            and not self._has_professional_or_official_verification(ret)
+            and retrieval_limitations_are_carriable
+        ):
+            context.metadata.setdefault("prewriting_carried_risks", {})[
+                "public_web_verification_limitations"
+            ] = {
+                "policy": (
+                    "公开网页/Google 候选证据已尝试交叉核验但受来源不可用或无直接命中限制；"
+                    "该限制进入撰写和质量审查，不再触发无限补检。"
+                ),
+                "items": self._as_nonempty_list(ret.get("evidence_gaps")),
+            }
         retrieval_has_newer_requirement_review = self._retrieval_has_requirement_review(context)
         evidence_gaps = self._filter_hard_prewriting_gaps(
             self._as_nonempty_list(ret.get("evidence_gaps")),
@@ -4018,14 +4118,16 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             and (review_allows_drafting or requirement_allows_drafting)
             and self._has_real_retrieval_evidence(ret)
         )
-        if evidence_gaps and latest_requirement_approves_retrieval:
+        if evidence_gaps and (
+            latest_requirement_approves_retrieval or retrieval_limitations_are_carriable
+        ):
             context.metadata.setdefault("prewriting_carried_risks", {})[
                 "retrieval_evidence_gaps"
             ] = {
                 "items": evidence_gaps,
                 "policy": (
-                    "检索 Agent 已返回真实可核验证据，且更新后的需求分析 Agent "
-                    "已确认需求缺口可进入撰写；剩余证据限制转交撰写/质检阶段处理，"
+                    "检索 Agent 已返回真实证据或可审计的无结果/不可用记录，"
+                    "且已完成检索后需求复核；剩余来源限制转交撰写/质检阶段处理，"
                     "不再触发检索无限循环。"
                 ),
             }
@@ -4046,6 +4148,7 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             has_retrieval_signal
             and not retrieval_has_newer_requirement_review
             and (not self._has_real_retrieval_evidence(ret) or evidence_gaps)
+            and not retrieval_limitations_are_carriable
         ):
             blockers.append({
                 "phase": WorkflowState.RETRIEVAL_ANALYSIS.value,
@@ -7895,6 +7998,10 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
             )
             context_data = self._normalize_phase_output("review_report", context_data)
             context_data = self._merge_manual_compliance_into_review(context, context_data)
+            context_data = self._downgrade_false_drawing_access_system_failures(
+                context,
+                context_data,
+            )
             return agent_text[:500], context_data
         except asyncio.TimeoutError:
             reason = f"质量审查 Agent{label}超过 {timeout_seconds}s 未完成"
@@ -7979,6 +8086,13 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                     result_str = str(result) if result else ""
                     success = event_data.get("success", True)
                     status_icon = "✅" if success else "❌"
+                    _emit("agent.tool_call_result", f"{status_icon} {tool_name} 结果", {
+                        "agent_name": agent_name,
+                        "tool_name": tool_name,
+                        "parameters": event_data.get("parameters", {}),
+                        "result": result_str,
+                        "success": success,
+                    })
                     _emit("agent.tool_call_end", f"{status_icon} {tool_name} 返回", {
                         "agent_name": agent_name,
                         "tool_name": tool_name,
@@ -8122,6 +8236,13 @@ claim_drafter、description_writer、terminology_normalizer、support_checker �
                         result_str = str(result) if result else ""
                         success = event_data.get("success", True)
                         status_icon = "✅" if success else "❌"
+                        _emit("agent.tool_call_result", f"{status_icon} {tool_name} 结果", {
+                            "agent_name": agent_name,
+                            "tool_name": tool_name,
+                            "parameters": event_data.get("parameters", {}),
+                            "result": result_str,
+                            "success": success,
+                        })
                         _emit("agent.tool_call_end", f"{status_icon} {tool_name} 返回", {
                             "agent_name": agent_name,
                             "tool_name": tool_name,

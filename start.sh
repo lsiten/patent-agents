@@ -236,11 +236,16 @@ start_backend() {
     fi
     source venv/bin/activate
 
-    # 安装依赖
-    if [ ! -f "venv/.deps_installed" ]; then
+    # 安装依赖；依赖文件变化时自动重装，避免旧标记掩盖新增依赖。
+    DEPS_HASH=$(shasum -a 256 requirements.txt | awk '{print $1}')
+    INSTALLED_HASH=""
+    if [ -f "venv/.deps_installed" ]; then
+        INSTALLED_HASH=$(cat venv/.deps_installed)
+    fi
+    if [ "$INSTALLED_HASH" != "$DEPS_HASH" ]; then
         echo "📦 安装 Python 依赖..."
         pip install -r requirements.txt
-        touch venv/.deps_installed
+        echo "$DEPS_HASH" > venv/.deps_installed
     fi
 
     echo "✅ 后端启动中..."
@@ -319,11 +324,16 @@ start_all() {
     fi
     source venv/bin/activate
 
-    # 安装后端依赖
-    if [ ! -f "venv/.deps_installed" ]; then
+    # 安装后端依赖；依赖文件变化时自动重装，避免旧标记掩盖新增依赖。
+    DEPS_HASH=$(shasum -a 256 requirements.txt | awk '{print $1}')
+    INSTALLED_HASH=""
+    if [ -f "venv/.deps_installed" ]; then
+        INSTALLED_HASH=$(cat venv/.deps_installed)
+    fi
+    if [ "$INSTALLED_HASH" != "$DEPS_HASH" ]; then
         echo "📦 安装 Python 依赖..."
         pip install -r requirements.txt
-        touch venv/.deps_installed
+        echo "$DEPS_HASH" > venv/.deps_installed
     fi
 
     # 启动后端 (后台)

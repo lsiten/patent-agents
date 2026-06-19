@@ -19,17 +19,20 @@ logger = logging.getLogger(__name__)
 
 def _run_async(coro, timeout: int = 120):
     """在同步上下文中运行异步协程"""
+    async def _with_timeout():
+        return await asyncio.wait_for(coro, timeout=timeout)
+
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, coro)
+                future = pool.submit(asyncio.run, _with_timeout())
                 return future.result(timeout=timeout)
         else:
-            return loop.run_until_complete(coro)
+            return loop.run_until_complete(_with_timeout())
     except RuntimeError:
-        return asyncio.run(coro)
+        return asyncio.run(_with_timeout())
 
 
 def _json_result(result: Any) -> str:
@@ -123,7 +126,7 @@ def _handle_transcript_sanitizer(args: Dict[str, Any], **kw) -> str:
 def _handle_patent_search(args: Dict[str, Any], **kw) -> str:
     from src.agents.hermes.tools.patent_search import PatentSearchTool
     tool = PatentSearchTool()
-    result = _run_async(tool.execute(**args))
+    result = _run_async(tool.execute(**args), timeout=120)
     return _json_result(result)
 
 
@@ -503,6 +506,11 @@ PATENT_TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "patent_document": {"type": "string", "description": "专利文件内容"},
+                    "drawings": {
+                        "type": "array",
+                        "description": "可选附图元数据数组，每项包含 figure_number/title/file_path 等字段",
+                        "items": {"type": "object"},
+                    },
                 },
                 "required": ["patent_document"],
             },

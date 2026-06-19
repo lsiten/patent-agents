@@ -1376,8 +1376,6 @@ async def test_patent_docx_generator_accepts_structured_text_values():
 
 @pytest.mark.asyncio
 async def test_patent_docx_generator_embeds_provided_drawings(tmp_path):
-    import zipfile
-
     from docx import Document
     from PIL import Image, ImageDraw
 
@@ -1421,11 +1419,21 @@ async def test_patent_docx_generator_embeds_provided_drawings(tmp_path):
     assert result["success"] is True
     assert result["figures"][0]["path"] == str(drawing_path)
     generated = Document(result["file_path"])
-    assert len(generated.inline_shapes) >= 3
+    assert len(generated.inline_shapes) == 2
 
-    with zipfile.ZipFile(result["file_path"]) as docx_zip:
-        document_xml = docx_zip.read("word/document.xml").decode("utf-8")
-    drawing_desc_index = document_xml.index("图1为系统结构示意图")
-    inline_drawing_index = document_xml.index("<w:drawing>", drawing_desc_index)
-    detailed_index = document_xml.index("下面结合图1说明本发明的系统结构", inline_drawing_index)
-    assert drawing_desc_index < inline_drawing_index < detailed_index
+    paragraphs = generated.paragraphs
+    drawing_desc_index = next(
+        idx for idx, para in enumerate(paragraphs) if para.text == "图1为系统结构示意图。"
+    )
+    detailed_index = next(
+        idx for idx, para in enumerate(paragraphs) if para.text == "下面结合图1说明本发明的系统结构。"
+    )
+    description_drawings_index = next(
+        idx for idx, para in enumerate(paragraphs) if para.text == "说    明    书    附    图"
+    )
+    inline_drawing_index = next(
+        idx
+        for idx in range(description_drawings_index, len(paragraphs))
+        if paragraphs[idx]._element.xml.count("<w:drawing")
+    )
+    assert drawing_desc_index < detailed_index < description_drawings_index < inline_drawing_index

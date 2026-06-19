@@ -249,6 +249,121 @@ class TestRequirementRetrievalReviewContracts:
 
         assert engine._collect_prewriting_blockers(context) == []
 
+    def test_repeated_source_limitations_are_carried_after_requirement_review(self):
+        engine = PatentWorkflowEngine()
+        context = WorkflowContext(task_id="prewrite-source-limit", user_id="u-source-limit")
+        requirement_round_1 = {
+            "tech_field": "沉浸式显示控制",
+            "core_principle": "根据可动显示面姿态调整显示内容。",
+            "technical_problem": "屏幕姿态变化后相邻画面衔接不连续。",
+            "beneficial_effects": ["提高多显示面连续性"],
+            "key_innovative_features": ["姿态变化与画面补偿策略联合控制"],
+            "application_scenarios": ["沉浸式多屏显示空间"],
+            "patent_type_recommendation": "发明专利",
+            "claim_skeleton": {"step_count": 4, "steps": ["获取", "确定", "驱动", "生成"]},
+            "information_gaps": ["继续补强 Google Patents 或 CNIPA 直接对比文件。"],
+        }
+        retrieval = {
+            "retrieval_strategy": {
+                "keywords": ["movable display", "projection mapping", "image compensation"],
+                "databases_used": ["google_patents", "arxiv", "official_research_page"],
+                "unavailable_sources": ["web_access_read_page: 浏览器远程调试未连接"],
+            },
+            "web_evidence": [
+                {
+                    "title": "Projection mapping research overview",
+                    "url": "https://example.org/projection-mapping",
+                }
+            ],
+            "non_patent_prior_art": [
+                {
+                    "title": "Dynamic projection mapping",
+                    "url": "https://arxiv.org/abs/1234.5678",
+                }
+            ],
+            "evidence_sources": [
+                {"source": "Google Patents", "status": "无直接命中"},
+                {"source": "arxiv", "status": "used"},
+                {"source": "web_access_read_page", "status": "网页正文读取失败：远程调试不可用"},
+            ],
+            "tool_results": [
+                {"success": True, "result": "Google Patents 未取得直接对比文件"},
+                {"success": True, "result": "arXiv https://arxiv.org/abs/1234.5678"},
+                {"success": True, "result": "web_access_read_page 网页正文读取失败：远程调试不可用"},
+            ],
+            "evidence_gaps": [
+                "网页正文读取失败，远程调试不可用；Google Patents/CNIPA 未取得直接对比文件。"
+            ],
+        }
+        requirement_round_2 = dict(requirement_round_1)
+        requirement_round_2.update(
+            {
+                "information_gaps": [],
+                "retrieval_feedback_review": {
+                    "ready_for_writing": True,
+                    "all_requirement_gaps_closed": False,
+                    "remaining_requirement_gaps": [
+                        {
+                            "gap": "Google Patents/CNIPA 未取得直接对比文件。",
+                            "impact_on_writing": "作为撰写和质量审查风险，不阻止撰写。",
+                        }
+                    ],
+                    "search_feedback_for_retrieval": [
+                        "网页正文读取失败，远程调试不可用；不应通过自动扫描调试端口绕过。"
+                    ],
+                },
+            }
+        )
+
+        context.requirement_analysis = requirement_round_2
+        context.retrieval_report = retrieval
+        context.phase_history = [
+            PhaseResult(WorkflowPhase.REQUIREMENT, True, 1.0, requirement_round_1),
+            PhaseResult(WorkflowPhase.RETRIEVAL, True, 1.0, retrieval),
+            PhaseResult(WorkflowPhase.RETRIEVAL, True, 1.0, retrieval),
+            PhaseResult(WorkflowPhase.REQUIREMENT, True, 1.0, requirement_round_2),
+        ]
+
+        assert engine._collect_prewriting_blockers(context) == []
+        assert "retrieval_source_limitations" in context.metadata["prewriting_carried_risks"]
+
+    def test_missing_technical_facts_still_block_writing(self):
+        engine = PatentWorkflowEngine()
+        context = WorkflowContext(task_id="prewrite-hard-gap", user_id="u-hard-gap")
+        requirement = {
+            "tech_field": "沉浸式显示控制",
+            "core_principle": "根据可动显示面姿态调整显示内容。",
+            "technical_problem": "屏幕姿态变化后相邻画面衔接不连续。",
+            "beneficial_effects": ["提高多显示面连续性"],
+            "key_innovative_features": ["姿态变化与画面补偿策略联合控制"],
+            "application_scenarios": ["沉浸式多屏显示空间"],
+            "patent_type_recommendation": "发明专利",
+            "claim_skeleton": {"step_count": 4, "steps": ["获取", "确定", "驱动", "生成"]},
+            "information_gaps": ["缺少目标显示姿态与补偿画面生成之间的技术映射关系。"],
+        }
+        retrieval = {
+            "retrieval_strategy": {
+                "keywords": ["movable display", "projection mapping", "image compensation"],
+                "databases_used": ["arxiv", "official_research_page"],
+            },
+            "web_evidence": [{"title": "Projection mapping", "url": "https://example.org/a"}],
+            "non_patent_prior_art": [{"title": "Dynamic projection", "url": "https://arxiv.org/abs/1"}],
+            "evidence_sources": [{"source": "arxiv", "status": "used"}],
+            "tool_results": [{"success": True, "result": "arxiv https://arxiv.org/abs/1"}],
+            "evidence_gaps": [],
+        }
+        context.requirement_analysis = requirement
+        context.retrieval_report = retrieval
+        context.phase_history = [
+            PhaseResult(WorkflowPhase.REQUIREMENT, True, 1.0, requirement),
+            PhaseResult(WorkflowPhase.RETRIEVAL, True, 1.0, retrieval),
+            PhaseResult(WorkflowPhase.REQUIREMENT, True, 1.0, requirement),
+        ]
+
+        blockers = engine._collect_prewriting_blockers(context)
+        assert blockers
+        assert any("映射关系" in item["message"] for item in blockers)
+
 
 class TestLowScoreRemediationContracts:
     """Low-score remediation contract tests for the next workflow iteration."""

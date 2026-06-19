@@ -53,7 +53,7 @@ class TestAgentActivityEvents:
         assert payload["type"] == "thinking"
         assert payload["data"] == {"message": "正在分析技术方案"}
 
-    def test_agent_event_info_backfills_legacy_identity_fields(self):
+    def test_agent_event_info_backfills_missing_identity_fields(self):
         event = AgentEventInfo(
             type="status",
             agent_name="patent.ceo.v1",
@@ -64,9 +64,9 @@ class TestAgentActivityEvents:
 
         payload = event.model_dump()
 
-        assert payload["id"] == "legacy-status-2026-06-06T02:00:00"
+        assert payload["id"] == "event-status-2026-06-06T02:00:00"
         assert payload["sequence"] == 0
-        assert payload["call_id"] == "legacy"
+        assert payload["call_id"] == "event"
 
     def test_agent_activity_event_builder_preserves_order_and_call_id(self):
         first = routes._build_agent_activity_event(

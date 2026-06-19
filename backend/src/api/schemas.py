@@ -417,16 +417,16 @@ class AgentEventInfo(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def fill_legacy_identity_fields(cls, value: Any) -> Any:
+    def fill_missing_identity_fields(cls, value: Any) -> Any:
         if not isinstance(value, dict):
             return value
 
         data = dict(value)
         timestamp = str(data.get("timestamp") or "")
         event_type = str(data.get("type") or "agent_event")
-        data.setdefault("id", f"legacy-{event_type}-{timestamp}")
+        data.setdefault("id", f"event-{event_type}-{timestamp}")
         data.setdefault("sequence", 0)
-        data.setdefault("call_id", "legacy")
+        data.setdefault("call_id", "event")
         return data
 
 

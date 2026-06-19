@@ -417,6 +417,8 @@ class WebFetchSource:
 class DataSourceManager:
     """数据源管理器 - 统一调度所有数据源"""
 
+    SOURCE_SEARCH_TIMEOUT_SECONDS = 45
+
     def __init__(self):
         from src.core.config import settings
 
@@ -440,6 +442,24 @@ class DataSourceManager:
         self.last_search_status: Dict[str, Dict[str, Any]] = {}
         logger.info(f"数据源管理器初始化完成，可用数据源: {list(self.sources.keys())}")
 
+    async def _search_source_with_timeout(
+        self,
+        source_id: str,
+        source: DataSource,
+        query: SearchQuery,
+    ) -> List[PriorArtReference]:
+        try:
+            return await asyncio.wait_for(
+                source.search(query),
+                timeout=self.SOURCE_SEARCH_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            source.last_error = (
+                f"{source.config.name or source_id} 检索超过 "
+                f"{self.SOURCE_SEARCH_TIMEOUT_SECONDS} 秒"
+            )
+            raise
+
     async def search_all(self, query: SearchQuery) -> List[PriorArtReference]:
         """并行检索所有数据源"""
         databases = query.databases or list(self.sources.keys())
@@ -451,7 +471,7 @@ class DataSourceManager:
             source = self.sources.get(source_id)
             if source and source.config.enabled:
                 source.last_error = None
-                tasks.append(source.search(query))
+                tasks.append(self._search_source_with_timeout(source_id, source, query))
                 task_sources.append(source_id)
             else:
                 self.last_search_status[source_id] = {
@@ -469,12 +489,14 @@ class DataSourceManager:
         for i, result in enumerate(results):
             source_id = task_sources[i]
             if isinstance(result, Exception):
+                source = self.sources.get(source_id)
+                error = source.last_error if source and source.last_error else str(result)
                 self.last_search_status[source_id] = {
                     "success": False,
                     "count": 0,
-                    "error": str(result),
+                    "error": error or "数据源检索失败",
                 }
-                logger.warning(f"数据源 {source_id} 检索失败: {result}")
+                logger.warning(f"数据源 {source_id} 检索失败: {error or result}")
             else:
                 source = self.sources.get(source_id)
                 self.last_search_status[source_id] = {

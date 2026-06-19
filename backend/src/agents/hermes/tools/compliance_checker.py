@@ -34,6 +34,11 @@ class ComplianceCheckerTool(HermesTool):
                     description="专利文件内容（全文或指定部分）",
                     required=True,
                 ),
+                "drawings": HermesToolParameter(
+                    type="array",
+                    description="可选附图元数据数组，每项包含 figure_number/title/file_path 等字段",
+                    required=False,
+                ),
             },
         )
 
@@ -125,11 +130,11 @@ class ComplianceCheckerTool(HermesTool):
         JSON string would falsely report missing Chinese sections, so convert
         structured drafts into the same patent text used by hard-rule validators.
         """
-        drawings = kwargs.get("drawings") if isinstance(kwargs.get("drawings"), list) else []
+        drawings = self._extract_drawings(kwargs)
         if isinstance(patent_document, dict):
-            draft = patent_document
-            if not drawings and isinstance(draft.get("drawings"), list):
-                drawings = draft.get("drawings") or []
+            draft = self._extract_draft(patent_document)
+            if not drawings:
+                drawings = self._extract_drawings(patent_document, draft)
             return build_patent_text_from_draft(draft), drawings
 
         text = patent_document or ""
@@ -137,13 +142,88 @@ class ComplianceCheckerTool(HermesTool):
             stripped = text.strip()
             if stripped.startswith("{") and stripped.endswith("}"):
                 try:
-                    draft = json.loads(stripped)
-                    if isinstance(draft, dict):
-                        if not drawings and isinstance(draft.get("drawings"), list):
-                            drawings = draft.get("drawings") or []
+                    payload = json.loads(stripped)
+                    if isinstance(payload, dict):
+                        draft = self._extract_draft(payload)
+                        if not drawings:
+                            drawings = self._extract_drawings(payload, draft)
                         return build_patent_text_from_draft(draft), drawings
                 except json.JSONDecodeError:
                     pass
             return stripped, drawings
 
         return str(text), drawings
+
+    def _extract_draft(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Find the patent draft inside direct or nested review payloads."""
+        if not isinstance(payload, dict):
+            return {}
+        if self._looks_like_draft(payload):
+            return payload
+
+        for key in (
+            "patent_draft",
+            "draft",
+            "document",
+            "patent_document",
+            "current_draft",
+            "latest_draft",
+        ):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                if self._looks_like_draft(value):
+                    return value
+                nested = self._extract_draft(value)
+                if nested:
+                    return nested
+            if isinstance(value, str):
+                parsed = self._try_parse_json_object(value)
+                if parsed:
+                    nested = self._extract_draft(parsed)
+                    if nested:
+                        return nested
+        return payload
+
+    def _looks_like_draft(self, value: Dict[str, Any]) -> bool:
+        return any(key in value for key in ("claims", "description", "abstract", "drawings")) and any(
+            key in value for key in ("title", "patent_title", "claims", "description")
+        )
+
+    def _extract_drawings(
+        self,
+        payload: Dict[str, Any],
+        draft: Dict[str, Any] | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Collect drawing metadata from direct args, nested draft, or validation facts."""
+        for container in (payload, draft or {}):
+            if not isinstance(container, dict):
+                continue
+            drawings = container.get("drawings")
+            if isinstance(drawings, list):
+                normalized = [item for item in drawings if isinstance(item, dict)]
+                if normalized:
+                    return normalized
+
+        validation = payload.get("drawing_file_validation") if isinstance(payload, dict) else None
+        if isinstance(validation, dict) and isinstance(validation.get("items"), list):
+            items = [item for item in validation.get("items", []) if isinstance(item, dict)]
+            if items:
+                return [
+                    {
+                        "figure_number": str(item.get("figure_number") or ""),
+                        "title": str(item.get("title") or ""),
+                        "file_path": str(item.get("file_path") or ""),
+                    }
+                    for item in items
+                ]
+        return []
+
+    def _try_parse_json_object(self, value: str) -> Dict[str, Any]:
+        text = str(value or "").strip()
+        if not (text.startswith("{") and text.endswith("}")):
+            return {}
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
