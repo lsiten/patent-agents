@@ -1,90 +1,6 @@
 [
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T16:29:55.764418",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "unknown",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T16:29:55.769845",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "unknown",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.785146",
-    "iteration_count": 2,
-    "review_recommendation": "reject",
-    "review_issue_categories": [
-      "摘要需包含专利名称、技术领域、简化方案和技术效果",
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "附图需按当前专利内容逐图差异化生成并插入DOCX",
-      "最终DOCX路径、图片资源和下载可用性必须确认",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T16:29:55.800069",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "needs_attention",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.806069",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "unknown",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T16:29:55.821026",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "needs_attention",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "awaiting_user_decision",
-    "generated_at": "2026-06-19T16:29:55.827197",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "unknown",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
     "terminal_state": "awaiting_user_decision",
     "generated_at": "2026-06-19T16:29:55.832685",
     "iteration_count": 0,
@@ -359,6 +275,111 @@
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "success",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:05:51.654638",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "success",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:05:51.669406",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "success",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:05:51.690065",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "success",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:05:51.723290",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "success",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:05:52.370084",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "success",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:05:52.411577",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "success",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T17:05:52.445095",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
     "phase_status": "success",
     "checked_drawings": null
