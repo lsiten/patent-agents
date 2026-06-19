@@ -14,52 +14,25 @@ from src.api.schemas import (
     SystemConfigUpdateRequest,
     SystemStatusResponse,
 )
+from src.core.constants.environment import DEFAULT_ENVIRONMENT, ENV_FILE_BY_ENVIRONMENT
+from src.core.llm.providers import (
+    DEFAULT_IMAGE_GEN_PROVIDER,
+    DEFAULT_TEXT_LLM_PROVIDER,
+    IMAGE_GEN_ENV_MAP,
+    TEXT_LLM_ENV_MAP,
+)
 from src.knowledge.base import get_knowledge_base
 from src.models.enums import WorkflowState
 
 router = APIRouter(tags=["system"])
 
-_CONFIG_ENV_FILE_MAP: Dict[str, str] = {
-    "development": ".env",
-    "testing": ".env.testing",
-    "production": ".env.production",
-}
-
-_LLM_ENV_MAP: Dict[str, Dict[str, str]] = {
-    "openai": {
-        "api_key": "LLM_OPENAI_API_KEY",
-        "base_url": "LLM_OPENAI_BASE_URL",
-        "model_id": "LLM_OPENAI_MODEL",
-    },
-    "anthropic": {
-        "api_key": "LLM_ANTHROPIC_API_KEY",
-        "base_url": "LLM_ANTHROPIC_BASE_URL",
-        "model_id": "LLM_ANTHROPIC_MODEL",
-    },
-    "spark": {
-        "api_key": "LLM_SPARK_API_KEY",
-        "base_url": "LLM_SPARK_BASE_URL",
-        "model_id": "LLM_SPARK_MODEL",
-    },
-}
-
-_IMG_ENV_MAP: Dict[str, Dict[str, str]] = {
-    "azure_aoai": {
-        "api_key": "IMAGE_GEN_AZURE_AOAI_API_KEY",
-        "base_url": "IMAGE_GEN_AZURE_AOAI_BASE_URL",
-        "model_id": "IMAGE_GEN_AZURE_AOAI_MODEL_ID",
-    },
-    "openai": {
-        "api_key": "IMAGE_GEN_OPENAI_API_KEY",
-        "base_url": "IMAGE_GEN_OPENAI_BASE_URL",
-        "model_id": "IMAGE_GEN_OPENAI_MODEL_ID",
-    },
-}
+_LLM_ENV_MAP: Dict[str, Dict[str, str]] = dict(TEXT_LLM_ENV_MAP)
+_IMG_ENV_MAP: Dict[str, Dict[str, str]] = dict(IMAGE_GEN_ENV_MAP)
 
 
 def _get_env_file_path() -> tuple[str, str]:
-    env = os.getenv("ENVIRONMENT", "development")
-    filename = _CONFIG_ENV_FILE_MAP.get(env, ".env")
+    env = os.getenv("ENVIRONMENT", DEFAULT_ENVIRONMENT)
+    filename = ENV_FILE_BY_ENVIRONMENT.get(env, ENV_FILE_BY_ENVIRONMENT[DEFAULT_ENVIRONMENT])
     backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     return os.path.join(backend_dir, filename), env
 
@@ -109,8 +82,8 @@ def _read_config_from_env_file(env_path: str) -> SystemConfigResponse:
             configured=bool(api_key),
         )
 
-    llm_active = _get_env_value(values, "LLM_ACTIVE_PROVIDER") or "openai"
-    img_active = _get_env_value(values, "IMAGE_GEN_ACTIVE_PROVIDER") or "azure_aoai"
+    llm_active = _get_env_value(values, "LLM_ACTIVE_PROVIDER") or DEFAULT_TEXT_LLM_PROVIDER
+    img_active = _get_env_value(values, "IMAGE_GEN_ACTIVE_PROVIDER") or DEFAULT_IMAGE_GEN_PROVIDER
 
     return SystemConfigResponse(
         text_llm=ModelConfigSectionResponse(active_provider=llm_active, providers=llm_providers),

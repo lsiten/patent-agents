@@ -72,6 +72,10 @@ result = await agent.run_conversation("分析这个技术方案...")
 | 3 | system-config 默认 | `hermes_home/profiles/system-config/config.yaml` → `llm` / `image_gen` | 跨 agent 默认配置 |
 | 4 (最低) | 全局 settings | `src/core/config.py` → `LLMSettings` / `ImageGenSettings` 的 `active_provider` | 启动级默认配置 |
 
+内置 provider 清单不放在 agent 模块内，统一维护在
+`src/core/llm/providers/catalog.py`。新增文字模型或生图模型时，只能在那里登记
+provider 元数据、默认 base URL、默认模型和环境变量名；不能把 API key 或案例专用配置写入代码。
+
 #### YAML 配置示例（`hermes_home/profiles/patent_writer/config.yaml`）
 ```yaml
 llm:

@@ -9,6 +9,23 @@ from dotenv import load_dotenv
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
+from src.core.constants.environment import (
+    DEFAULT_ENVIRONMENT,
+    ENV_DEVELOPMENT,
+    ENV_FILE_BY_ENVIRONMENT,
+    ENV_PRODUCTION,
+    ENV_STAGING,
+    ENV_TESTING,
+)
+from src.core.llm.providers import (
+    DEFAULT_IMAGE_GEN_PROVIDER,
+    DEFAULT_TEXT_LLM_PROVIDER,
+    IMAGE_GEN_PROVIDER_DEFINITIONS,
+    IMAGE_GEN_PROVIDERS,
+    TEXT_LLM_PROVIDER_DEFINITIONS,
+    TEXT_LLM_PROVIDERS,
+)
+
 _backend_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 _selected_env_file = os.getenv("PATENT_AGENTS_ENV_FILE")
 
@@ -23,28 +40,23 @@ else:
     if os.path.isfile(_env_path):
         load_dotenv(_env_path)
 
-    if os.getenv("ENVIRONMENT") == "testing":
-        _test_env_path = os.path.join(_backend_root, ".env.testing")
+    if os.getenv("ENVIRONMENT") == ENV_TESTING:
+        _test_env_path = os.path.join(_backend_root, ENV_FILE_BY_ENVIRONMENT[ENV_TESTING])
         if os.path.isfile(_test_env_path):
             load_dotenv(_test_env_path, override=True)
 
-    if os.getenv("ENVIRONMENT") == "production":
-        _prod_env_path = os.path.join(_backend_root, ".env.production")
+    if os.getenv("ENVIRONMENT") == ENV_PRODUCTION:
+        _prod_env_path = os.path.join(_backend_root, ENV_FILE_BY_ENVIRONMENT[ENV_PRODUCTION])
         if os.path.isfile(_prod_env_path):
             load_dotenv(_prod_env_path, override=True)
 
 
 class Environment(str, Enum):
     """运行环境枚举"""
-    DEVELOPMENT = "development"
-    TESTING = "testing"
-    STAGING = "staging"
-    PRODUCTION = "production"
-
-
-# ── 所有已知供应商列表（用于校验等） ──
-TEXT_LLM_PROVIDERS = {"openai", "anthropic", "spark", "openai-spark"}
-IMAGE_GEN_PROVIDERS = {"azure_aoai", "openai"}
+    DEVELOPMENT = ENV_DEVELOPMENT
+    TESTING = ENV_TESTING
+    STAGING = ENV_STAGING
+    PRODUCTION = ENV_PRODUCTION
 
 
 class LogLevel(str, Enum):
@@ -92,51 +104,64 @@ class LLMSettings(BaseSettings):
 
     # 当前激活的供应商
     active_provider: str = Field(
-        default="openai", alias="LLM_ACTIVE_PROVIDER"
+        default=DEFAULT_TEXT_LLM_PROVIDER, alias="LLM_ACTIVE_PROVIDER"
     )
 
     # ── OpenAI / 兼容代理 ──
     openai_api_key: Optional[str] = Field(default=None, alias="LLM_OPENAI_API_KEY")
     openai_base_url: str = Field(
-        default="https://api.openai.com/v1",
+        default=TEXT_LLM_PROVIDER_DEFINITIONS["openai"].default_base_url,
         alias="LLM_OPENAI_BASE_URL"
     )
-    openai_model: str = Field(default="gpt-4-turbo-preview", alias="LLM_OPENAI_MODEL")
+    openai_model: str = Field(
+        default=TEXT_LLM_PROVIDER_DEFINITIONS["openai"].default_model,
+        alias="LLM_OPENAI_MODEL",
+    )
 
     # ── Anthropic Claude ──
     anthropic_api_key: Optional[str] = Field(default=None, alias="LLM_ANTHROPIC_API_KEY")
     anthropic_base_url: str = Field(
-        default="https://api.anthropic.com/v1",
+        default=TEXT_LLM_PROVIDER_DEFINITIONS["anthropic"].default_base_url,
         alias="LLM_ANTHROPIC_BASE_URL"
     )
     anthropic_model: str = Field(
-        default="claude-3-opus-20240229", alias="LLM_ANTHROPIC_MODEL"
+        default=TEXT_LLM_PROVIDER_DEFINITIONS["anthropic"].default_model,
+        alias="LLM_ANTHROPIC_MODEL",
     )
 
     # ── DeepSeek ──
     deepseek_api_key: Optional[str] = Field(default=None, alias="LLM_DEEPSEEK_API_KEY")
     deepseek_base_url: str = Field(
-        default="https://api.deepseek.com/v1",
+        default=TEXT_LLM_PROVIDER_DEFINITIONS["deepseek"].default_base_url,
         alias="LLM_DEEPSEEK_BASE_URL",
     )
-    deepseek_model: str = Field(default="deepseek-chat", alias="LLM_DEEPSEEK_MODEL")
+    deepseek_model: str = Field(
+        default=TEXT_LLM_PROVIDER_DEFINITIONS["deepseek"].default_model,
+        alias="LLM_DEEPSEEK_MODEL",
+    )
 
     # ── OpenRouter ──
     openrouter_api_key: Optional[str] = Field(default=None, alias="LLM_OPENROUTER_API_KEY")
     openrouter_base_url: str = Field(
-        default="https://openrouter.ai/api/v1",
+        default=TEXT_LLM_PROVIDER_DEFINITIONS["openrouter"].default_base_url,
         alias="LLM_OPENROUTER_BASE_URL",
     )
-    openrouter_model: str = Field(default="openrouter/auto", alias="LLM_OPENROUTER_MODEL")
+    openrouter_model: str = Field(
+        default=TEXT_LLM_PROVIDER_DEFINITIONS["openrouter"].default_model,
+        alias="LLM_OPENROUTER_MODEL",
+    )
 
     # ── 讯飞星火 (Spark) ──
     spark_api_key: Optional[str] = Field(default=None, alias="LLM_SPARK_API_KEY")
     spark_api_secret: Optional[str] = Field(default=None, alias="LLM_SPARK_API_SECRET")
     spark_base_url: str = Field(
-        default="https://spark-api-open.xf-yun.com/v1",
+        default=TEXT_LLM_PROVIDER_DEFINITIONS["spark"].default_base_url,
         alias="LLM_SPARK_BASE_URL",
     )
-    spark_model: str = Field(default="generalv3.5", alias="LLM_SPARK_MODEL")
+    spark_model: str = Field(
+        default=TEXT_LLM_PROVIDER_DEFINITIONS["spark"].default_model,
+        alias="LLM_SPARK_MODEL",
+    )
 
     # ── API 模式（覆盖自动检测） ──
     api_mode: Optional[str] = Field(
@@ -169,13 +194,21 @@ class LLMSettings(BaseSettings):
                 combined_key = None
             return {
                 "provider": "openai",  # 返回 openai 作为 provider
-                "base_url": getattr(self, "spark_base_url", "https://spark-api-open.xf-yun.com/v1"),
+                "base_url": getattr(
+                    self,
+                    "spark_base_url",
+                    TEXT_LLM_PROVIDER_DEFINITIONS["spark"].default_base_url,
+                ),
                 "api_key": combined_key,
-                "model_id": getattr(self, "spark_model", "lite"),
+                "model_id": getattr(
+                    self,
+                    "spark_model",
+                    TEXT_LLM_PROVIDER_DEFINITIONS["spark"].default_model,
+                ),
             }
         
         if p not in TEXT_LLM_PROVIDERS:
-            p = "openai"
+            p = DEFAULT_TEXT_LLM_PROVIDER
         
         # 讯飞星火需要特殊处理：组合 APIKey:APISecret
         if p == "spark":
@@ -242,43 +275,46 @@ class ImageGenSettings(BaseSettings):
 
     # 当前激活的供应商
     active_provider: str = Field(
-        default="azure_aoai", alias="IMAGE_GEN_ACTIVE_PROVIDER",
+        default=DEFAULT_IMAGE_GEN_PROVIDER, alias="IMAGE_GEN_ACTIVE_PROVIDER",
     )
 
     # ── Azure OpenAI (default, intsig proxy for gpt-image-2) ──
     azure_aoai_base_url: str = Field(
-        default="http://deepseek-work.intsig.net/proxy/azure/gpt/v1",
+        default=IMAGE_GEN_PROVIDER_DEFINITIONS["azure_aoai"].default_base_url,
         alias="IMAGE_GEN_AZURE_AOAI_BASE_URL",
     )
     azure_aoai_api_key: Optional[str] = Field(
         default=None, alias="IMAGE_GEN_AZURE_AOAI_API_KEY",
     )
     azure_aoai_model_id: str = Field(
-        default="gpt-image-2", alias="IMAGE_GEN_AZURE_AOAI_MODEL_ID",
+        default=IMAGE_GEN_PROVIDER_DEFINITIONS["azure_aoai"].default_model,
+        alias="IMAGE_GEN_AZURE_AOAI_MODEL_ID",
     )
 
     # ── OpenAI (DALL-E) ──
     openai_base_url: str = Field(
-        default="https://api.openai.com/v1",
+        default=IMAGE_GEN_PROVIDER_DEFINITIONS["openai"].default_base_url,
         alias="IMAGE_GEN_OPENAI_BASE_URL",
     )
     openai_api_key: Optional[str] = Field(
         default=None, alias="IMAGE_GEN_OPENAI_API_KEY",
     )
     openai_model_id: str = Field(
-        default="dall-e-3", alias="IMAGE_GEN_OPENAI_MODEL_ID",
+        default=IMAGE_GEN_PROVIDER_DEFINITIONS["openai"].default_model,
+        alias="IMAGE_GEN_OPENAI_MODEL_ID",
     )
 
     # ── Stability AI (Stable Diffusion) ──
     stability_base_url: str = Field(
-        default="https://api.stability.ai/v1",
+        default=IMAGE_GEN_PROVIDER_DEFINITIONS["stability"].default_base_url,
         alias="IMAGE_GEN_STABILITY_BASE_URL",
     )
     stability_api_key: Optional[str] = Field(
         default=None, alias="IMAGE_GEN_STABILITY_API_KEY",
     )
     stability_model_id: str = Field(
-        default="stable-diffusion-3", alias="IMAGE_GEN_STABILITY_MODEL_ID",
+        default=IMAGE_GEN_PROVIDER_DEFINITIONS["stability"].default_model,
+        alias="IMAGE_GEN_STABILITY_MODEL_ID",
     )
 
     model_config = {"env_prefix": "IMAGE_GEN_"}
@@ -289,7 +325,7 @@ class ImageGenSettings(BaseSettings):
         """获取指定供应商（或当前激活供应商）的连接配置"""
         p = provider or self.active_provider
         if p not in IMAGE_GEN_PROVIDERS:
-            p = "azure_aoai"
+            p = DEFAULT_IMAGE_GEN_PROVIDER
         return {
             "base_url": getattr(self, f"{p}_base_url", None),
             "api_key": getattr(self, f"{p}_api_key", None),
@@ -507,7 +543,7 @@ class AppSettings(BaseSettings):
     port: int = Field(default=8000, ge=1, le=65535, alias="PORT")
     debug: bool = Field(default=True, alias="DEBUG")
     environment: Environment = Field(
-        default=Environment.DEVELOPMENT,
+        default=Environment(DEFAULT_ENVIRONMENT),
         alias="ENVIRONMENT",
         description="运行环境"
     )
@@ -596,8 +632,10 @@ def reload_settings() -> None:
     """
     from dotenv import load_dotenv
 
+    selected_env = os.getenv("ENVIRONMENT", DEFAULT_ENVIRONMENT)
+    env_file = ENV_FILE_BY_ENVIRONMENT.get(selected_env, ENV_FILE_BY_ENVIRONMENT[DEFAULT_ENVIRONMENT])
     env_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))), env_file
     )
     if os.path.isfile(env_path):
         load_dotenv(env_path, override=True)
@@ -605,3 +643,10 @@ def reload_settings() -> None:
     fresh = AppSettings()
     for field_name in settings.model_fields:
         setattr(settings, field_name, getattr(fresh, field_name))
+
+    try:
+        from src.core.llm.client import reset_llm_service
+
+        reset_llm_service()
+    except Exception:
+        pass

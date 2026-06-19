@@ -3,8 +3,7 @@
  */
 
 import type { AgentConfig, AgentEvent, AgentWorkEvent, AgentTool, AgentSkill, AgentTimer, AgentMemory, OrgNode, BrowseDirResponse, FileContentResponse, SystemConfigResponse, SystemConfigUpdateRequest, EnvInfoResponse, ResolvedLLMConfig, ResolvedImageGenConfig, AgentLLMConfigUpdate, AgentImageGenConfigUpdate, AgentModelConfigTestResponse } from '@/types';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+import { API_BASE_URL, CHAT_STREAM_DEFAULTS, SSE_RECONNECT } from '@/lib/constants/runtime';
 
 function apiOrigin(): string {
   try {
@@ -787,10 +786,6 @@ export const systemApi = {
 };
 
 // ============ SSE Event Stream ============
-const SSE_MAX_RETRIES = 8;
-const SSE_INITIAL_DELAY = 1000;
-const SSE_MAX_DELAY = 30000;
-
 export function createEventStream(
   task_id: string,
   onEvent: (event: any) => void,
@@ -840,12 +835,15 @@ export function createEventStream(
     currentEventSource.onerror = () => {
       if (closed) return;
       retryCount++;
-      if (retryCount > SSE_MAX_RETRIES) {
-        console.error(`SSE: max retries (${SSE_MAX_RETRIES}) exceeded, giving up`);
+      if (retryCount > SSE_RECONNECT.maxRetries) {
+        console.error(`SSE: max retries (${SSE_RECONNECT.maxRetries}) exceeded, giving up`);
         cleanup();
         return;
       }
-      const delay = Math.min(SSE_INITIAL_DELAY * Math.pow(2, retryCount - 1), SSE_MAX_DELAY);
+      const delay = Math.min(
+        SSE_RECONNECT.initialDelayMs * Math.pow(2, retryCount - 1),
+        SSE_RECONNECT.maxDelayMs,
+      );
       if (currentEventSource) {
         currentEventSource.close();
         currentEventSource = null;
@@ -1125,9 +1123,9 @@ export const conversationApi = {
     options?: { timeout?: number; maxRetries?: number; stallTimeout?: number },
   ): { abort: () => void } => {
     const controller = new AbortController();
-    const timeout = options?.timeout ?? 30000;
-    const maxRetries = options?.maxRetries ?? 3;
-    const stallTimeout = options?.stallTimeout ?? 60000;
+    const timeout = options?.timeout ?? CHAT_STREAM_DEFAULTS.timeoutMs;
+    const maxRetries = options?.maxRetries ?? CHAT_STREAM_DEFAULTS.maxRetries;
+    const stallTimeout = options?.stallTimeout ?? CHAT_STREAM_DEFAULTS.stallTimeoutMs;
 
     // Timeout timer — fires once if initial fetch takes too long
     let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1142,7 +1140,10 @@ export const conversationApi = {
         if (attempt > 0) {
           callbacks.onStatusChange?.('connecting');
           // Exponential backoff: 1s, 2s, 4s
-          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+          const delay = Math.min(
+            CHAT_STREAM_DEFAULTS.initialBackoffMs * Math.pow(2, attempt - 1),
+            CHAT_STREAM_DEFAULTS.maxBackoffMs,
+          );
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
 

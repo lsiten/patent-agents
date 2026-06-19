@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, status, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
+from src.core.llm.providers import TEXT_LLM_PROVIDER_DEFINITIONS
 
 from .schemas import (
     ChatMessageRequest,
@@ -163,6 +164,7 @@ def _repair_truncated_json(json_str: str) -> dict | None:
 
 
 router = APIRouter(tags=["patent-agents"])
+DEFAULT_TEXT_MODEL = TEXT_LLM_PROVIDER_DEFINITIONS["openai"].default_model
 router.include_router(search_routes.router)
 router.include_router(system_routes.router)
 router.include_router(dashboard_routes.router)
@@ -3522,7 +3524,7 @@ async def test_agent_llm_config(
         provider=resolved.get("provider", ""),
         base_url=resolved.get("base_url", "") or "",
         api_key=resolved.get("api_key", "") or "",
-        model=resolved.get("model_id", "") or "gpt-4-turbo-preview",
+        model=resolved.get("model_id", "") or DEFAULT_TEXT_MODEL,
     )
 
 

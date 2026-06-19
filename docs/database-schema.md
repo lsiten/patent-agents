@@ -420,7 +420,8 @@ CREATE TABLE agents (
     agent_type VARCHAR(32) NOT NULL, -- orchestrator, specialist, assistant
     role VARCHAR(64) NOT NULL,
     system_prompt TEXT NOT NULL,
-    model VARCHAR(64) NOT NULL DEFAULT 'gpt-4-turbo',
+    llm_provider VARCHAR(64) NOT NULL DEFAULT 'openai',
+    model VARCHAR(128) NOT NULL DEFAULT 'provider-configured-model',
     temperature NUMERIC(3,2) NOT NULL DEFAULT 0.7,
     max_tokens INT NOT NULL DEFAULT 2048,
     top_p NUMERIC(3,2) DEFAULT 1.0,

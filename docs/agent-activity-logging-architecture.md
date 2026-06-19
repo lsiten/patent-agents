@@ -476,18 +476,18 @@ onThinking: (_data) => {
 | 文件 | 变更内容 |
 |------|----------|
 | `backend/src/api/schemas.py` | 新增 `AgentEventInfo`、`ConversationMessage.agent_events` |
-| `backend/src/api/routes.py` | 4 个 SSE 回调收集 agent_events、持久化逻辑修复 |
+| `backend/src/api/routers/` | SSE 回调收集 agent_events、持久化逻辑修复 |
 | `frontend/types/index.ts` | 新增 `AgentEvent`、`ChatMessage.agent_events` |
-| `frontend/lib/api.ts` | 新增 `onStatus` 回调类型和 SSE 事件分发 |
-| `frontend/app/chat/page.tsx` | 集成 agent_events 全链路（初始化→追加→渲染→恢复） |
+| `frontend/lib/api/` | 新增 `onStatus` 回调类型和 SSE 事件分发 |
+| `frontend/components/chat/ChatWorkspace.tsx` | 集成 agent_events 全链路（初始化→追加→渲染→恢复） |
 
 ### 相关现有文件
 
 | 文件 | 说明 |
 |------|------|
 | `backend/src/core/events.py` | 事件总线（`InMemoryEventBus` / `RedisEventBus`） |
-| `backend/src/core/workflow_engine.py` | 工作流引擎（含独立的事件持久化路径） |
-| `frontend/components/workflow/MessageLog.tsx` | 工作流场景的日志组件 |
+| `backend/src/core/workflow/` | LangGraph 工作流运行时、AG-UI 事件、阶段轮次持久化 |
+| `frontend/components/workflow/AgentTerminalLog.tsx` | 工作流场景的日志组件 |
 
 ---
 

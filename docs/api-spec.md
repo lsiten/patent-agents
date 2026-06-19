@@ -490,7 +490,8 @@ Authorization: Bearer {token}
         "name": "需求分析Agent",
         "description": "分析技术需求，提取创新点",
         "type": "specialist",
-        "model": "gpt-4-turbo",
+        "llm_provider": "openai",
+        "model": "provider-configured-model",
         "is_enabled": true,
         "created_at": "2024-01-20T10:00:00Z"
       }
@@ -516,7 +517,8 @@ Authorization: Bearer {token}
     "name": "需求分析Agent",
     "description": "...",
     "system_prompt": "...",
-    "model": "gpt-4-turbo",
+    "llm_provider": "openai",
+    "model": "provider-configured-model",
     "temperature": 0.7,
     "max_tokens": 2048,
     "tools": [...],
@@ -537,7 +539,8 @@ Authorization: Bearer {token}
   "description": "描述",
   "type": "specialist",
   "system_prompt": "系统提示词",
-  "model": "gpt-4-turbo",
+  "llm_provider": "openai",
+  "model": "provider-configured-model",
   "temperature": 0.7,
   "max_tokens": 2048
 }

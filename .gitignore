@@ -16,6 +16,9 @@ pip-delete-this-directory.txt
 # === Node.js / Frontend ===
 node_modules/
 .next/
+.next-dev/
+.next-testing/
+.next-production/
 out/
 build/
 dist/
@@ -83,6 +86,7 @@ coverage.xml
 # === Local Runtime / Worktrees ===
 .runtime/
 .local-ignore/
+.tmp/
 
 # === Playwright MCP debug artifacts ===
 .playwright-mcp/

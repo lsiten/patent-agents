@@ -2,7 +2,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.058009",
+    "generated_at": "2026-06-19T19:59:15.061871",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -19,7 +19,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.103477",
+    "generated_at": "2026-06-19T19:59:15.092546",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -36,7 +36,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.152037",
+    "generated_at": "2026-06-19T19:59:15.129581",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -53,7 +53,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.177745",
+    "generated_at": "2026-06-19T19:59:15.153332",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -70,7 +70,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.208681",
+    "generated_at": "2026-06-19T19:59:15.175023",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -87,7 +87,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.241642",
+    "generated_at": "2026-06-19T19:59:15.196097",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -104,7 +104,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.307568",
+    "generated_at": "2026-06-19T19:59:15.217662",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -121,7 +121,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.364882",
+    "generated_at": "2026-06-19T19:59:15.240496",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -138,7 +138,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.402196",
+    "generated_at": "2026-06-19T19:59:15.262646",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -155,7 +155,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.469176",
+    "generated_at": "2026-06-19T19:59:15.287005",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -172,7 +172,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.509177",
+    "generated_at": "2026-06-19T20:36:31.937357",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -189,7 +189,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.532860",
+    "generated_at": "2026-06-19T21:14:06.914623",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -206,7 +206,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.560762",
+    "generated_at": "2026-06-19T21:14:06.940749",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -223,7 +223,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.591109",
+    "generated_at": "2026-06-19T21:14:06.973772",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -240,7 +240,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.619621",
+    "generated_at": "2026-06-19T21:14:07.007045",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -257,7 +257,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.653034",
+    "generated_at": "2026-06-19T21:14:07.045340",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -274,7 +274,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.684221",
+    "generated_at": "2026-06-19T21:14:07.077645",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -291,7 +291,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.718460",
+    "generated_at": "2026-06-19T21:14:07.108113",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -308,7 +308,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.743426",
+    "generated_at": "2026-06-19T21:14:07.153380",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -324,145 +324,189 @@
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:18:22.158862",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "needs_attention",
-    "has_drawings": false,
-    "drawing_count": 0,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T18:18:22.194664",
+    "generated_at": "2026-06-19T21:14:07.184419",
     "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [],
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
     "phase_status": "success",
-    "has_drawings": false,
-    "drawing_count": 0,
+    "has_drawings": true,
+    "drawing_count": 6,
     "has_final_document": true
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:20:05.194103",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "needs_attention",
-    "has_drawings": false,
-    "drawing_count": 0,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T18:20:05.227341",
+    "generated_at": "2026-06-19T21:14:07.208260",
     "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [],
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
     "phase_status": "success",
-    "has_drawings": false,
-    "drawing_count": 0,
+    "has_drawings": true,
+    "drawing_count": 6,
     "has_final_document": true
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:24:55.981396",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "needs_attention",
-    "has_drawings": false,
-    "drawing_count": 0,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T18:24:56.019771",
+    "generated_at": "2026-06-19T21:14:07.239558",
     "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [],
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
     "phase_status": "success",
-    "has_drawings": false,
-    "drawing_count": 0,
+    "has_drawings": true,
+    "drawing_count": 6,
     "has_final_document": true
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:28:58.369718",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.266980",
     "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "unknown",
-    "has_drawings": false,
-    "drawing_count": 0,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:28:58.381248",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "unknown",
-    "has_drawings": false,
-    "drawing_count": 0,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:29:04.609299",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "unknown",
-    "has_drawings": false,
-    "drawing_count": 0,
-    "has_final_document": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:52:26.712189",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
-    "phase_status": "needs_attention",
-    "has_drawings": false,
-    "drawing_count": 0,
-    "has_final_document": false
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": true
   },
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T18:52:26.739679",
+    "generated_at": "2026-06-19T21:14:07.289025",
     "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [],
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
     "phase_status": "success",
-    "has_drawings": false,
-    "drawing_count": 0,
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.309899",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.328897",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.347197",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.370819",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.391236",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
+    "has_final_document": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.412623",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "按章节分步撰写，附图逐图差异化生成，并在 DOCX 对应位置插入",
+    "phase_status": "success",
+    "has_drawings": true,
+    "drawing_count": 6,
     "has_final_document": true
   }
 ]

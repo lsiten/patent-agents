@@ -7,6 +7,8 @@ from typing import Optional
 from sqlalchemy import String, Text, Float, Integer, Boolean, ForeignKey, UniqueConstraint, JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.core.llm.providers import TEXT_LLM_PROVIDER_DEFINITIONS
+
 from .base import Base, UUIDMixin, TimestampMixin, SoftDeleteMixin
 
 
@@ -24,7 +26,10 @@ class Agent(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     agent_type: Mapped[str] = mapped_column(String(32), nullable=False)  # orchestrator, specialist, assistant
     role: Mapped[str] = mapped_column(String(64), nullable=False)
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    model: Mapped[str] = mapped_column(String(64), default="gpt-4-turbo")
+    model: Mapped[str] = mapped_column(
+        String(128),
+        default=TEXT_LLM_PROVIDER_DEFINITIONS["openai"].default_model,
+    )
     temperature: Mapped[float] = mapped_column(Float, default=0.7)
     max_tokens: Mapped[int] = mapped_column(Integer, default=2048)
     top_p: Mapped[float] = mapped_column(Float, default=1.0)

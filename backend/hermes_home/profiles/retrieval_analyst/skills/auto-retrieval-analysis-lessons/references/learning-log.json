@@ -2,7 +2,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.057329",
+    "generated_at": "2026-06-19T19:59:15.061241",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -18,7 +18,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.101971",
+    "generated_at": "2026-06-19T19:59:15.091909",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -34,7 +34,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.151512",
+    "generated_at": "2026-06-19T19:59:15.127086",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -50,7 +50,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.177271",
+    "generated_at": "2026-06-19T19:59:15.152829",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -66,7 +66,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.208143",
+    "generated_at": "2026-06-19T19:59:15.174532",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -82,7 +82,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.241136",
+    "generated_at": "2026-06-19T19:59:15.195622",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -98,7 +98,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.306624",
+    "generated_at": "2026-06-19T19:59:15.217210",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -114,7 +114,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.362218",
+    "generated_at": "2026-06-19T19:59:15.240001",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -130,7 +130,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.401456",
+    "generated_at": "2026-06-19T19:59:15.262133",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -146,7 +146,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.467705",
+    "generated_at": "2026-06-19T19:59:15.286531",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -162,7 +162,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.507800",
+    "generated_at": "2026-06-19T20:36:31.936663",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -178,7 +178,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.532355",
+    "generated_at": "2026-06-19T21:14:06.914065",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -194,7 +194,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.559786",
+    "generated_at": "2026-06-19T21:14:06.940222",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -210,7 +210,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.590431",
+    "generated_at": "2026-06-19T21:14:06.973279",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -226,7 +226,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.617861",
+    "generated_at": "2026-06-19T21:14:07.005153",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -242,7 +242,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.652273",
+    "generated_at": "2026-06-19T21:14:07.043558",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -258,7 +258,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.683647",
+    "generated_at": "2026-06-19T21:14:07.076431",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -274,7 +274,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.717993",
+    "generated_at": "2026-06-19T21:14:07.107530",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -290,7 +290,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.742962",
+    "generated_at": "2026-06-19T21:14:07.152902",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -305,11 +305,15 @@
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:18:22.157773",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.183249",
     "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
     "phase_status": "success",
     "has_search_strategy": true,
@@ -318,22 +322,14 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T18:18:22.194079",
+    "generated_at": "2026-06-19T21:14:07.207783",
     "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:20:05.193277",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
     "phase_status": "success",
     "has_search_strategy": true,
@@ -342,22 +338,14 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T18:20:05.226758",
+    "generated_at": "2026-06-19T21:14:07.237468",
     "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:24:55.980841",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
     "phase_status": "success",
     "has_search_strategy": true,
@@ -366,58 +354,14 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T18:24:56.019322",
+    "generated_at": "2026-06-19T21:14:07.266379",
     "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "success",
-    "has_search_strategy": true,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:28:58.369053",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "unknown",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:28:58.380698",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "unknown",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:29:04.608014",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
-    "phase_status": "unknown",
-    "has_search_strategy": false,
-    "key_references_count": 0
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:52:26.711635",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
     "phase_status": "success",
     "has_search_strategy": true,
@@ -426,10 +370,110 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T18:52:26.739192",
+    "generated_at": "2026-06-19T21:14:07.288256",
     "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [],
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.309468",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.328429",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.346773",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.370148",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.390732",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
+    "phase_status": "success",
+    "has_search_strategy": true,
+    "key_references_count": 0
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.412170",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "围绕技术主题构造关键词、同义词和检索式，沉淀先有技术对比角度",
     "phase_status": "success",
     "has_search_strategy": true,

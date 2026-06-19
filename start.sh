@@ -3,7 +3,7 @@
 # 专利智脑 - 启动脚本
 # Usage:
 #   ./start.sh dev          # 启动开发环境 (frontend:3000, backend:8000)
-#   ./start.sh testing      # 启动测试环境 (frontend:3000, backend:8000, ENVIRONMENT=testing)
+#   ./start.sh test         # 启动测试环境 (frontend:3100, backend:8100, ENVIRONMENT=testing)
 #   ./start.sh production   # 启动生产环境 (frontend:10001, backend:10002, ENVIRONMENT=production)
 #   ./start.sh stop [env]   # 停止服务 (all/dev/testing/production)
 #   ./start.sh backend      # 仅启动后端 (默认 dev)
@@ -24,48 +24,53 @@ NC='\033[0m'
 # ── 环境配置 ──────────────────────────────────────────────
 # 默认值 (dev)
 ENV_MODE="dev"
+ENVIRONMENT_VALUE="development"
 BACKEND_PORT=8000
 FRONTEND_PORT=3000
 BACKEND_TITLE="Dev"
 FRONTEND_ENV_FILE="$PROJECT_ROOT/frontend/.env.development"
 BACKEND_ENV_FILE="$PROJECT_ROOT/backend/.env"
+FRONTEND_DIST_DIR=".next-dev"
 
 # ── 函数: 解析环境参数 ────────────────────────────────────
 parse_env() {
     case "${1:-dev}" in
         dev)
             ENV_MODE="dev"
-            ENV_VAR=""
+            ENVIRONMENT_VALUE="development"
             BACKEND_PORT=8000
             FRONTEND_PORT=3000
             BACKEND_TITLE="Dev"
             FRONTEND_API_URL="http://localhost:8000/api/v1"
             FRONTEND_ENV_FILE="$PROJECT_ROOT/frontend/.env.development"
             BACKEND_ENV_FILE="$PROJECT_ROOT/backend/.env"
+            FRONTEND_DIST_DIR=".next-dev"
             ;;
-        testing)
+        testing|test)
             ENV_MODE="testing"
-            ENV_VAR="ENVIRONMENT=testing"
-            BACKEND_PORT=8000
-            FRONTEND_PORT=3000
+            ENVIRONMENT_VALUE="testing"
+            BACKEND_PORT=8100
+            FRONTEND_PORT=3100
             BACKEND_TITLE="Testing"
-            FRONTEND_API_URL="http://localhost:8000/api/v1"
-            FRONTEND_ENV_FILE="$PROJECT_ROOT/frontend/.env.development"
+            FRONTEND_API_URL="http://localhost:8100/api/v1"
+            FRONTEND_ENV_FILE="$PROJECT_ROOT/frontend/.env.testing"
             BACKEND_ENV_FILE="$PROJECT_ROOT/backend/.env.testing"
+            FRONTEND_DIST_DIR=".next-testing"
             ;;
         production)
             ENV_MODE="production"
-            ENV_VAR="ENVIRONMENT=production"
+            ENVIRONMENT_VALUE="production"
             BACKEND_PORT=10002
             FRONTEND_PORT=10001
             BACKEND_TITLE="Production"
-            FRONTEND_API_URL="https://patent-api.lene.fun/api/v1"
+            FRONTEND_API_URL="http://localhost:10002/api/v1"
             FRONTEND_ENV_FILE="$PROJECT_ROOT/frontend/.env.production"
             BACKEND_ENV_FILE="$PROJECT_ROOT/backend/.env.production"
+            FRONTEND_DIST_DIR=".next-production"
             ;;
         *)
             echo -e "${RED}❌ 未知环境: $1${NC}"
-            echo "可用选项: dev, testing, production"
+            echo "可用选项: dev, test, testing, production"
             exit 1
             ;;
     esac
@@ -122,8 +127,7 @@ assert_backend_env_file() {
 
 assert_frontend_env_file() {
     if [ ! -f "$FRONTEND_ENV_FILE" ]; then
-        echo -e "${RED}❌ 前端环境文件不存在: ${FRONTEND_ENV_FILE}${NC}"
-        exit 1
+        echo -e "${YELLOW}⚠ 前端环境文件不存在: ${FRONTEND_ENV_FILE}，将使用启动脚本注入的前端运行时配置${NC}"
     fi
 }
 
@@ -254,7 +258,7 @@ start_backend() {
     echo "   Docs:  http://localhost:${BACKEND_PORT}/docs"
     echo ""
 
-    PATENT_AGENTS_ENV_FILE="$BACKEND_ENV_FILE" python main.py
+    ENVIRONMENT="$ENVIRONMENT_VALUE" PATENT_AGENTS_ENV_FILE="$BACKEND_ENV_FILE" python main.py
 }
 
 # ── 启动前端 ──────────────────────────────────────────────
@@ -278,15 +282,16 @@ start_frontend() {
     echo "   端口:  ${FRONTEND_PORT}"
     echo "   URL:   http://localhost:${FRONTEND_PORT}"
     echo "   API:   ${FRONTEND_API_URL}"
+    echo "   构建目录: ${FRONTEND_DIST_DIR}"
     echo ""
 
     if [ "$ENV_MODE" = "production" ]; then
         echo "📦 构建生产版本..."
-        npx next build
+        NEXT_PUBLIC_API_URL="${FRONTEND_API_URL}" NEXT_DIST_DIR="${FRONTEND_DIST_DIR}" npx next build
         echo "🚀 启动生产服务器..."
-        npx next start -p "${FRONTEND_PORT}"
+        NEXT_PUBLIC_API_URL="${FRONTEND_API_URL}" NEXT_DIST_DIR="${FRONTEND_DIST_DIR}" npx next start -p "${FRONTEND_PORT}"
     else
-        npx next dev -p "${FRONTEND_PORT}"
+        NEXT_PUBLIC_API_URL="${FRONTEND_API_URL}" NEXT_DIST_DIR="${FRONTEND_DIST_DIR}" npx next dev -p "${FRONTEND_PORT}"
     fi
 }
 
@@ -342,7 +347,7 @@ start_all() {
     echo "📋 后端日志: ${BACKEND_LOG}"
     echo ""
 
-    PATENT_AGENTS_ENV_FILE="$BACKEND_ENV_FILE" nohup python main.py > "$BACKEND_LOG" 2>&1 &
+    ENVIRONMENT="$ENVIRONMENT_VALUE" PATENT_AGENTS_ENV_FILE="$BACKEND_ENV_FILE" nohup python main.py > "$BACKEND_LOG" 2>&1 &
     BACKEND_PID=$!
     write_pid "$ENV_MODE" backend "$BACKEND_PID"
     echo -e "${GREEN}✓ 后端已启动 (PID: ${BACKEND_PID})${NC}"
@@ -356,6 +361,7 @@ start_all() {
     echo ""
     echo -e "🎨 启动前端..."
     echo "   API:   ${FRONTEND_API_URL}"
+    echo "   构建目录: ${FRONTEND_DIST_DIR}"
     echo ""
 
     FRONTEND_LOG="$(log_file "$ENV_MODE" frontend)"
@@ -363,11 +369,11 @@ start_all() {
 
     if [ "$ENV_MODE" = "production" ]; then
         echo "📦 构建生产版本..."
-        npx next build
+        NEXT_PUBLIC_API_URL="${FRONTEND_API_URL}" NEXT_DIST_DIR="${FRONTEND_DIST_DIR}" npx next build
         echo "🚀 启动生产服务器..."
-        nohup npx next start -p "${FRONTEND_PORT}" > "$FRONTEND_LOG" 2>&1 &
+        nohup env NEXT_PUBLIC_API_URL="${FRONTEND_API_URL}" NEXT_DIST_DIR="${FRONTEND_DIST_DIR}" npx next start -p "${FRONTEND_PORT}" > "$FRONTEND_LOG" 2>&1 &
     else
-        nohup npx next dev -p "${FRONTEND_PORT}" > "$FRONTEND_LOG" 2>&1 &
+        nohup env NEXT_PUBLIC_API_URL="${FRONTEND_API_URL}" NEXT_DIST_DIR="${FRONTEND_DIST_DIR}" npx next dev -p "${FRONTEND_PORT}" > "$FRONTEND_LOG" 2>&1 &
     fi
     FRONTEND_PID=$!
     write_pid "$ENV_MODE" frontend "$FRONTEND_PID"
@@ -388,7 +394,7 @@ stop_env() {
         dev|development)
             stop_recorded_env dev
             ;;
-        testing)
+        testing|test)
             stop_recorded_env testing
             ;;
         production|prod)
@@ -401,7 +407,7 @@ stop_env() {
             ;;
         *)
             echo -e "${RED}❌ 未知环境: $env_mode${NC}"
-            echo "可用选项: dev, testing, production, all"
+            echo "可用选项: dev, test, testing, production, all"
             exit 1
             ;;
     esac
@@ -412,7 +418,7 @@ case "${1:-help}" in
     dev|development)
         start_all dev
         ;;
-    testing)
+    testing|test)
         start_all testing
         ;;
     production|prod)
@@ -434,7 +440,8 @@ case "${1:-help}" in
     help|--help|-h)
         echo "使用方法:"
         echo "  ./start.sh dev          # 启动开发环境 (frontend:3000, backend:8000)"
-        echo "  ./start.sh testing      # 启动测试环境 (frontend:3000, backend:8000)"
+        echo "  ./start.sh test         # 启动测试环境 (frontend:3100, backend:8100)"
+        echo "  ./start.sh testing      # 启动测试环境别名"
         echo "  ./start.sh production   # 启动生产环境 (frontend:10001, backend:10002)"
         echo "  ./start.sh stop [env]   # 停止服务 (all/dev/testing/production)"
         echo ""

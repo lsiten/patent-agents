@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 
 from src.core.config import settings
+from src.core.llm.providers import TEXT_LLM_PROVIDER_DEFINITIONS
 from src.core.logging import get_logger
 
 logger = get_logger("llm_client")
@@ -455,19 +456,19 @@ class AnthropicClient(BaseLLMClient):
         await self._init_client()
 
         if self._client is None:
-            raise LLMAuthError("OpenAI API key or package is not configured")
+            raise LLMAuthError("Anthropic API key or package is not configured")
 
         model = model or self.default_model
         temperature = temperature if temperature is not None else self.default_temperature
         max_tokens = max_tokens or self.default_max_tokens
 
-        openai_messages = [m.to_openai_format() for m in messages]
+        system_text, anthropic_messages = self._extract_system_and_messages(messages)
 
         for attempt in range(self.max_retries + 1):
             try:
                 request_kwargs = {
                     "model": model,
-                    "messages": openai_messages,
+                    "messages": anthropic_messages,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                 }
@@ -618,13 +619,37 @@ class LLMClientFactory:
         return cls._instances[provider]
 
     @classmethod
+    def get_openai_compatible_client(cls, provider_id: str) -> BaseLLMClient:
+        """Create an OpenAI SDK client for OpenAI-compatible configured providers."""
+        provider = TEXT_LLM_PROVIDER_DEFINITIONS.get(provider_id)
+        if provider and not provider.openai_compatible:
+            raise ValueError(f"Provider is not OpenAI-compatible: {provider_id}")
+
+        instance_key = LLMProvider.OPENAI
+        provider_config = settings.llm.get_provider_config(provider_id)
+        cls._instances[instance_key] = OpenAIClient(
+            api_key=provider_config.get("api_key"),
+            base_url=provider_config.get("base_url"),
+            model=provider_config.get("model_id"),
+        )
+        logger.info(
+            "OpenAI-compatible client initialized",
+            provider=provider_id,
+            base_url=provider_config.get("base_url"),
+            model=provider_config.get("model_id"),
+        )
+        return cls._instances[instance_key]
+
+    @classmethod
     def get_active_clients(cls) -> List[BaseLLMClient]:
         """获取当前激活供应商客户端。"""
         active_provider = settings.llm.active_provider
-        if active_provider in ("spark", "openai-spark"):
-            return [cls.get_client(LLMProvider.OPENAI)]
-        provider = LLMProvider(active_provider)
-        return [cls.get_client(provider)]
+        definition = TEXT_LLM_PROVIDER_DEFINITIONS.get(active_provider)
+        if definition and definition.openai_compatible:
+            return [cls.get_openai_compatible_client(active_provider)]
+        if active_provider == LLMProvider.ANTHROPIC.value:
+            return [cls.get_client(LLMProvider.ANTHROPIC)]
+        return [cls.get_openai_compatible_client(settings.llm.active_provider)]
 
     @classmethod
     def reset(cls) -> None:
@@ -790,3 +815,10 @@ def get_llm_service() -> LLMService:
     if _llm_service is None:
         _llm_service = LLMService()
     return _llm_service
+
+
+def reset_llm_service() -> None:
+    """Reset cached LLM clients after runtime configuration changes."""
+    global _llm_service
+    LLMClientFactory.reset()
+    _llm_service = None

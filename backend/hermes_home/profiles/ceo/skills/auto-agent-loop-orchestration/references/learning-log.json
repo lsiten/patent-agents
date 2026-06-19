@@ -2,7 +2,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.055947",
+    "generated_at": "2026-06-19T19:59:15.058946",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -22,7 +22,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.090746",
+    "generated_at": "2026-06-19T19:59:15.089595",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -42,7 +42,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.149135",
+    "generated_at": "2026-06-19T19:59:15.121779",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -62,7 +62,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.176128",
+    "generated_at": "2026-06-19T19:59:15.151146",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -82,7 +82,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.205249",
+    "generated_at": "2026-06-19T19:59:15.173423",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -102,7 +102,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.239277",
+    "generated_at": "2026-06-19T19:59:15.194537",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -122,7 +122,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.303571",
+    "generated_at": "2026-06-19T19:59:15.215974",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -142,7 +142,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.355445",
+    "generated_at": "2026-06-19T19:59:15.238478",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -162,7 +162,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.396816",
+    "generated_at": "2026-06-19T19:59:15.261009",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -182,7 +182,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.465276",
+    "generated_at": "2026-06-19T19:59:15.284693",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -202,7 +202,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.503756",
+    "generated_at": "2026-06-19T20:36:31.934557",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -222,7 +222,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.531098",
+    "generated_at": "2026-06-19T21:14:06.912586",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -242,7 +242,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.557621",
+    "generated_at": "2026-06-19T21:14:06.938447",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -262,7 +262,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.587647",
+    "generated_at": "2026-06-19T21:14:06.972087",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -282,7 +282,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.616375",
+    "generated_at": "2026-06-19T21:14:06.998865",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -302,7 +302,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.649365",
+    "generated_at": "2026-06-19T21:14:07.038072",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -322,7 +322,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.682027",
+    "generated_at": "2026-06-19T21:14:07.075291",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -342,7 +342,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.716445",
+    "generated_at": "2026-06-19T21:14:07.106232",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -362,7 +362,7 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:55:21.741723",
+    "generated_at": "2026-06-19T21:14:07.151229",
     "iteration_count": 0,
     "review_recommendation": "approve",
     "review_issue_categories": [
@@ -381,11 +381,15 @@
   },
   {
     "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:18:22.155697",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.182105",
     "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
     "loop_topology": [
       "coordinator-worker",
@@ -398,26 +402,14 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T18:18:22.192591",
+    "generated_at": "2026-06-19T21:14:07.206622",
     "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
     ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:20:05.191552",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
     "loop_topology": [
       "coordinator-worker",
@@ -430,26 +422,14 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T18:20:05.225455",
+    "generated_at": "2026-06-19T21:14:07.234786",
     "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
     ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:24:55.979322",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
     "loop_topology": [
       "coordinator-worker",
@@ -462,74 +442,14 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T18:24:56.018229",
+    "generated_at": "2026-06-19T21:14:07.265142",
     "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
     ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:28:58.358563",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:28:58.378967",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:29:04.605304",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
-    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
-    "loop_topology": [
-      "coordinator-worker",
-      "sequential-pipeline",
-      "generate-verifier",
-      "feedback-remediation-loop"
-    ],
-    "quality_remediation_required": false
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "failed",
-    "generated_at": "2026-06-19T18:52:26.709832",
-    "iteration_count": 0,
-    "review_recommendation": "",
-    "review_issue_categories": [],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
     "loop_topology": [
       "coordinator-worker",
@@ -542,10 +462,134 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T18:52:26.738133",
+    "generated_at": "2026-06-19T21:14:07.287169",
     "iteration_count": 0,
     "review_recommendation": "approve",
-    "review_issue_categories": [],
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.308274",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.327438",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.345784",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.368043",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.389538",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
+    "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
+    "loop_topology": [
+      "coordinator-worker",
+      "sequential-pipeline",
+      "generate-verifier",
+      "feedback-remediation-loop"
+    ],
+    "quality_remediation_required": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T21:14:07.411137",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [
+      "权利要求需短句分行、独权3或4步、从权逐项限定",
+      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
+      "检索报告需支撑区别特征和创造性论证"
+    ],
     "learned_focus": "调度顺序、质量反馈闭环、终止条件与人工等待状态",
     "loop_topology": [
       "coordinator-worker",

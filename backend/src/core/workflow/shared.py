@@ -39,6 +39,14 @@ from src.core.workflow.artifacts import (
 from src.core.workflow.phase_contracts import phase_contract_summary
 from src.core.workflow.models import PhaseResult, WorkflowContext, WorkflowPhase, WorkflowState
 from src.core.llm.client import LLMError
+from src.core.constants.workflow import (
+    AGENT_CONVERSATION_TIMEOUT_SECONDS,
+    QUALITY_REMEDIATION_SAFETY_LIMIT,
+    QUALITY_REMEDIATION_THRESHOLD,
+    WRITER_DRAWING_REPAIR_TIMEOUT_SECONDS,
+    WRITER_INITIAL_TIMEOUT_SECONDS,
+    WRITER_REVISION_TIMEOUT_SECONDS,
+)
 from src.core.patent.compliance import (
     build_patent_text_from_draft,
     collect_high_priority_issues,
@@ -112,7 +120,7 @@ async def _run_agent_conversation_impl(
     profile_id: str,
     prompt: str,
     session_id: str | None = None,
-    timeout_seconds: int = 600,
+    timeout_seconds: int = AGENT_CONVERSATION_TIMEOUT_SECONDS,
 ) -> str | Dict[str, Any]:
     """运行 Agent 对话的辅助函数
     
@@ -144,7 +152,7 @@ async def _run_agent_conversation(
     profile_id: str,
     prompt: str,
     session_id: str | None = None,
-    timeout_seconds: int = 600,
+    timeout_seconds: int = AGENT_CONVERSATION_TIMEOUT_SECONDS,
 ) -> str | Dict[str, Any]:
     override = _workflow_engine_override("_run_agent_conversation")
     if override is not None:
@@ -180,7 +188,7 @@ async def _run_agent_conversation_with_timeout(
     prompt: str,
     *,
     session_id: str | None = None,
-    timeout_seconds: int = 600,
+    timeout_seconds: int = AGENT_CONVERSATION_TIMEOUT_SECONDS,
 ) -> str | Dict[str, Any]:
     """Call a Hermes Agent conversation with an explicit timeout.
 
@@ -210,12 +218,6 @@ async def _run_agent_conversation_with_timeout(
 
 logger = get_logger("workflow_engine")
 T = TypeVar("T", bound=BaseModel)
-
-QUALITY_REMEDIATION_THRESHOLD = 0.9
-QUALITY_REMEDIATION_SAFETY_LIMIT = 12
-WRITER_INITIAL_TIMEOUT_SECONDS = 1800
-WRITER_REVISION_TIMEOUT_SECONDS = 1200
-WRITER_DRAWING_REPAIR_TIMEOUT_SECONDS = 1200
 
 
 def _configured_timeout_seconds(name: str, default: int) -> int:

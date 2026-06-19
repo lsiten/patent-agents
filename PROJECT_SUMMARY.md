@@ -1,178 +1,110 @@
-# 项目总结 - 专利智脑 v1.0
+# 项目总结 - 专利智脑
 
-## ✅ 已完成工作
+## 当前定位
 
-### 🎨 前端系统
+专利智脑是一个基于 Hermes Agent、LangGraph 和 AG-UI 的专利申请文件生成系统。它面向尚未申请、尚未公开的技术方案，通过多 Agent 协作把交底沟通内容整理为可用于申请准备的专利 DOCX。
 
-| 模块 | 状态 | 说明 |
-|------|------|------|
-| 设计系统 | ✅ 完成 | MongoDB Design System 完整实现（色彩、圆角、排版） |
-| UI组件库 | ✅ 完成 | Button, Card, Badge, Input, Tabs, CodeBlock 等 |
-| 首页Hero | ✅ 完成 | 深色Hero + 功能介绍 + 工作流展示 |
-| 专利提交页 | ✅ 完成 | 技术描述输入 + 专利类型选择 + 填写指南 |
-| 工作流监控页 | ✅ 完成 | 进度步进器 + Agent状态卡片 + 实时日志流 + 数据预览 |
-| 结果展示页 | ✅ 完成 | 专利性评分仪表盘 + 文件预览 + 审查意见 + 下载中心 |
+## 已完成的主链路能力
 
-### 🐍 后端系统
+| 能力 | 当前状态 |
+| --- | --- |
+| Hermes Agent 底座 | 使用 `run_agent.AIAgent`，profile 位于 `backend/hermes_home/profiles/` |
+| LangGraph 工作流 | 使用 `StateGraph` 表达阶段、质量门、用户 interrupt 和失败路由 |
+| AG-UI 事件 | 后端统一输出工作流/工具/技能/阶段轮次事件，前端归并恢复 |
+| 头脑风暴 | 正式流程启动前先梳理专利方向和技术细节 |
+| 专利名生成 | 启动确认前必须生成并展示专利名称 |
+| 用户确认 | 不能仅凭提示词或上传文件自动启动正式申请流程 |
+| 需求分析 | 识别技术需求、创新点、缺口和待解决问题 |
+| 检索补证 | 按缺口检索专利库、论文、公开网页和权威来源 |
+| 分段撰写 | 撰写 Agent 分段生成专利内容，并逐步写入 DOCX 结构 |
+| 附图生成 | 撰写 Agent 根据真实专利内容生成附图并插入文档 |
+| 质量审查 | 低于 90 分或存在 critical/high 问题时路由回责任 Agent |
+| 多轮展示 | 每阶段每轮输出写入 `phase_rounds`，前端以 tab 展示 |
+| 共享事实 | 通过 `shared_facts` 在所有 Agent 间共享已确认信息 |
+| 配置隔离 | dev/test/production 可同时启动，端口和 Next dist 目录互不覆盖 |
 
-| 模块 | 状态 | 说明 |
-|------|------|------|
-| 多智能体架构 | ✅ 完成 | 5个专业Agent + CEO统筹Agent |
-| 工作流状态机 | ✅ 完成 | 初始→需求→检索→撰写→审查→完成 |
-| 需求分析Agent | ✅ 完成 | 技术解构 + 创新点提取 + 专利类型判定 |
-| 检索分析Agent | ✅ 完成 | 多源并行检索 + 专利性三性评估 |
-| 专利撰写Agent | ✅ 完成 | 权利要求书 + 说明书完整撰写 |
-| 质量审查Agent | ✅ 完成 | 形式+实质双重审查 + 风险预估 |
-| 知识库系统 | ✅ 完成 | 定稿专利存储 + 风格参考 + 相似匹配 |
-| 数据源集成 | ✅ 完成 | Google Patents, USPTO, arXiv（按真实配置启用） |
-| FastAPI后端 | ✅ 完成 | 9个REST API + SSE实时事件流 |
+## 最新工程结构
 
-### 📚 文档与工程
+```text
+backend/src/
+  api/                         API 路由与 SSE
+  agents/                      Hermes Agent 配置、adapter、tools
+  core/
+    constants/                 抽离后的全局常量
+    llm/providers/             内置文字 LLM 与生图 provider catalog
+    workflow/                  LangGraph runtime、节点、契约、质量门、事件、产物
+    patent/                    专利硬规则检查
+    config.py                  settings 与 runtime reload
+  data_sources/                外部数据源连接
+  document_gen/                DOCX 与附图生成
+  models/                      数据模型
+  repositories/                持久化访问
+  services/                    业务服务
 
-| 文档 | 状态 |
-|------|------|
-| 完整README | ✅ 5000+字详细文档 |
-| DESIGN.md | ✅ MongoDB风格设计规范 |
-| 环境配置示例 | ✅ .env.example |
-| Python依赖 | ✅ requirements.txt + pyproject.toml |
-| 一键启动脚本 | ✅ start.sh (macOS/Linux) |
-
----
-
-## 🗂️ 项目结构总览
-
-```
-patent-agents/
-├── 📁 backend/                          # 后端服务 (Python 3.11+)
-│   ├── 📁 src/
-│   │   ├── 📁 agents/                   # 智能体实现
-│   │   │   ├── base.py                  # Agent基类
-│   │   │   ├── ceo.py                   # CEO统筹Agent
-│   │   │   ├── requirement_analyst.py   # 需求分析Agent
-│   │   │   ├── retrieval_analyst.py     # 检索分析Agent
-│   │   │   ├── patent_writer.py         # 专利撰写Agent
-│   │   │   └── quality_reviewer.py      # 质量审查Agent
-│   │   ├── 📁 core/
-│   │   │   └── workflow_engine.py       # Hermes Agent 工作流引擎
-│   │   ├── 📁 models/                   # 数据模型
-│   │   ├── 📁 api/                      # REST API
-│   │   ├── 📁 knowledge/                # 知识库
-│   │   ├── 📁 data_sources/             # 多源检索
-│   │   ├── 📁 prompts/                  # Prompt模板
-│   │   └── 📁 tools/                    # 工具函数
-│   ├── main.py                          # FastAPI入口
-│   ├── requirements.txt                 # Python依赖
-│   └── .env.example                     # 环境配置
-│
-├── 📁 frontend/                         # 前端应用 (Next.js 14)
-│   ├── 📁 app/                          # App Router页面
-│   │   ├── page.tsx                     # 首页Hero
-│   │   ├── submit/page.tsx              # 专利提交页
-│   │   ├── workflow/[taskId]/page.tsx   # 工作流监控页
-│   │   └── result/[taskId]/page.tsx     # 结果展示页
-│   ├── 📁 components/
-│   │   ├── layout/                      # Navbar, Hero, Footer
-│   │   ├── workflow/                    # 工作流组件
-│   │   └── ui/                          # Button, Card, Badge, Tabs...
-│   └── types/                           # TypeScript类型定义
-│
-├── DESIGN.md                             # 🎨 MongoDB设计系统规范
-├── README.md                             # 📖 5000+字项目文档
-├── start.sh                              # 🚀 一键启动脚本
-└── PROJECT_SUMMARY.md                    # 本文件
+frontend/
+  app/                         Next.js 页面
+  components/chat/             对话主界面、输入框、流程状态条
+  components/workflow/         工作流详情、阶段输出、多轮展示、日志
+  lib/constants/               前端运行时常量
+  lib/workflowProtocolStore.ts AG-UI 事件归并
 ```
 
----
+## 常量抽离结果
 
-## 🚀 快速启动
+| 分类 | 文件 |
+| --- | --- |
+| 环境常量 | `backend/src/core/constants/environment.py` |
+| 专利规范硬规则 | `backend/src/core/constants/patent_rules.py` |
+| 工作流阈值与超时 | `backend/src/core/constants/workflow.py` |
+| 前端运行时常量 | `frontend/lib/constants/runtime.ts` |
 
-### 方式一：分别启动（推荐）
+## 内置 LLM / 生图配置
 
-**终端1 - 后端:**
+内置 provider 元数据集中在 `backend/src/core/llm/providers/catalog.py`。
+
+文字 LLM：
+
+- `openai`
+- `anthropic`
+- `deepseek`
+- `openrouter`
+- `spark`
+- `openai-spark`
+
+生图：
+
+- `azure_aoai`
+- `openai`
+- `stability`
+
+该目录只保存 provider 分类、默认 base URL、默认模型和环境变量名。API key 必须通过环境变量、系统配置或 Agent override 注入，不写入代码。
+
+## 启动方式
+
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: .\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-cp .env.example .env
-# 编辑 .env，填入 OPENAI_API_KEY
-python main.py
+./start.sh dev         # frontend 3000, backend 8000
+./start.sh test        # frontend 3100, backend 8100
+./start.sh production  # frontend 10001, backend 10002
 ```
 
-**终端2 - 前端:**
+三种模式可以同时运行。
+
+## 质量要求
+
+- 生成 DOCX 必须符合 `专利申请文件撰写完整规范手册.md`。
+- 权利要求 1 的独权部分只能由 3 或 4 步组成。
+- 权利要求书每个分号和句号后必须换行。
+- 不能保留逐字稿格式内容、时间戳或交底文件格式噪声。
+- 附图编号、标题、正文引用和文档插入必须一致。
+- 检索结果不足时必须分析原因并更换检索策略；仍不足时再请求用户补充。
+- 所有专业判断由对应 Agent 通过 LLM 完成，确定性硬规则才允许本地检查。
+
+## 验证入口
+
 ```bash
-cd frontend
-npm install
-npm run dev
+cd backend && PYTHONPATH=. python -m pytest
+cd frontend && npm run typecheck
+bash scripts/test_start_sh_isolation.sh
 ```
 
-**访问:**
-- 前端: http://localhost:3000
-- 后端: http://localhost:8000
-- API文档: http://localhost:8000/docs
-
-### 方式二：一键脚本
-```bash
-chmod +x start.sh
-./start.sh backend   # 终端1
-./start.sh frontend  # 终端2
-```
-
----
-
-## 🧠 多智能体能力矩阵
-
-| Agent | 核心能力 | 输出 |
-|-------|---------|------|
-| **CEO Agent** | 流程调度、冲突协调、质量门控、迭代决策 | 工作流状态管理 |
-| **需求分析 Agent** | 技术解构、创新点提取、专利类型判定 | 结构化需求文档 |
-| **检索分析 Agent** | 多源并行检索、新颖性/创造性/实用性评估 | 专利性分析报告 |
-| **专利撰写 Agent** | 权利要求书撰写、说明书五大部分、标准术语 | 完整专利申请文件 |
-| **质量审查 Agent** | 形式合规检查、权利要求审查、风险预估 | 审查报告+修改建议 |
-
----
-
-## 🔗 核心API接口
-
-| 方法 | 路径 | 功能 |
-|------|------|------|
-| POST | `/api/v1/tasks` | 创建专利申请任务 |
-| GET | `/api/v1/tasks/{id}` | 获取任务详情 |
-| GET | `/api/v1/tasks/{id}/stream` | SSE实时事件流 |
-| GET | `/api/v1/tasks/{id}/events` | 获取事件列表 |
-| POST | `/api/v1/search/patents` | 现有技术检索 |
-| GET | `/api/v1/knowledge/search` | 知识库搜索 |
-| GET | `/api/v1/system/status` | 系统状态 |
-
----
-
-## 🎯 版本信息
-
-- **版本**: v1.0.0
-- **完成日期**: 2024年
-- **前端技术栈**: Next.js 14 + React 18 + TailwindCSS 3
-- **后端技术栈**: FastAPI + Pydantic 2 + Python 3.11+
-- **设计系统**: MongoDB Design System (品牌绿+深海军蓝)
-
----
-
-## 📈 下一步开发建议
-
-### v1.1 近期计划
-- [ ] 接入真实 LLM API (GPT-4, Claude 3)
-- [ ] 向量数据库集成 (FAISS/Milvus)
-- [ ] 扩展更多官方/专业专利源真实连接器
-
-### v1.2 中期计划
-- [ ] PDF/DOCX专业格式导出
-- [ ] 文档版本对比功能
-- [ ] 多语言支持 (中英文切换)
-
-### v2.0 长期规划
-- [ ] Agent自学习与知识库进化
-- [ ] 审查意见自动答复
-- [ ] 电子申请系统直连
-
----
-
-**Made with ❤️ for Innovators**
+最终验收仍以真实浏览器生成一份专利、下载 DOCX 并校验规范为准。

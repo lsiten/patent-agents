@@ -19,6 +19,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { clsx } from 'clsx';
 import { conversationApi, workflowApi } from '@/lib/api';
+import { POLLING_INTERVALS } from '@/lib/constants/runtime';
 import type { ConversationActiveReply, ConversationSummary } from '@/lib/api';
 import type { AgentEvent, AgentWorkEvent, ChatMessage } from '@/types';
 
@@ -597,7 +598,9 @@ function ChatPageContent() {
 
   useEffect(() => {
     void loadConversations();
-    const interval = setInterval(() => { void loadConversations(); }, 30000);
+    const interval = setInterval(() => {
+      void loadConversations();
+    }, POLLING_INTERVALS.conversationListMs);
     return () => clearInterval(interval);
   }, [loadConversations]);
 
@@ -750,7 +753,7 @@ function ChatPageContent() {
     };
 
     void syncWorkflowState();
-    interval = setInterval(syncWorkflowState, 3000);
+    interval = setInterval(syncWorkflowState, POLLING_INTERVALS.workflowSyncMs);
 
     return () => {
       stopped = true;
