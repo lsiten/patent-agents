@@ -101,7 +101,7 @@ class WorkflowLifecycleMixin:
         workflow's real terminal result, so all exceptions are logged and swallowed.
         """
         try:
-            from src.core.agent_loop import persist_patent_loop_snapshot
+            from src.core.workflow.agent_loop import persist_patent_loop_snapshot
             from src.agents.hermes.skill_learning import sediment_workflow_skills
 
             snapshot = persist_patent_loop_snapshot(context, terminal_state)

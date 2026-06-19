@@ -112,7 +112,7 @@ def test_resolve_image_config_passes_agent_overrides(monkeypatch):
         lambda profile_id: FakeAgentConfig(),
     )
     monkeypatch.setattr(
-        "src.core.override_store.get_override_store",
+        "src.agents.config.overrides.get_override_store",
         lambda: type("Store", (), {"get_image_gen_override": lambda self, profile_id: {}})(),
     )
 

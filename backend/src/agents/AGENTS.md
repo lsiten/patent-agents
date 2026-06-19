@@ -67,7 +67,7 @@ result = await agent.run_conversation("分析这个技术方案...")
 
 | 优先级 | 来源 | 位置 | 用途 |
 |-------|------|------|------|
-| 1 (最高) | runtime override | `backend/src/data/agent_overrides.json` → `llm_override` / `image_gen_override` | 前端 UI 改的；api_key 用 Fernet 加密 |
+| 1 (最高) | runtime override | `backend/var/agent_overrides.json` → `llm_override` / `image_gen_override` | 前端 UI 改的；api_key 用 Fernet 加密 |
 | 2 | agent yaml | `hermes_home/profiles/<agent>/config.yaml` → `llm` / `image_gen` | 开发者 / CI 配的；支持 `${ENV_VAR}` 引用 |
 | 3 | system-config 默认 | `hermes_home/profiles/system-config/config.yaml` → `llm` / `image_gen` | 跨 agent 默认配置 |
 | 4 (最低) | 全局 settings | `src/core/config.py` → `LLMSettings` / `ImageGenSettings` 的 `active_provider` | 启动级默认配置 |

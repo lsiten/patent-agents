@@ -58,7 +58,7 @@ from .schemas import (
 )
 from ..models.domain import PatentTask
 from ..models.enums import WorkflowState
-from ..core.workflow_engine import (
+from ..core.workflow import (
     PhaseResult,
     WorkflowContext,
     WorkflowPhase,
@@ -179,7 +179,7 @@ def _mark_workflow_resume_running(context: WorkflowContext) -> None:
             remediation["resumed_at"] = datetime.now().isoformat()
 
 # ── Agent Override Store (真实持久化) ──
-from ..core.override_store import get_override_store
+from src.agents.config.overrides import get_override_store
 
 _override_store = get_override_store()
 
@@ -547,7 +547,7 @@ async def restore_stores_from_db() -> None:
     # 恢复工作流
     restored_workflows = 0
     zombie_workflows = 0
-    from src.core.workflow_engine import WorkflowState
+    from src.core.workflow import WorkflowState
     from datetime import datetime, timezone
     
     try:
@@ -674,7 +674,7 @@ def _workflow_context_to_response(context: WorkflowContext) -> WorkflowResponse:
     agent_loop = _load_agent_loop_snapshot(context.task_id)
     if not agent_loop:
         try:
-            from src.core.agent_loop import build_patent_loop_snapshot
+            from src.core.workflow.agent_loop import build_patent_loop_snapshot
 
             agent_loop = build_patent_loop_snapshot(
                 context,
@@ -2483,7 +2483,7 @@ async def get_workflow_loop(task_id: str):
         snapshot = _load_agent_loop_snapshot(task_id)
         if not snapshot:
             try:
-                from src.core.agent_loop import build_patent_loop_snapshot
+                from src.core.workflow.agent_loop import build_patent_loop_snapshot
 
                 snapshot = build_patent_loop_snapshot(
                     context,
@@ -5593,7 +5593,7 @@ from typing import Any, Dict
 
 from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
 from src.core.logging import get_logger
-from src.core.llm_client import get_llm_service, LLMMessage
+from src.core.llm.client import get_llm_service, LLMMessage
 
 logger = get_logger(__name__)
 
@@ -5923,7 +5923,7 @@ async def chat_generate_tool(agent_id: str, body: dict):
         raise HTTPException(status_code=400, detail="工具名称和描述不能为空")
 
     # 使用 LLM 生成工具代码
-    from src.core.llm_client import get_llm_service, LLMMessage as _LLMMsg
+    from src.core.llm.client import get_llm_service, LLMMessage as _LLMMsg
 
     llm = get_llm_service()
 
@@ -5948,7 +5948,7 @@ from typing import Any, Dict
 
 from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
 from src.core.logging import get_logger
-from src.core.llm_client import get_llm_service, LLMMessage
+from src.core.llm.client import get_llm_service, LLMMessage
 
 logger = get_logger(__name__)
 
@@ -6022,7 +6022,7 @@ from typing import Any, Dict
 
 from ..base import HermesTool, HermesToolDefinition, HermesToolParameter
 from src.core.logging import get_logger
-from src.core.llm_client import get_llm_service, LLMMessage
+from src.core.llm.client import get_llm_service, LLMMessage
 
 logger = get_logger(__name__)
 
@@ -6069,7 +6069,7 @@ async def chat_generate_skill(agent_id: str, body: dict):
         raise HTTPException(status_code=400, detail="技能描述不能为空")
 
     # 使用 LLM 生成技能元数据
-    from src.core.llm_client import get_llm_service, LLMMessage as _LLMMsg
+    from src.core.llm.client import get_llm_service, LLMMessage as _LLMMsg
 
     llm = get_llm_service()
 

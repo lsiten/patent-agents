@@ -22,4 +22,3 @@ class PatentWorkflowState(TypedDict, total=False):
     _agent_event_callback: Any
     _checkpoint_callback: Any
     _force_start_from: Any
-

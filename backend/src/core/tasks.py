@@ -123,13 +123,23 @@ async def _run_agent_async(
 ) -> Dict[str, Any]:
     """异步执行Agent"""
     try:
-        from src.agents import get_agent_by_name
+        from src.agents import create_ai_agent
 
-        agent = get_agent_by_name(agent_name)
-        if not agent:
-            raise ValueError(f"Agent not found: {agent_name}")
+        prompt = (
+            input_data.get("prompt")
+            or input_data.get("user_input")
+            or input_data.get("message")
+            or input_data.get("text")
+        )
+        if not prompt:
+            raise ValueError("Agent task input must include prompt/user_input/message/text")
 
-        result = await agent.run(**input_data)
+        agent = create_ai_agent(
+            profile_id=agent_name,
+            session_id=task_id,
+            user_id=user_id,
+        )
+        result = await asyncio.to_thread(agent.run_conversation, str(prompt))
 
         return {
             "agent_name": agent_name,

@@ -8,7 +8,7 @@ import pickle
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, TypeVar
 
-from .logging import get_logger
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

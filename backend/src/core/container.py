@@ -7,8 +7,8 @@ from injector import Injector, singleton, Binder
 
 from .config import settings
 from .logging import get_logger
-from .cache import create_cache_service
-from .storage import create_storage_service
+from src.infrastructure.cache import create_cache_service
+from src.infrastructure.storage import create_storage_service
 from src.repositories import (
     UnitOfWork,
     PatentTaskRepository, TaskEventRepository,
@@ -25,7 +25,7 @@ from src.services import (
     WorkflowService,
     ChatService,
 )
-from src.core.workflow_engine import PatentWorkflowEngine
+from src.core.workflow import PatentWorkflowEngine
 from src.core.events import get_event_bus
 from src.data_sources.base import get_data_source_manager
 from src.knowledge.base import get_knowledge_base

@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import BinaryIO, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from .config import settings
-from .logging import get_logger
+from src.core.config import settings
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -18,14 +18,14 @@ from cryptography.fernet import Fernet
 os.environ.setdefault("ENVIRONMENT", "testing")
 
 from src.core.config import settings  # noqa: E402
-from src.core import secret_cipher  # noqa: E402
-from src.core.override_store import AgentOverrideStore  # noqa: E402
+from src.core.security import secret_cipher  # noqa: E402
+from src.agents.config.overrides import AgentOverrideStore  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     """每个测试用独立 cipher key + 独立 override store 文件"""
-    from src.core import override_store
+    from src.agents.config import overrides as override_store
     monkeypatch.setenv("AGENT_OVERRIDE_MASTER_KEY", Fernet.generate_key().decode())
     secret_cipher._cached_key = None
     monkeypatch.setattr(override_store, "OVERRIDES_FILE", tmp_path / "overrides.json")
@@ -39,7 +39,7 @@ def _resolve_for_agent_in_priority(agent_id, yaml_llm=None, yaml_image_gen=None,
 
     返回 (resolved_llm, resolved_image_gen) dict。
     """
-    from src.core.override_store import AgentOverrideStore
+    from src.agents.config.overrides import AgentOverrideStore
     store = AgentOverrideStore()
     llm_runtime = store.get_llm_override(agent_id) or {}
     img_runtime = store.get_image_gen_override(agent_id) or {}

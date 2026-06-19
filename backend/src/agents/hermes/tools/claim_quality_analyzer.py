@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
-from src.core.patent_compliance import validate_claim_rules
+from src.core.patent.compliance import validate_claim_rules
 
 logger = get_logger(__name__)
 

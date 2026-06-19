@@ -24,7 +24,7 @@
 - [ ] **Step 3:** 验证 `from cryptography.fernet import Fernet` 可导入
 
 ### Task 2: 加密工具模块
-**Files:** `backend/src/core/secret_cipher.py` (新)
+**Files:** `backend/src/core/security/secret_cipher.py` (新)
 
 - [ ] **Step 1 (TDD red):** 写测试 `tests/core/test_secret_cipher.py`:
   - `test_roundtrip_encrypt_decrypt`: 加密 "sk-xxx" → 解密得到 "sk-xxx"
@@ -34,7 +34,7 @@
   - `test_persists_auto_generated_key`: 未设置 env 时自动生成 key 并持久化到文件
 - [ ] **Step 2:** 跑测试确认失败
 - [ ] **Step 3:** 实现 `secret_cipher.py`：
-  - `get_master_key() -> bytes`: 优先 env；未配置时生成并持久化本地密钥文件 `data/.secret_key`
+  - `get_master_key() -> bytes`: 优先 env；未配置时生成并持久化本地密钥文件 `backend/var/.secret_key`
   - `encrypt_value(plaintext: str) -> str`: 返回 `"enc:" + base64(ciphertext)`
   - `decrypt_value(ciphertext: str) -> str`: 检测 `"enc:"` 前缀解密；非前缀原样返回（兼容明文）
   - `is_encrypted(value: str) -> bool`
@@ -86,7 +86,7 @@
 - [ ] **Step 4:** 跑测试确认通过
 
 ### Task 6: 扩展 `override_store` 支持 LLM/生图加密覆盖
-**Files:** `backend/src/core/override_store.py` (修改)
+**Files:** `backend/src/agents/config/overrides.py` (修改)
 
 - [ ] **Step 1 (TDD red):** 写测试 `tests/core/test_override_store_llm.py`:
   - `test_get_llm_override_default`: 未设置时返回 None

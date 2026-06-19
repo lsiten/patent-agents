@@ -4,6 +4,7 @@ Agent Override Store — 持久化 Agent 配置覆盖层
 """
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -11,7 +12,26 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-OVERRIDES_FILE = Path(__file__).parent.parent / "data" / "agent_overrides.json"
+BACKEND_DIR = Path(__file__).resolve().parents[3]
+RUNTIME_DIR = BACKEND_DIR / "var"
+OVERRIDES_FILE = RUNTIME_DIR / "agent_overrides.json"
+LEGACY_OVERRIDES_FILE = BACKEND_DIR / "src" / "data" / "agent_overrides.json"
+
+
+def _migrate_legacy_overrides_file() -> None:
+    """Move runtime overrides out of src/ on first use."""
+    if OVERRIDES_FILE.exists() or not LEGACY_OVERRIDES_FILE.exists():
+        return
+    try:
+        OVERRIDES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(LEGACY_OVERRIDES_FILE, OVERRIDES_FILE)
+        logger.info(
+            "Migrated agent overrides to runtime var directory",
+            old_path=str(LEGACY_OVERRIDES_FILE),
+            new_path=str(OVERRIDES_FILE),
+        )
+    except Exception as exc:
+        logger.warning("Failed to migrate legacy agent overrides", error=str(exc))
 
 
 class AgentOverrideStore:
@@ -27,6 +47,7 @@ class AgentOverrideStore:
 
     def load(self) -> None:
         """从文件加载覆盖配置"""
+        _migrate_legacy_overrides_file()
         if not OVERRIDES_FILE.exists():
             logger.info("No overrides file, starting fresh")
             return
@@ -179,7 +200,7 @@ class AgentOverrideStore:
 
     def get_llm_override(self, agent_id: str) -> Optional[Dict[str, Any]]:
         """获取 agent 的 LLM 运行时覆盖（已解密 api_key）。未设置返回 None。"""
-        from .secret_cipher import decrypt_value
+        from src.core.security.secret_cipher import decrypt_value
 
         entry = self._overrides.get(agent_id, {})
         raw = entry.get(self._LLM_OVERRIDE_KEY)
@@ -195,7 +216,7 @@ class AgentOverrideStore:
         更新 agent 的 LLM 运行时覆盖。api_key 加密后存盘。
         其他字段（provider / base_url / model）明文存。
         """
-        from .secret_cipher import encrypt_value
+        from src.core.security.secret_cipher import encrypt_value
 
         entry = self._ensure_agent(agent_id)
         stored = dict(llm_config)
@@ -214,7 +235,7 @@ class AgentOverrideStore:
 
     def get_image_gen_override(self, agent_id: str) -> Optional[Dict[str, Any]]:
         """获取 agent 的生图运行时覆盖（已解密 api_key）。未设置返回 None。"""
-        from .secret_cipher import decrypt_value
+        from src.core.security.secret_cipher import decrypt_value
 
         entry = self._overrides.get(agent_id, {})
         raw = entry.get(self._IMAGE_GEN_OVERRIDE_KEY)
@@ -227,7 +248,7 @@ class AgentOverrideStore:
 
     def update_image_gen_override(self, agent_id: str, img_config: Dict[str, Any]) -> None:
         """更新 agent 的生图运行时覆盖。api_key 加密后存盘。"""
-        from .secret_cipher import encrypt_value
+        from src.core.security.secret_cipher import encrypt_value
 
         entry = self._ensure_agent(agent_id)
         stored = dict(img_config)

@@ -13,7 +13,7 @@ from cryptography.fernet import Fernet
 os.environ.setdefault("ENVIRONMENT", "testing")
 
 from src.core.config import LLMSettings, ImageGenSettings  # noqa: E402
-from src.core import secret_cipher  # noqa: E402
+from src.core.security import secret_cipher  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

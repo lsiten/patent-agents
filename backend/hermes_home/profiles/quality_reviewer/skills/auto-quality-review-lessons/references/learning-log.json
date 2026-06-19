@@ -2,171 +2,6 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.486900",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.511122",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.544366",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.571930",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.596137",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.623747",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.649272",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.685701",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.716424",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.746188",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.771953",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
-    "phase_status": "success",
-    "checked_drawings": null
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
     "generated_at": "2026-06-19T17:55:21.058528",
     "iteration_count": 0,
     "review_recommendation": "approve",
@@ -445,6 +280,127 @@
       "说明书需充分公开可实施细节并避免Markdown和交底噪声",
       "检索报告需支撑区别特征和创造性论证"
     ],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "success",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:18:22.159562",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T18:18:22.195196",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "success",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:20:05.195604",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T18:20:05.228806",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "success",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:24:55.985584",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T18:24:56.020315",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "success",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:28:58.371259",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:28:58.382310",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:29:04.611571",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:52:26.712739",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
+    "phase_status": "unknown",
+    "checked_drawings": null
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T18:52:26.740171",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [],
     "learned_focus": "同时审查文本、权利要求、说明书一致性、附图缺失/重复和 DOCX 可用性",
     "phase_status": "success",
     "checked_drawings": null

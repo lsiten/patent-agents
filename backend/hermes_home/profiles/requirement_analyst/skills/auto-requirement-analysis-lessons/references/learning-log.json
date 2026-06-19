@@ -2,182 +2,6 @@
   {
     "record_type": "abstract_workflow_lesson",
     "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.484035",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.508865",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.542868",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.569729",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.593891",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.621594",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.646597",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.684242",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.711807",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.744595",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
-    "generated_at": "2026-06-19T17:52:40.770413",
-    "iteration_count": 0,
-    "review_recommendation": "approve",
-    "review_issue_categories": [
-      "权利要求需短句分行、独权3或4步、从权逐项限定",
-      "说明书需充分公开可实施细节并避免Markdown和交底噪声",
-      "检索报告需支撑区别特征和创造性论证"
-    ],
-    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
-    "phase_status": "success",
-    "has_innovation_points": false,
-    "has_technical_problem": true
-  },
-  {
-    "record_type": "abstract_workflow_lesson",
-    "terminal_state": "completed",
     "generated_at": "2026-06-19T17:55:21.056755",
     "iteration_count": 0,
     "review_recommendation": "approve",
@@ -474,6 +298,138 @@
       "说明书需充分公开可实施细节并避免Markdown和交底噪声",
       "检索报告需支撑区别特征和创造性论证"
     ],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:18:22.156668",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T18:18:22.193350",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:20:05.192527",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T18:20:05.226210",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:24:55.980325",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T18:24:56.018795",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:28:58.368413",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "unknown",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:28:58.380229",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "unknown",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:29:04.606737",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "needs_attention",
+    "has_innovation_points": false,
+    "has_technical_problem": false
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "failed",
+    "generated_at": "2026-06-19T18:52:26.710993",
+    "iteration_count": 0,
+    "review_recommendation": "",
+    "review_issue_categories": [],
+    "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
+    "phase_status": "success",
+    "has_innovation_points": false,
+    "has_technical_problem": true
+  },
+  {
+    "record_type": "abstract_workflow_lesson",
+    "terminal_state": "completed",
+    "generated_at": "2026-06-19T18:52:26.738728",
+    "iteration_count": 0,
+    "review_recommendation": "approve",
+    "review_issue_categories": [],
     "learned_focus": "从逐字稿/沟通材料提炼技术主题，剔除口语化、时间戳和格式噪声",
     "phase_status": "success",
     "has_innovation_points": false,

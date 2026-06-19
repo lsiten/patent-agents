@@ -23,7 +23,7 @@
 | 官方 LangGraph 使用 | 符合 | `backend/src/core/workflow_graph/runtime.py` 使用 `StateGraph/START/END` 建模主链路。 |
 | 工作流图状态 | 符合基础要求 | `PatentWorkflowState` 包含 `task_id`、`conversation_id`、`current_node`、`shared_facts`、`phase_rounds`、`route_history`、`interrupt`、`artifacts`、`quality_score`。 |
 | 官方 AG-UI 依赖 | 符合 | `frontend/package.json` 声明 `@ag-ui/core@^0.0.57`、`@ag-ui/client@^0.0.57`。 |
-| AG-UI 事件字段 | 符合 | `backend/src/core/agui_events.py` 输出 `agui_type/run_id/message_id/tool_call_id/parent_message_id/state_delta`。 |
+| AG-UI 事件字段 | 符合 | `backend/src/core/workflow/protocol/agui_events.py` 输出 `agui_type/run_id/message_id/tool_call_id/parent_message_id/state_delta`。 |
 | 前端协议归并 | 符合基础要求 | `frontend/lib/workflowProtocolStore.ts` 使用官方类型消费并归并 SSE 事件。 |
 
 ## 当前主链路节点

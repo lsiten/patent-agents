@@ -79,7 +79,7 @@ def _resolve_image_config(profile_id: str = "patent.writer.v1") -> Dict[str, Any
         image_overrides = {}
 
     try:
-        from src.core.override_store import get_override_store
+        from src.agents.config.overrides import get_override_store
 
         runtime_override = get_override_store().get_image_gen_override(profile_id) or {}
         image_overrides.update(runtime_override)

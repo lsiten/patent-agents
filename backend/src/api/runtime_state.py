@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 
 from loguru import logger
 
-from ..core.workflow_engine import PatentWorkflowEngine
+from ..core.workflow import PatentWorkflowEngine
 from ..models.domain import PatentTask
 from .schemas import OrgNodeResponse, WorkflowEventResponse
 
@@ -70,4 +70,3 @@ def workflow_background_task_running(task_id: str) -> bool:
     """Return whether a workflow has an active background task."""
     task = workflow_background_tasks.get(task_id)
     return bool(task and not task.done())
-

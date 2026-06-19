@@ -215,7 +215,7 @@ class LLMSettings(BaseSettings):
 
         返回 dict 形如 {"provider", "base_url", "api_key", "model_id"}。
         """
-        from .secret_cipher import decrypt_value
+        from src.core.security.secret_cipher import decrypt_value
 
         overrides = overrides or {}
 
@@ -310,7 +310,7 @@ class ImageGenSettings(BaseSettings):
         合并策略同 LLMSettings.resolve_for_agent，但 override 字段名为 `model_id`
         （区别于 LLM 的 `model`）。
         """
-        from .secret_cipher import decrypt_value
+        from src.core.security.secret_cipher import decrypt_value
 
         overrides = overrides or {}
 

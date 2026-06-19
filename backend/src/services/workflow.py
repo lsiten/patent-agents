@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from loguru import logger
 
-from src.core.workflow_engine import (
+from src.core.workflow import (
     PatentWorkflowEngine,
     WorkflowContext,
     WorkflowState,

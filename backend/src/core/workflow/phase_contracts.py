@@ -85,4 +85,3 @@ PHASE_CONTRACTS: Dict[str, Dict[str, Any]] = {
 def phase_contract_summary(context_field: str) -> Dict[str, Any]:
     """Return the contract used to instruct and validate a phase."""
     return PHASE_CONTRACTS.get(context_field, {"node": context_field})
-

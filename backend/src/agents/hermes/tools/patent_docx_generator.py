@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from docx.shared import Pt
 from loguru import logger
 
-from src.core.patent_compliance import normalize_claim_linebreaks
+from src.core.patent.compliance import normalize_claim_linebreaks
 
 
 # ═══════════════════════════════════════════════════════════════════

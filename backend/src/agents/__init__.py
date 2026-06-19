@@ -2,10 +2,10 @@
 专利申请多智能体系统 - Agent 层
 基于 hermes-agent (run_agent.AIAgent) 架构
 
-配置加载通过 agent_config.py 模块提供，直接使用 hermes-agent 的 AIAgent。
+配置加载通过 config/ 包提供，agent_config.py 仅保留为兼容入口。
 """
 
-from .agent_config import (
+from .config import (
     AgentConfig,
     AgentConfigRegistry,
     get_agent_config_registry,

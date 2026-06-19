@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+BACKEND_DIR = Path(__file__).resolve().parents[3]
 
 PHASE_DIR_MAP = {
     "requirement_analysis": "requirement",
@@ -61,4 +61,3 @@ def persist_workflow_checkpoint(task_id: str, checkpoint: Dict[str, Any]) -> str
     file_path.write_text(payload, encoding="utf-8")
     (checkpoint_dir / "latest.json").write_text(payload, encoding="utf-8")
     return str(file_path)
-

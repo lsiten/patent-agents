@@ -29,17 +29,17 @@ from src.core.events import (
     AgentDispatchEvent,
     AgentContentEvent,
 )
-from src.core.agui_events import EVENT_TYPE_MAP, ensure_agui_payload
-from src.core.workflow_artifacts import (
+from src.core.workflow.protocol.agui_events import EVENT_TYPE_MAP, ensure_agui_payload
+from src.core.workflow.artifacts import (
     get_phase_dir as _get_phase_dir,
     get_task_dir as _get_task_dir,
     persist_phase_result as _persist_phase_result,
     persist_workflow_checkpoint as _persist_workflow_checkpoint,
 )
-from src.core.workflow_contracts import phase_contract_summary
-from src.core.workflow_models import PhaseResult, WorkflowContext, WorkflowPhase, WorkflowState
-from src.core.llm_client import LLMError
-from src.core.patent_compliance import (
+from src.core.workflow.phase_contracts import phase_contract_summary
+from src.core.workflow.models import PhaseResult, WorkflowContext, WorkflowPhase, WorkflowState
+from src.core.llm.client import LLMError
+from src.core.patent.compliance import (
     build_patent_text_from_draft,
     collect_high_priority_issues,
     normalize_claims_payload_linebreaks,

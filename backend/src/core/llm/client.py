@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pydantic import BaseModel, Field
 
-from .config import settings
-from .logging import get_logger
+from src.core.config import settings
+from src.core.logging import get_logger
 
 logger = get_logger("llm_client")
 

@@ -24,7 +24,7 @@ class WorkflowExecutionMixin:
                 force_start_from=force_start_from,
             )
 
-        from src.core.workflow_graph import PatentWorkflowGraphRuntime
+        from src.core.workflow.graph import PatentWorkflowGraphRuntime
 
         runtime = PatentWorkflowGraphRuntime(self)
         return await runtime.run(

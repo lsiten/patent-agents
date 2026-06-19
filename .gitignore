@@ -58,6 +58,10 @@ service-account.json
 backend/exports/
 backend/finalized_patents/
 
+# Runtime configuration and generated local secrets
+backend/var/*
+!backend/var/.gitkeep
+
 # Celery beat schedule
 celerybeat-schedule*
 

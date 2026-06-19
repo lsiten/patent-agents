@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -26,9 +27,10 @@ logger = logging.getLogger(__name__)
 
 # ── 模块状态 ─────────────────────────────────────────────────────────
 # _DATA_DIR 在 conftest.py 里用 monkeypatch 替换，测试时可以指向 tmp_path
-# 默认指向 backend/data/
-_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent  # backend/
-_DATA_DIR: Path = _BACKEND_DIR / "data"
+# 默认指向 backend/var/
+_BACKEND_DIR = Path(__file__).resolve().parents[3]  # backend/
+_DATA_DIR: Path = _BACKEND_DIR / "var"
+_LEGACY_DATA_DIR: Path = _BACKEND_DIR / "data"
 _SECRET_KEY_FILE: str = ".secret_key"
 _ENV_MASTER_KEY: str = "AGENT_OVERRIDE_MASTER_KEY"
 
@@ -69,6 +71,18 @@ def _get_master_key() -> bytes:
     # 2. 文件
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     key_file = _DATA_DIR / _SECRET_KEY_FILE
+    legacy_key_file = _LEGACY_DATA_DIR / _SECRET_KEY_FILE
+    if not key_file.exists() and legacy_key_file.exists():
+        try:
+            shutil.copy2(legacy_key_file, key_file)
+            try:
+                os.chmod(key_file, 0o600)
+            except OSError:
+                pass
+            logger.info("Migrated secret key from %s to %s", legacy_key_file, key_file)
+        except Exception as e:
+            logger.warning("Failed to migrate legacy secret key: %s", e)
+
     if key_file.exists():
         try:
             stored = key_file.read_text(encoding="utf-8").strip()

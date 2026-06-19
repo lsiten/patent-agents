@@ -10,7 +10,11 @@
 | `middleware.py` | — | JWT auth, rate limiting (slowapi), SSE connection manager |
 | `events.py` | — | InMemoryEventBus / RedisEventBus + event types |
 | `tasks.py` | — | Celery app + LocalTaskExecutor (dev local executor) |
-| `workflow_engine.py` | 917 | DAG-based patent drafting workflow executor |
+| `workflow_engine.py` | — | Compatibility facade for the modular workflow engine |
+| `workflow/` | — | Patent workflow runtime, LangGraph adapter, phase contracts, artifacts, AG-UI protocol |
+| `llm/` | — | Unified LLM client and retry logic |
+| `patent/` | — | Deterministic patent compliance helpers |
+| `security/` | — | Secret encryption helpers |
 
 ### Dependency Rule
 `core/` imports zero `src` modules — it is the bottom layer. Everything else depends on it.
@@ -20,4 +24,4 @@
 - **DI**: `ApplicationContainer` wired in `backend/main.py`. Override for testing via `container.override()`
 - **Events**: SSE streaming for real-time agent thinking. Two implementations: InMemoryEventBus (dev) and RedisEventBus (prod)
 - **Tasks**: Celery for background tasks. LocalTaskExecutor is the explicit dev local executor
-- **Workflow**: DAG-based engine — define steps as nodes, dependencies as edges, executor traverses topologically
+- **Workflow**: Modular patent workflow package; `workflow_engine.py` exists only as the legacy import facade

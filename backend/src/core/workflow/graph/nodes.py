@@ -24,4 +24,3 @@ TERMINAL_PIPELINE_STATES = {
     "cancelled",
     "awaiting_user_decision",
 }
-

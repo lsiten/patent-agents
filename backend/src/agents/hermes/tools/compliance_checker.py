@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Tuple
 
 from ..base import HermesTool, HermesToolDefinition, HermesToolParameter, make_tool_output
 from src.core.logging import get_logger
-from src.core.patent_compliance import (
+from src.core.patent.compliance import (
     build_patent_text_from_draft,
     validate_patent_document_structure,
 )

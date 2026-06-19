@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+_BACKEND_DIR = Path(__file__).resolve().parents[3]
 
 
 @dataclass(frozen=True)

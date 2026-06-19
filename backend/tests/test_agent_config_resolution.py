@@ -5,10 +5,7 @@ Tests for per-agent LLM/image_gen config in AgentConfig:
 """
 from __future__ import annotations
 
-import os
-import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -27,15 +24,15 @@ def fake_profile_dirs(tmp_path, monkeypatch):
     (profiles / "system-config").mkdir(parents=True)
     (profiles / "my_agent").mkdir(parents=True)
 
-    # 重置 _load_system_defaults 的全局缓存
-    from src.agents import agent_config as ac
-    ac._system_defaults = None
+    from src.agents.config import paths
+    from src.agents.config.models import clear_system_defaults_cache
 
-    monkeypatch.setattr(ac, "HERMES_PROFILES_DIR", profiles)
-    monkeypatch.setattr(ac, "SYSTEM_CONFIG_DIR", profiles / "system-config")
+    clear_system_defaults_cache()
+    monkeypatch.setattr(paths, "HERMES_PROFILES_DIR", profiles)
+    monkeypatch.setattr(paths, "SYSTEM_CONFIG_DIR", profiles / "system-config")
     yield profiles
 
-    ac._system_defaults = None
+    clear_system_defaults_cache()
 
 
 def write_yaml(path: Path, data: dict) -> None:

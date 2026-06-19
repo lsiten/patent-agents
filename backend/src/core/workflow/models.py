@@ -183,4 +183,3 @@ class WorkflowContext:
             "phase_count": len(self.phase_history),
             "phases_completed": [phase.phase.value for phase in self.phase_history],
         }
-

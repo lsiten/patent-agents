@@ -4,10 +4,10 @@ import pytest
 
 from langgraph.graph import END, START, StateGraph
 
-from src.core.agui_events import AgUiEventType, REQUIRED_EVENT_TYPES, ensure_agui_payload
+from src.core.workflow.protocol.agui_events import AgUiEventType, REQUIRED_EVENT_TYPES, ensure_agui_payload
 from src.core.workflow_engine import PatentWorkflowEngine, PhaseResult, WorkflowPhase, WorkflowState
-from src.core.workflow_graph import PatentWorkflowGraphRuntime, PatentWorkflowState
-from src.core.workflow_graph.runtime import GRAPH_NODE_SEQUENCE
+from src.core.workflow.graph import PatentWorkflowGraphRuntime, PatentWorkflowState
+from src.core.workflow.graph.runtime import GRAPH_NODE_SEQUENCE
 
 
 def test_official_langgraph_dependency_is_available():
