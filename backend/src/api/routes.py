@@ -541,6 +541,8 @@ async def restore_stores_from_db() -> None:
     # 恢复对话
     try:
         for key, value in await store.load_all("conversations"):
+            if isinstance(value, dict):
+                _ensure_conversation_shared_facts(value)
             conversations_store[key] = value
             restored_conversations += 1
     except Exception as e:
@@ -1244,15 +1246,212 @@ def _linked_workflow_state(conv: Dict[str, Any]) -> Optional[str]:
     return context.current_phase.value
 
 
+_CONVERSATION_SHARED_FACT_KEYS = {
+    "patent_title",
+    "patent_type",
+    "mining_rule",
+    "closest_prior_art",
+    "invention_directions",
+    "distinguishing_points",
+    "invention_directions_text",
+    "distinguishing_points_text",
+    "independent_claim",
+    "main_claim",
+    "claim_1",
+    "claims",
+    "description",
+    "drawings",
+    "abstract",
+    "abstract_drawing",
+    "abstract_figure",
+    "summary_text",
+    "ready_marker",
+    "required_fields",
+}
+
+_CONVERSATION_SHARED_FACT_ALIASES = {
+    "title": "patent_title",
+    "invention_title": "patent_title",
+    "application_type": "patent_type",
+    "mining_principle": "mining_rule",
+    "prior_art": "closest_prior_art",
+    "nearest_prior_art": "closest_prior_art",
+    "difference_points": "distinguishing_points",
+    "directions": "invention_directions",
+    "main_claim": "independent_claim",
+    "claim_1": "independent_claim",
+}
+
+
+def _ensure_conversation_shared_facts(conv: Dict[str, Any]) -> None:
+    facts = conv.get("shared_facts")
+    if not isinstance(facts, dict):
+        facts = {}
+        conv["shared_facts"] = facts
+    version = conv.get("shared_facts_version")
+    if not isinstance(version, int):
+        version = int(facts.get("_version") or 0) if isinstance(facts.get("_version"), int) else 0
+        conv["shared_facts_version"] = version
+    facts["_version"] = version
+    history = conv.get("shared_facts_history")
+    if not isinstance(history, list):
+        conv["shared_facts_history"] = []
+
+
+def _conversation_shared_facts_payload(conv: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not conv:
+        return {
+            "shared_facts": {},
+            "shared_facts_version": 0,
+            "shared_facts_history": [],
+        }
+    _ensure_conversation_shared_facts(conv)
+    return {
+        "shared_facts": conv.get("shared_facts") or {},
+        "shared_facts_version": conv.get("shared_facts_version") or 0,
+        "shared_facts_history": conv.get("shared_facts_history") or [],
+    }
+
+
+def _normalized_shared_fact_value(value: Any) -> Any:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned if cleaned else None
+    if isinstance(value, list):
+        cleaned_items = [
+            _normalized_shared_fact_value(item)
+            for item in value
+        ]
+        return [item for item in cleaned_items if item not in (None, "", [], {})]
+    if isinstance(value, dict):
+        cleaned_dict = {
+            str(key): item
+            for key, raw in value.items()
+            if (item := _normalized_shared_fact_value(raw)) not in (None, "", [], {})
+        }
+        return cleaned_dict or None
+    return value
+
+
+def _normalize_conversation_shared_facts(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    source = dict(value)
+    for wrapper_key in (
+        "patent_preflight",
+        "shared_facts",
+        "shared_agent_context",
+        "consensus_patent_info",
+        "patent_draft",
+        "requirement_analysis",
+        "retrieval_report",
+        "review_report",
+    ):
+        wrapped = source.get(wrapper_key)
+        if isinstance(wrapped, dict):
+            source = {**source, **wrapped}
+    normalized: Dict[str, Any] = {}
+    for raw_key, raw_value in source.items():
+        key = _CONVERSATION_SHARED_FACT_ALIASES.get(str(raw_key), str(raw_key))
+        if key not in _CONVERSATION_SHARED_FACT_KEYS:
+            continue
+        value = _normalized_shared_fact_value(raw_value)
+        if value not in (None, "", [], {}):
+            normalized[key] = value
+    if "independent_claim" in normalized:
+        normalized["main_claim"] = normalized["independent_claim"]
+    return normalized
+
+
+def _is_confirmed_shared_fact_payload(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if isinstance(value.get("patent_preflight"), dict):
+        return True
+    if isinstance(value.get("shared_facts"), dict):
+        return True
+    if isinstance(value.get("shared_agent_context"), dict):
+        return True
+    if value.get("ready_marker") == _PATENT_PREFLIGHT_MARKER:
+        return True
+    if value.get("consensus") is True or value.get("confirmed") is True:
+        return True
+    return False
+
+
+def _merge_conversation_shared_facts(
+    conv: Dict[str, Any],
+    facts: Dict[str, Any],
+    *,
+    source: str,
+    message_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    incoming = _normalize_conversation_shared_facts(facts)
+    if not incoming:
+        return None
+    _ensure_conversation_shared_facts(conv)
+    current = conv["shared_facts"]
+    changed: Dict[str, Any] = {}
+    for key, value in incoming.items():
+        if current.get(key) != value:
+            current[key] = value
+            changed[key] = value
+    if not changed:
+        return None
+    version = int(conv.get("shared_facts_version") or 0) + 1
+    conv["shared_facts_version"] = version
+    current["_version"] = version
+    current["consensus"] = True
+    history_entry = {
+        "version": version,
+        "source": source,
+        "message_id": message_id,
+        "changed_keys": sorted(changed.keys()),
+        "updated_at": datetime.now().isoformat(),
+    }
+    history = conv.setdefault("shared_facts_history", [])
+    history.append(history_entry)
+    del history[:-50]
+    return _conversation_shared_facts_payload(conv)
+
+
+async def _merge_conversation_shared_facts_by_id(
+    conv_id: str,
+    facts: Dict[str, Any],
+    *,
+    source: str,
+    message_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    if not conv_id or not isinstance(facts, dict):
+        return None
+    shared_payload = None
+    async with conversations_lock:
+        conv = conversations_store.get(conv_id)
+        if conv:
+            shared_payload = _merge_conversation_shared_facts(
+                conv,
+                facts,
+                source=source,
+                message_id=message_id,
+            )
+    if shared_payload:
+        _queue_conversation_event(conv_id, "conversation_state", shared_payload)
+        await _persist_conversation(conv_id)
+    return shared_payload
+
+
 def _conversation_detail_payload(conv: Dict[str, Any]) -> Dict[str, Any]:
+    _ensure_conversation_shared_facts(conv)
     return {
         **conv,
         "workflow_state": _linked_workflow_state(conv),
         "active_reply": _conversation_active_reply_payload(conv),
+        **_conversation_shared_facts_payload(conv),
     }
 
 
 def _conversation_summary_payload(conv: Dict[str, Any]) -> Dict[str, Any]:
+    _ensure_conversation_shared_facts(conv)
     return {
         "id": conv["id"],
         "title": conv["title"],
@@ -1263,6 +1462,7 @@ def _conversation_summary_payload(conv: Dict[str, Any]) -> Dict[str, Any]:
         "linked_workflow_id": conv.get("linked_workflow_id"),
         "workflow_state": _linked_workflow_state(conv),
         "active_reply": _conversation_active_reply_payload(conv),
+        **_conversation_shared_facts_payload(conv),
     }
 
 
@@ -1978,6 +2178,14 @@ async def _resume_workflow_from_user_supplement(
             )
         await _persist_events(task_id)
         await _persist_workflow(task_id)
+        if result.success and isinstance(result.output, dict):
+            target_conv_id = conversation_id or str(context.metadata.get("conversation_id") or "")
+            if target_conv_id:
+                await _merge_conversation_shared_facts_by_id(
+                    target_conv_id,
+                    result.output,
+                    source=f"workflow.resume.phase.{phase.value}",
+                )
 
     async def agent_event_callback(event: Dict[str, Any]):
         event = dict(event)
@@ -2006,6 +2214,12 @@ async def _resume_workflow_from_user_supplement(
                 _append_workflow_terminal_event(task_id, context, "专利工作流已根据补充信息继续执行")
             await _persist_events(task_id)
             await _persist_workflow(task_id)
+            if result.success and isinstance(result.output, dict) and conv_id:
+                await _merge_conversation_shared_facts_by_id(
+                    conv_id,
+                    result.output,
+                    source=f"workflow.restart.phase.{phase.value}",
+                )
         except Exception as e:
             async with workflow_lock:
                 _append_workflow_event(
@@ -2016,6 +2230,17 @@ async def _resume_workflow_from_user_supplement(
                 )
             await _persist_events(task_id)
             await _persist_workflow(task_id)
+            if result.success and isinstance(result.output, dict):
+                target_conv_id = str(context.metadata.get("conversation_id") or "")
+                if not target_conv_id:
+                    async with conversations_lock:
+                        target_conv_id = _linked_workflow_conversation_id(task_id)
+                if target_conv_id:
+                    await _merge_conversation_shared_facts_by_id(
+                        target_conv_id,
+                        result.output,
+                        source=f"workflow.retry.phase.{result.phase.value}",
+                    )
             logger.exception("工作流补充信息恢复后台任务失败", exc_info=e)
 
     _track_workflow_background_task(task_id, run_resume_from_chat())
@@ -2117,6 +2342,17 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
             )
         await _persist_events(task_id)
         await _persist_workflow(task_id)
+        if result.success and isinstance(result.output, dict):
+            target_conv_id = str(context.metadata.get("conversation_id") or "")
+            if not target_conv_id:
+                async with conversations_lock:
+                    target_conv_id = _linked_workflow_conversation_id(task_id)
+            if target_conv_id:
+                await _merge_conversation_shared_facts_by_id(
+                    target_conv_id,
+                    result.output,
+                    source=f"workflow.start.phase.{phase.value}",
+                )
 
     def _workflow_event_callback(agent_name: str, event_type: str, message: str, data: Dict[str, Any]):
         """直接将agent事件写入task_events（绕过事件总线）"""
@@ -2146,6 +2382,17 @@ async def start_workflow(task_id: str, background_tasks: BackgroundTasks):
                     data=event,
                 )
             await _persist_events(task_id)
+            if result.success and isinstance(result.output, dict):
+                target_conv_id = str(context.metadata.get("conversation_id") or "")
+                if not target_conv_id:
+                    async with conversations_lock:
+                        target_conv_id = _linked_workflow_conversation_id(task_id)
+                if target_conv_id:
+                    await _merge_conversation_shared_facts_by_id(
+                        target_conv_id,
+                        result.output,
+                        source=f"workflow.legacy.phase.{phase.value}",
+                    )
 
         try:
             await _execute_full_workflow_compat(
@@ -2218,6 +2465,17 @@ async def resume_workflow(task_id: str, background_tasks: BackgroundTasks):
             )
         await _persist_events(task_id)
         await _persist_workflow(task_id)
+        if result.success and isinstance(result.output, dict):
+            target_conv_id = str(context.metadata.get("conversation_id") or "")
+            if not target_conv_id:
+                async with conversations_lock:
+                    target_conv_id = _linked_workflow_conversation_id(task_id)
+            if target_conv_id:
+                await _merge_conversation_shared_facts_by_id(
+                    target_conv_id,
+                    result.output,
+                    source=f"workflow.resume_full.phase.{phase.value}",
+                )
 
     def _workflow_event_callback(agent_name: str, event_type: str, message: str, data: Dict[str, Any]):
         task_events.setdefault(task_id, []).append(
@@ -2367,6 +2625,17 @@ async def workflow_decision(
             )
         await _persist_events(task_id)
         await _persist_workflow(task_id)
+        if result.success and isinstance(result.output, dict):
+            target_conv_id = str(context.metadata.get("conversation_id") or "")
+            if not target_conv_id:
+                async with conversations_lock:
+                    target_conv_id = _linked_workflow_conversation_id(task_id)
+            if target_conv_id:
+                await _merge_conversation_shared_facts_by_id(
+                    target_conv_id,
+                    result.output,
+                    source=f"workflow.decision.phase.{phase.value}",
+                )
 
     async def run_decision_resume():
         async def agent_event_callback(event: Dict[str, Any]):
@@ -4147,12 +4416,11 @@ def _extract_recommended_patent_title(response_text: str) -> Optional[str]:
 _PATENT_PREFLIGHT_MARKER = "[PATENT_PREFLIGHT_READY]"
 _PATENT_PREFLIGHT_REQUIRED_FIELDS = {
     "patent_title": ("专利名称", "发明名称"),
-    "protection_theme": ("保护主题", "核心保护主题", "保护主线"),
-    "patent_type": ("专利类型", "保护类型", "申请类型"),
-    "claim_skeleton": ("独权骨架", "独立权利要求骨架", "三步", "四步", "3步", "4步"),
-    "technical_facts": ("关键技术事实", "必要技术事实", "技术事实"),
-    "public_status": ("公开状态", "是否公开"),
-    "drawing_plan": ("附图需求", "附图规划", "附图方案"),
+    "patent_type": ("专利类型", "撰写类型", "申请类型"),
+    "mining_rule": ("挖掘规则", "专利挖掘规则", "权利挖掘规则"),
+    "closest_prior_art": ("最接近现有技术", "最接近的现有技术"),
+    "distinguishing_points": ("发明方向", "挖掘方向", "区别点", "最大区别点", "差异点", "创新点"),
+    "independent_claim": ("主权要", "独立权利要求", "权利要求1"),
 }
 _PATENT_PREFLIGHT_UNRESOLVED_PATTERNS = (
     "尚未明确",
@@ -4166,6 +4434,95 @@ _PATENT_PREFLIGHT_UNRESOLVED_PATTERNS = (
     "需用户",
     "继续确认",
 )
+
+
+def _extract_labeled_block(text: str, aliases: tuple[str, ...], *, max_chars: int = 2500) -> Optional[str]:
+    """Extract a Chinese label block from agent text without inventing missing facts."""
+    alias_pattern = "|".join(re.escape(alias) for alias in aliases)
+    next_label_pattern = "|".join(
+        re.escape(alias)
+        for values in _PATENT_PREFLIGHT_REQUIRED_FIELDS.values()
+        for alias in values
+    )
+    pattern = re.compile(
+        rf"(?:^|\n)\s*(?:{alias_pattern})\s*[：:]\s*(.*?)(?=\n\s*(?:{next_label_pattern})\s*[：:]|\n\s*{re.escape(_PATENT_PREFLIGHT_MARKER)}|\Z)",
+        re.S,
+    )
+    match = pattern.search(text)
+    if not match:
+        return None
+    value = match.group(1).strip()
+    value = re.sub(r"\n{3,}", "\n\n", value)
+    return value[:max_chars] if value else None
+
+
+def _extract_list_from_block(block: Optional[str]) -> List[Dict[str, str]]:
+    """Parse distinguishing point summaries into clickable frontend items."""
+    if not block:
+        return []
+
+    sections: List[Dict[str, str]] = []
+    current: Dict[str, str] = {}
+    current_detail: List[str] = []
+
+    def flush() -> None:
+        nonlocal current, current_detail
+        if not current and not current_detail:
+            return
+        detail = "\n".join(line for line in current_detail if line.strip()).strip()
+        if detail and not current.get("detail"):
+            current["detail"] = detail
+        name = current.get("name") or (detail.splitlines()[0].strip(" -、0123456789.") if detail else "")
+        if name:
+            current["name"] = name[:80]
+            sections.append(current)
+        current = {}
+        current_detail = []
+
+    for raw_line in block.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        heading = re.match(r"^(?:[-*•]\s*)?(?:区别点|差异点|创新点)?\s*(\d+|[一二三四五六七八九十]+)?[、.：:]\s*(.+)$", line)
+        if heading and ("：" not in heading.group(2) and ":" not in heading.group(2)):
+            flush()
+            current["name"] = heading.group(2).strip()
+            continue
+
+        field_match = re.match(r"^(?:[-*•]\s*)?【?([^】：:]{2,18})】?\s*[：:]\s*(.+)$", line)
+        if field_match:
+            key = field_match.group(1).strip()
+            value = field_match.group(2).strip()
+            normalized_key = {
+                "现有技术缺陷": "prior_art_gap",
+                "对应现有技术缺口": "prior_art_gap",
+                "技术问题": "technical_problem",
+                "核心技术手段": "technical_solution",
+                "技术手段": "technical_solution",
+                "有益效果": "technical_effect",
+                "技术效果": "technical_effect",
+                "可申请价值": "patent_value",
+                "风险": "risk",
+                "需补充信息": "risk",
+                "落入独权步骤": "claim_step",
+                "可落入独权的步骤": "claim_step",
+            }.get(key)
+            if normalized_key:
+                current[normalized_key] = value
+            current_detail.append(line)
+            continue
+
+        current_detail.append(line)
+
+    flush()
+    if sections:
+        return sections[:12]
+
+    return [
+        {"name": line[:80], "detail": line}
+        for line in re.split(r"\n+|；|;", block)
+        if line.strip()
+    ][:12]
 
 
 def _strip_workflow_recommendation_markers(text: str) -> str:
@@ -4182,15 +4539,20 @@ def _extract_patent_preflight_summary(response_text: str) -> Optional[Dict[str, 
         return None
 
     clean_text = _strip_workflow_recommendation_markers(response_text)
-    title = _extract_recommended_patent_title(clean_text)
+    partial = _extract_patent_info_partial(clean_text)
+    title = str(partial.get("patent_title") or "").strip()
     if not title:
         return None
 
+    labeled = {
+        field: _extract_labeled_block(clean_text, aliases)
+        for field, aliases in _PATENT_PREFLIGHT_REQUIRED_FIELDS.items()
+    }
     missing_fields: List[str] = []
     for field, aliases in _PATENT_PREFLIGHT_REQUIRED_FIELDS.items():
         if field == "patent_title":
             continue
-        if not any(alias in clean_text for alias in aliases):
+        if not any(alias in clean_text for alias in aliases) or not labeled.get(field):
             missing_fields.append(field)
 
     # A preflight summary is only useful when the agent says the required facts are settled.
@@ -4201,11 +4563,70 @@ def _extract_patent_preflight_summary(response_text: str) -> Optional[Dict[str, 
         return None
 
     return {
-        "patent_title": title,
+        **partial,
         "ready_marker": _PATENT_PREFLIGHT_MARKER,
         "required_fields": sorted(_PATENT_PREFLIGHT_REQUIRED_FIELDS.keys()),
         "summary_text": clean_text[:6000],
     }
+
+
+def _extract_patent_info_partial(response_text: str) -> Dict[str, Any]:
+    """Extract patent workspace facts from any agent/tool text without marking workflow ready."""
+    clean_text = _strip_workflow_recommendation_markers(response_text or "")
+    labeled = {
+        field: _extract_labeled_block(clean_text, aliases)
+        for field, aliases in _PATENT_PREFLIGHT_REQUIRED_FIELDS.items()
+    }
+    title = _extract_recommended_patent_title(clean_text) or labeled.get("patent_title")
+    distinguishing_points = _extract_list_from_block(labeled.get("distinguishing_points"))
+    data: Dict[str, Any] = {}
+    if title:
+        data["patent_title"] = str(title).strip()
+    if labeled.get("patent_type"):
+        data["patent_type"] = labeled["patent_type"]
+    if labeled.get("mining_rule"):
+        data["mining_rule"] = labeled["mining_rule"]
+    if labeled.get("closest_prior_art"):
+        data["closest_prior_art"] = labeled["closest_prior_art"]
+    if distinguishing_points:
+        data["invention_directions"] = distinguishing_points
+        data["distinguishing_points"] = distinguishing_points
+    if labeled.get("distinguishing_points"):
+        data["invention_directions_text"] = labeled["distinguishing_points"]
+        data["distinguishing_points_text"] = labeled["distinguishing_points"]
+    if labeled.get("independent_claim"):
+        data["independent_claim"] = labeled["independent_claim"]
+    return data
+
+
+def _compact_stream_payload(value: Any, *, max_string: int = 4000, max_items: int = 20) -> Any:
+    """Keep stream payloads structured enough for the UI without sending huge tool artifacts."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:max_string]
+    if isinstance(value, dict):
+        return {
+            str(key): _compact_stream_payload(item, max_string=max_string, max_items=max_items)
+            for key, item in list(value.items())[:max_items]
+        }
+    if isinstance(value, list):
+        return [
+            _compact_stream_payload(item, max_string=max_string, max_items=max_items)
+            for item in value[:max_items]
+        ]
+    return str(value)[:max_string]
+
+
+def _text_for_patent_info(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except Exception:
+        return str(value)
 
 
 def _normalized_patent_title(value: str) -> str:
@@ -4233,8 +4654,28 @@ def _extract_patent_preflight_from_message(
     return None
 
 
+def _extract_patent_preflight_from_shared_facts(
+    conv: dict, patent_title: str
+) -> Optional[Dict[str, Any]]:
+    facts = conv.get("shared_facts")
+    if not isinstance(facts, dict):
+        return None
+    normalized_title = _normalized_patent_title(patent_title)
+    ready_title = _normalized_patent_title(str(facts.get("patent_title") or ""))
+    if ready_title != normalized_title:
+        return None
+    required = ("patent_title", "patent_type", "mining_rule", "closest_prior_art", "independent_claim")
+    if not all(str(facts.get(key) or "").strip() for key in required):
+        return None
+    if not (facts.get("distinguishing_points") or facts.get("invention_directions")):
+        return None
+    return dict(facts)
+
+
 def _conversation_has_patent_preflight_ready(conv: dict, patent_title: str) -> bool:
     """Server-side gate: frontend confirmation cannot start a workflow without preflight."""
+    if _extract_patent_preflight_from_shared_facts(conv, patent_title):
+        return True
     for message in reversed(conv.get("messages", [])):
         if _extract_patent_preflight_from_message(message, patent_title):
             return True
@@ -4243,6 +4684,9 @@ def _conversation_has_patent_preflight_ready(conv: dict, patent_title: str) -> b
 
 def _extract_latest_patent_preflight(conv: dict, patent_title: str) -> Dict[str, Any]:
     """Get the latest confirmed preflight package for workflow shared context."""
+    shared = _extract_patent_preflight_from_shared_facts(conv, patent_title)
+    if shared:
+        return shared
     for message in reversed(conv.get("messages", [])):
         preflight = _extract_patent_preflight_from_message(message, patent_title)
         if preflight:
@@ -4250,27 +4694,32 @@ def _extract_latest_patent_preflight(conv: dict, patent_title: str) -> Dict[str,
     return {}
 
 
-_PATENT_PREFLIGHT_PROMPT = f"""- 启动正式专利申请流程前，必须先完成“启动前方案确认”，不能只凭用户一句“生成专利/开始流程”直接启动
-- 头脑风暴阶段可以调用 patent_search 等工具做初步事实补齐；正式检索阶段再按已确认的专利方向做更细的现有技术证据收集
-- 未满足以下全部条件时，禁止输出 [CREATE_PATENT_RECOMMENDATION]，应继续调用工具、调度专业 Agent 或向用户确认：
-  1. 专利名称/发明名称已明确，且与技术主题一致
-  2. 核心保护主题已明确，不能是泛泛领域名
-  3. 专利类型/保护类型已明确
-  4. 独权骨架已明确为 3 步或 4 步，并能覆盖核心创新
-  5. 关键技术事实已明确到足以撰写：输入、处理对象、核心步骤、输出、关键参数/边界条件
-  6. 公开状态/申请策略风险已确认
-  7. 附图需求和每张图表达内容已初步规划
-- 满足全部条件并准备建议启动时，回复中必须包含：
+_PATENT_PREFLIGHT_PROMPT = f"""- 你当前处于“头脑风暴/权要确定”阶段。正式专利申请流程只能在用户确认主权要后启动，不能只凭用户一句“生成专利/开始流程”直接启动。
+- 头脑风暴核心目标：确定权利要求1的保护点。后续撰写流程必须围绕已确认主权要展开。
+- 必须按以下顺序推进：
+  1. 先确定专利类型。可选项：电学发明、机械发明、化学发明、实用新型。未确定时使用 [CONFIRM: 请选择撰写类型|电学发明|机械发明|化学发明|实用新型]。
+  2. 再确定挖掘规则。可选项：仅挖掘实用新型、挖掘发明及实用新型（严谨）、挖掘发明及实用新型（宽松）。未确定时使用 [CONFIRM: 请选择挖掘规则|仅挖掘实用新型|挖掘发明及实用新型（严谨）|挖掘发明及实用新型（宽松）]。
+  3. 基于交底材料和对话先找最接近现有技术；事实不足时可以调用 patent_search 等工具做初步事实补齐，不能编造检索事实。
+  4. 进行专利挖掘：不是复述已有方案，而是根据已有内容挖掘新的可申请发明方向。每个方向都要说明它相对最接近现有技术的最大区别点，允许用户多选或补充自定义方向。每个方向必须有可点击详情所需结构：方向名称、对应现有技术缺口、技术问题、技术手段、技术效果/可申请价值、可落入独权的步骤、风险/需补充信息。
+  5. 根据用户确认的发明方向/区别点撰写主权要草案。主权要必须仅由 3 步或 4 步组成；权利要求中的每个分号和句号后必须换行。
+  6. 主权要草案必须先给用户确认。未确认时不要输出启动推荐标记。
+- 满足以下全部条件时，才允许建议启动正式流程：
+  1. 专利名称/发明名称已明确，且与主权要保护方向一致；
+  2. 专利类型已明确；
+  3. 挖掘规则已明确；
+  4. 最接近现有技术已明确，且来源或依据已说明；
+  5. 发明方向/区别点清单已明确，至少一个方向已被用户确认用于主权要；
+  6. 主权要/权利要求1草案已给出并已被用户确认。
+- 满足全部条件并准备建议启动时，回复中必须包含以下标签，标签名不能省略：
   专利名称：……
-  保护主题：……
   专利类型：……
-  独权骨架：3步/4步，……
-  关键技术事实：……
-  公开状态：……
-  附图需求：……
+  挖掘规则：……
+  最接近现有技术：……
+  发明方向：……
+  主权要：……
   {_PATENT_PREFLIGHT_MARKER}
   [CREATE_PATENT_RECOMMENDATION]
-- 如果任一项还不能确认，必须给出下一步确认问题，必要时使用 [CONFIRM: 问题|选项1|选项2|选项3]，不要输出启动推荐标记"""
+- 如果任一项还不能确认，必须给出下一步确认问题，必要时使用 [CONFIRM: 问题|选项1|选项2|选项3]，不要输出启动推荐标记。"""
 
 
 def _should_recommend_workflow_creation(
@@ -4407,7 +4856,7 @@ async def create_conversation(request: CreateConversationRequest):
             {
                 "id": greeting_id,
                 "role": "assistant",
-                "content": "你好！我是专利智脑的创意助手。请告诉我你的技术构思，我们可以一起探讨它的专利价值。",
+                "content": "你好！我是专利智脑的创意助手。请告诉我你的技术构思或上传交底材料。我会先确认专利类型、挖掘规则、最接近现有技术、发明方向/区别点，并产出主权要草案供你确认。",
                 "timestamp": now,
                 "type": "text",
                 "metadata": None,
@@ -4417,6 +4866,9 @@ async def create_conversation(request: CreateConversationRequest):
         "updated_at": now,
         "status": "brainstorming",
         "linked_workflow_id": None,
+        "shared_facts": {},
+        "shared_facts_version": 0,
+        "shared_facts_history": [],
     }
     async with conversations_lock:
         conversations_store[conv_id] = conversation
@@ -4563,6 +5015,15 @@ async def chat_in_conversation(conv_id: str, request: ConversationChatRequest):
             conv["messages"].append(user_msg)
             conv["messages"].append(assistant_msg)
             conv["updated_at"] = datetime.now().isoformat()
+            if preflight_summary:
+                shared_payload = _merge_conversation_shared_facts(
+                    conv,
+                    preflight_summary,
+                    source="brainstorm.final",
+                    message_id=assistant_msg["id"],
+                )
+                if shared_payload:
+                    _queue_conversation_event(conv_id, "conversation_state", shared_payload)
             # 自动生成标题（从第一条用户消息）
             user_msgs = [m for m in conv["messages"] if m["role"] == "user"]
             if conv["title"] == "新的对话" and len(user_msgs) == 1:
@@ -4727,6 +5188,15 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
             )
             events.append({"type": "agent_activity", "data": activity})
             agent_events.append(activity)
+            if _is_confirmed_shared_fact_payload(data):
+                events.append({
+                    "type": "consensus_update",
+                    "data": {
+                        "facts": data,
+                        "source": f"agent_activity.{event_type}",
+                        "message_id": activity.get("id"),
+                    },
+                })
 
         def on_thinking(data):
             text = str(data).strip() if data else ""
@@ -4761,16 +5231,27 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
 
         def on_tool_complete(call_id, name, args, result):
             with events_lock:
-                result_str = str(result)[:500] if result else ""
+                compact_result = _compact_stream_payload(result)
+                result_text = _text_for_patent_info(result)
+                result_str = result_text[:500] if result_text else ""
+                patent_info = _extract_patent_info_partial(result_text)
                 tool_calls_data.append({
                     "name": name,
                     "result": result_str,
                     "success": True,
                 })
+                payload = {
+                    "name": name,
+                    "result": compact_result,
+                    "result_text": result_str,
+                    "success": True,
+                }
+                if patent_info:
+                    payload["candidate_patent_info"] = patent_info
                 append_agent_activity(
                     event_type="tool_call_end",
                     message=f"工具完成: {name}",
-                    data={"name": name, "result": result_str, "success": True},
+                    data=payload,
                     call_id=str(call_id),
                 )
 
@@ -4858,6 +5339,10 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
             preflight_summary = (
                 _extract_patent_preflight_summary(final_content) if has_recommendation else None
             )
+            consensus_patent_info = preflight_summary
+            candidate_patent_info = (
+                None if consensus_patent_info else _extract_patent_info_partial(final_content)
+            )
             clean_content = _strip_workflow_recommendation_markers(final_content)
 
             confirmation_data = None
@@ -4880,6 +5365,9 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                     assistant_metadata["suggested_title"] = suggested_title
                 if preflight_summary:
                     assistant_metadata["patent_preflight"] = preflight_summary
+                    assistant_metadata["patent_info"] = preflight_summary
+            if candidate_patent_info:
+                assistant_metadata["candidate_patent_info"] = candidate_patent_info
             if confirmation_data:
                 assistant_metadata["confirmation"] = confirmation_data
 
@@ -4899,6 +5387,15 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                 if c:
                     c["messages"].append(assistant_msg)
                     c["updated_at"] = datetime.now().isoformat()
+                    if preflight_summary:
+                        shared_payload = _merge_conversation_shared_facts(
+                            c,
+                            preflight_summary,
+                            source="brainstorm.stream.final",
+                            message_id=assistant_msg["id"],
+                        )
+                        if shared_payload:
+                            _queue_conversation_event(conv_id, "conversation_state", shared_payload)
                     user_msgs = [m for m in c["messages"] if m["role"] == "user"]
                     if c["title"] == "新的对话" and len(user_msgs) == 1:
                         title = content[:50]
@@ -4910,6 +5407,8 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                 "message": assistant_msg,
                 "content": clean_content,
                 "has_recommendation": has_recommendation,
+                "patent_info": consensus_patent_info,
+                "candidate_patent_info": candidate_patent_info,
                 "confirmation": confirmation_data,
             }
 
@@ -4929,6 +5428,21 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                 for event in batch:
                     event_type = event.get("type", "status")
                     event_data = event.get("data", {})
+                    if event_type == "consensus_update":
+                        shared_payload = None
+                        async with conversations_lock:
+                            c = conversations_store.get(conv_id)
+                            if c and isinstance(event_data, dict):
+                                shared_payload = _merge_conversation_shared_facts(
+                                    c,
+                                    event_data.get("facts") if isinstance(event_data.get("facts"), dict) else {},
+                                    source=str(event_data.get("source") or "agent_activity"),
+                                    message_id=str(event_data.get("message_id") or ""),
+                                )
+                        if shared_payload:
+                            await _persist_conversation(conv_id)
+                            yield f"event: conversation_state\ndata: {_json.dumps(shared_payload, ensure_ascii=False)}\n\n"
+                        continue
                     yield f"event: {event_type}\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
 
                 if not batch and not result_holder["done"]:
@@ -4959,15 +5473,16 @@ async def chat_in_conversation_stream(conv_id: str, request: ConversationChatReq
                 has_recommendation = finalized_result["has_recommendation"]
                 confirmation_data = finalized_result["confirmation"]
                 assistant_msg = finalized_result["message"]
+                patent_info = finalized_result.get("patent_info")
 
                 # 发送 content 事件
-                yield f"event: content\ndata: {_json.dumps({'content': clean_content, 'has_recommendation': has_recommendation}, ensure_ascii=False)}\n\n"
+                yield f"event: content\ndata: {_json.dumps({'content': clean_content, 'has_recommendation': has_recommendation, 'patent_info': patent_info}, ensure_ascii=False)}\n\n"
 
                 # If confirmation needed, emit confirmation event
                 if confirmation_data:
                     yield f"event: confirmation\ndata: {_json.dumps(confirmation_data, ensure_ascii=False)}\n\n"
 
-                yield f"event: done\ndata: {_json.dumps({'message': assistant_msg, 'has_recommendation': has_recommendation, 'needs_confirmation': confirmation_data is not None, 'conversation_id': conv_id}, ensure_ascii=False)}\n\n"
+                yield f"event: done\ndata: {_json.dumps({'message': assistant_msg, 'has_recommendation': has_recommendation, 'needs_confirmation': confirmation_data is not None, 'conversation_id': conv_id, 'patent_info': patent_info}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             await _clear_conversation_active_reply(
@@ -5186,8 +5701,8 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
         raise HTTPException(
             status_code=400,
             detail=(
-                "启动专利申请前必须先完成方案确认：专利名称、保护主题、专利类型、"
-                "独权3步或4步骨架、关键技术事实、公开状态和附图需求都需由 Agent 明确并经用户确认。"
+                "启动专利申请前必须先完成主权要确认：专利名称、专利类型、挖掘规则、"
+                "最接近现有技术、发明方向/区别点和主权要都需由 Agent 明确并经用户确认。"
                 "请继续头脑风暴补齐后再启动。"
             ),
         )
@@ -5197,6 +5712,7 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
     if not user_msgs:
         raise HTTPException(status_code=400, detail="对话中没有用户消息，无法创建工作流")
     tech_description = " ".join(user_msgs)
+    confirmed_preflight = _extract_latest_patent_preflight(conv, patent_title)
 
     # 创建工作流
     async with workflow_lock:
@@ -5205,7 +5721,7 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             user_id=request.user_id,
             description=tech_description,
             target_country=request.target_country,
-            confirmed_preflight=_extract_latest_patent_preflight(conv, patent_title),
+            confirmed_preflight=confirmed_preflight,
         )
         task_id = context.task_id
         context.title = patent_title
@@ -5238,6 +5754,13 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
             conv["linked_workflow_id"] = task_id
             conv["status"] = "workflow_linked"
             conv["updated_at"] = datetime.now().isoformat()
+            shared_payload = _merge_conversation_shared_facts(
+                conv,
+                confirmed_preflight,
+                source="workflow.confirmed_preflight",
+            )
+            if shared_payload:
+                _queue_conversation_event(conv_id, "conversation_state", shared_payload)
 
             workflow_msg = {
                 "id": f"workflow-created-{task_id}",
@@ -5290,6 +5813,19 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
                 )
             await _persist_events(task_id)
             await _persist_workflow(task_id)
+            if result.success and isinstance(result.output, dict):
+                shared_payload = None
+                async with conversations_lock:
+                    c = conversations_store.get(conv_id)
+                    if c:
+                        shared_payload = _merge_conversation_shared_facts(
+                            c,
+                            result.output,
+                            source=f"workflow.phase.{phase.value}",
+                        )
+                if shared_payload:
+                    _queue_conversation_event(conv_id, "conversation_state", shared_payload)
+                    await _persist_conversation(conv_id)
 
         async def agent_event_callback(event: Dict[str, Any]):
             event = dict(event)
@@ -5310,6 +5846,15 @@ async def create_workflow_from_conversation(conv_id: str, request: CreateWorkflo
                 if c:
                     c["messages"].append(message)
                     c["updated_at"] = datetime.now().isoformat()
+                    if _is_confirmed_shared_fact_payload(event):
+                        shared_payload = _merge_conversation_shared_facts(
+                            c,
+                            event,
+                            source=str(event.get("event_type") or "workflow.agent_event"),
+                            message_id=message["id"],
+                        )
+                        if shared_payload:
+                            _queue_conversation_event(conv_id, "conversation_state", shared_payload)
             _queue_conversation_event(conv_id, "agent_work", event)
             activity = _agent_activity_from_workflow_event(event)
             if activity:
@@ -5376,7 +5921,11 @@ async def stream_conversation_events(conv_id: str):
         async with conversations_lock:
             initial_conv = conversations_store.get(conv_id)
             initial_active_reply = _conversation_active_reply_payload(initial_conv)
-        yield f"event: conversation_state\ndata: {_json.dumps({'active_reply': initial_active_reply}, ensure_ascii=False)}\n\n"
+            initial_state = {
+                "active_reply": initial_active_reply,
+                **_conversation_shared_facts_payload(initial_conv),
+            }
+        yield f"event: conversation_state\ndata: {_json.dumps(initial_state, ensure_ascii=False)}\n\n"
         while True:
             sent_this_tick = False
             while True:

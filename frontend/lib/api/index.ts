@@ -871,6 +871,9 @@ export interface ConversationSummary {
   workflow_task_id?: string | null;
   workflow_state?: string | null;
   active_reply?: ConversationActiveReply | null;
+  shared_facts?: Record<string, unknown>;
+  shared_facts_version?: number;
+  shared_facts_history?: Array<Record<string, unknown>>;
 }
 
 export interface ConversationDetail extends ConversationSummary {
@@ -1001,7 +1004,12 @@ export const conversationApi = {
       onAgentWork?: (data: AgentWorkEvent) => void;
       onAgentActivity?: (data: AgentEvent) => void;
       onConversationMessage?: (data: ChatMessage) => void;
-      onConversationState?: (data: { active_reply?: ConversationActiveReply | null }) => void;
+      onConversationState?: (data: {
+        active_reply?: ConversationActiveReply | null;
+        shared_facts?: Record<string, unknown>;
+        shared_facts_version?: number;
+        shared_facts_history?: Array<Record<string, unknown>>;
+      }) => void;
       onDone?: () => void;
       onError?: (error: string) => void;
     },

@@ -392,6 +392,9 @@ class ConversationSummary(BaseModel):
     linked_workflow_id: Optional[str] = None
     workflow_state: Optional[str] = None
     active_reply: Optional[Dict[str, Any]] = None
+    shared_facts: Dict[str, Any] = Field(default_factory=dict)
+    shared_facts_version: int = 0
+    shared_facts_history: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ToolCallInfo(BaseModel):
