@@ -11,6 +11,13 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence
 
+from src.core.constants.patent_rules import (
+    DEPENDENT_CLAIM_MAX_CHARS,
+    INDEPENDENT_CLAIM_ALLOWED_STEP_COUNTS,
+    INDEPENDENT_CLAIM_MAX_CHARS,
+    TRANSCRIPT_ARTIFACT_MARKERS,
+)
+
 
 TRANSCRIPT_ARTIFACT_RE = re.compile(
     r"[\u4e00-\u9fa5A-Za-z0-9_·（）()、\s]{1,30}[（(]\d{2}:\d{2}:\d{2}[）)]\s*[：:]?"
@@ -29,7 +36,11 @@ def sanitize_transcript_text(text: str) -> Dict[str, Any]:
         r"^\s*[\u4e00-\u9fa5A-Za-z0-9_·（）()、\s]{1,30}[（(]\d{2}:\d{2}:\d{2}[）)]\s*[：:]?\s*"
     )
     plain_ts = re.compile(r"^\s*[（(]?\d{2}:\d{2}:\d{2}[）)]?\s*[：:]?\s*")
-    filename_noise = re.compile(r"^\s*(文件名|任务编号|生成时间|逐字稿|会议记录|转写文本)\s*[：:]")
+    filename_noise = re.compile(
+        r"^\s*(文件名|任务编号|生成时间|"
+        + "|".join(re.escape(item) for item in TRANSCRIPT_ARTIFACT_MARKERS)
+        + r")\s*[：:]"
+    )
     conversational_noise = re.compile(
         r"^(这样)?我(先|来)?开个头[！!。.]?$|^你说[。.]?$|^然后[。.]?$|^对写的时候.*$"
     )
@@ -164,7 +175,7 @@ def validate_claim_rules(claims: Any) -> Dict[str, Any]:
         })
     else:
         step_count = len(_find_claim_steps(independent))
-        if step_count not in (3, 4):
+        if step_count not in INDEPENDENT_CLAIM_ALLOWED_STEP_COUNTS:
             issues.append({
                 "severity": "critical",
                 "location": "权利要求1",
@@ -172,11 +183,14 @@ def validate_claim_rules(claims: Any) -> Dict[str, Any]:
                 "suggestion": "将独立权利要求重构为S1-S3或S1-S4，每步承接前一步输出。",
                 "target_agent": "patent_writer",
             })
-        if len(independent) > 250:
+        if len(independent) > INDEPENDENT_CLAIM_MAX_CHARS:
             issues.append({
                 "severity": "high",
                 "location": "权利要求1",
-                "issue": f"独立权利要求超过250字，当前约{len(independent)}字",
+                "issue": (
+                    f"独立权利要求超过{INDEPENDENT_CLAIM_MAX_CHARS}字，"
+                    f"当前约{len(independent)}字"
+                ),
                 "suggestion": "删除实施例细节和非必要参数，保留必要技术特征。",
                 "target_agent": "patent_writer",
             })
@@ -191,11 +205,14 @@ def validate_claim_rules(claims: Any) -> Dict[str, Any]:
 
     for idx, block in enumerate(claim_blocks, start=1):
         is_secondary_independent = idx > 1 and _is_secondary_independent_claim(block)
-        if idx > 1 and not is_secondary_independent and len(block) > 200:
+        if idx > 1 and not is_secondary_independent and len(block) > DEPENDENT_CLAIM_MAX_CHARS:
             issues.append({
                 "severity": "high",
                 "location": f"权利要求{idx}",
-                "issue": f"从属权利要求超过200字，当前约{len(block)}字",
+                "issue": (
+                    f"从属权利要求超过{DEPENDENT_CLAIM_MAX_CHARS}字，"
+                    f"当前约{len(block)}字"
+                ),
                 "suggestion": "删减实施例细节和非必要限定，保留该从属权利要求的单一附加特征。",
                 "target_agent": "patent_writer",
             })

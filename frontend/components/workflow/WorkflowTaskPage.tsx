@@ -23,6 +23,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/Tabs';
 import { CodeBlock } from '@/components/ui/CodeBlock';
 import { workflowApi, type WorkflowResponse } from '@/lib/api';
+import { API_BASE_URL, POLLING_INTERVALS, SSE_RECONNECT } from '@/lib/constants/runtime';
 import {
   createWorkflowProtocolStore,
   normalizeWorkflowProtocolEvent,
@@ -341,7 +342,9 @@ export default function WorkflowPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pollIntervalMs, setPollIntervalMs] = useState(3000);
+  const [pollIntervalMs, setPollIntervalMs] = useState<number>(
+    POLLING_INTERVALS.workflowInitialMs
+  );
   const [isPaused, setIsPaused] = useState(false);
   const [agentLogs, setAgentLogs] = useState<AgentLogEntry[]>([]);
   const [supplementalInfo, setSupplementalInfo] = useState('');
@@ -351,10 +354,7 @@ export default function WorkflowPage() {
   useEffect(() => {
     if (!taskId) return;
 
-    const baseUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1').replace(/\/+$/, '');
-    const SSE_MAX_RETRIES = 8;
-    const SSE_INITIAL_DELAY = 1000;
-    const SSE_MAX_DELAY = 30000;
+    const baseUrl = API_BASE_URL;
 
     let es: EventSource | null = null;
     let retryCount = 0;
@@ -572,11 +572,14 @@ export default function WorkflowPage() {
       es.onerror = () => {
         if (closed) return;
         retryCount++;
-        if (retryCount > SSE_MAX_RETRIES) {
+        if (retryCount > SSE_RECONNECT.maxRetries) {
           clearEventSource();
           return;
         }
-        const delay = Math.min(SSE_INITIAL_DELAY * Math.pow(2, retryCount - 1), SSE_MAX_DELAY);
+        const delay = Math.min(
+          SSE_RECONNECT.initialDelayMs * Math.pow(2, retryCount - 1),
+          SSE_RECONNECT.maxDelayMs
+        );
         clearEventSource();
         retryTimer = setTimeout(connect, delay);
       };
@@ -665,10 +668,12 @@ export default function WorkflowPage() {
       const data = await workflowApi.get(taskId);
       setWorkflow(data);
       setError(null);
-      setPollIntervalMs(3000);
+      setPollIntervalMs(POLLING_INTERVALS.workflowInitialMs);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '获取工作流状态失败');
-      setPollIntervalMs((currentInterval) => Math.min(currentInterval * 2, 30000));
+      setPollIntervalMs((currentInterval) => (
+        Math.min(currentInterval * 2, POLLING_INTERVALS.workflowMaxMs)
+      ));
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);

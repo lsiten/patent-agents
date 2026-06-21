@@ -1,37 +1,8 @@
-"""LLM client module."""
+"""LLM package.
 
-from .client import (
-    AnthropicClient,
-    BaseLLMClient,
-    LLMAuthError,
-    LLMClientFactory,
-    LLMError,
-    LLMFunctionCall,
-    LLMMessage,
-    LLMProvider,
-    LLMRateLimitError,
-    LLMResponse,
-    LLMService,
-    LLMTokenUsage,
-    LLMToolUseError,
-    OpenAIClient,
-    get_llm_service,
-)
+Import concrete clients from `src.core.llm.client` and provider metadata from
+`src.core.llm.providers`. Keeping this package initializer light prevents
+configuration/provider imports from eagerly constructing client dependencies.
+"""
 
-__all__ = [
-    "AnthropicClient",
-    "BaseLLMClient",
-    "LLMAuthError",
-    "LLMClientFactory",
-    "LLMError",
-    "LLMFunctionCall",
-    "LLMMessage",
-    "LLMProvider",
-    "LLMRateLimitError",
-    "LLMResponse",
-    "LLMService",
-    "LLMTokenUsage",
-    "LLMToolUseError",
-    "OpenAIClient",
-    "get_llm_service",
-]
+__all__: list[str] = []

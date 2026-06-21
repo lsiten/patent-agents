@@ -19,7 +19,8 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { clsx } from 'clsx';
 import { conversationApi, workflowApi } from '@/lib/api';
-import type { ConversationActiveReply, ConversationSummary } from '@/lib/api';
+import { POLLING_INTERVALS } from '@/lib/constants/runtime';
+import type { ConversationActiveReply, ConversationSummary, WorkflowResponse } from '@/lib/api';
 import type { AgentEvent, AgentWorkEvent, ChatMessage } from '@/types';
 
 const terminalWorkflowStates = new Set(['completed', 'failed', 'cancelled']);
@@ -137,14 +138,16 @@ function createWelcomeMessage(): ChatMessage {
   return {
     id: 'welcome',
     role: 'assistant',
-    content: `您好！我是专利智脑的专利代理人助理。请描述您的发明创造，我们将一起完善技术方案。
+    content: `您好！我是专利智脑的专利代理人助理。请描述您的发明创造或上传交底材料，我们会先完成主权要头脑风暴。
 
-例如：
-• 这是哪个技术领域的创新？
-• 它解决了什么具体问题？
-• 核心技术方案大概是什么？
+启动正式流程前，我会依次确认：
+• 专利类型
+• 挖掘规则
+• 最接近现有技术
+• 新的发明方向/区别点
+• 主权要草案
 
-多轮对话后，我可以帮您启动正式的专利申请流程。`,
+主权要确认后，再进入正式撰写流程。`,
     timestamp: new Date().toISOString(),
   };
 }
@@ -264,6 +267,415 @@ function getSuggestedPatentTitle(message?: ChatMessage | null): string | null {
   return null;
 }
 
+interface PatentWorkspaceSection {
+  id: string;
+  label: string;
+  content: string;
+}
+
+interface PatentDirectionInfo {
+  name: string;
+  detail?: string;
+  prior_art_gap?: string;
+  technical_problem?: string;
+  technical_solution?: string;
+  technical_effect?: string;
+  patent_value?: string;
+  claim_step?: string;
+  risk?: string;
+}
+
+interface PatentWorkspaceInfo {
+  patentTitle?: string;
+  patentType?: string;
+  miningRule?: string;
+  closestPriorArt?: string;
+  mainClaim?: string;
+  directions: PatentDirectionInfo[];
+  sections: PatentWorkspaceSection[];
+}
+
+const emptyPatentWorkspaceInfo: PatentWorkspaceInfo = {
+  directions: [],
+  sections: [],
+};
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function asRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const text = asString(value);
+    if (text) return text;
+  }
+  return undefined;
+}
+
+function nestedRecord(record: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  const value = record[key];
+  return isRecord(value) ? value : undefined;
+}
+
+function isConsensusPatentRecord(record: Record<string, unknown>): boolean {
+  return Boolean(
+    record.ready_marker
+    || record._version
+    || record.consensus === true
+    || record.confirmed === true
+  );
+}
+
+function latestPatentPreflight(messages: ChatMessage[]): Record<string, unknown> | null {
+  for (const message of [...messages].reverse()) {
+    if (isRecord(message.metadata?.patent_preflight)) {
+      return message.metadata.patent_preflight;
+    }
+  }
+  return null;
+}
+
+function normalizeDirections(value: unknown): PatentDirectionInfo[] {
+  return asRecordArray(value).map((item) => ({
+    name: asString(item.name) || asString(item.title) || '未命名发明方向',
+    detail: asString(item.detail),
+    prior_art_gap: asString(item.prior_art_gap),
+    technical_problem: asString(item.technical_problem),
+    technical_solution: asString(item.technical_solution),
+    technical_effect: asString(item.technical_effect),
+    patent_value: asString(item.patent_value),
+    claim_step: asString(item.claim_step),
+    risk: asString(item.risk),
+  }));
+}
+
+function mergeDirections(
+  current: PatentDirectionInfo[],
+  incoming: PatentDirectionInfo[],
+): PatentDirectionInfo[] {
+  const merged = [...current];
+  for (const item of incoming) {
+    const index = merged.findIndex((existing) => existing.name === item.name);
+    if (index >= 0) {
+      merged[index] = { ...merged[index], ...item };
+    } else {
+      merged.push(item);
+    }
+  }
+  return merged;
+}
+
+function mergeSections(
+  current: PatentWorkspaceSection[],
+  incoming: PatentWorkspaceSection[],
+): PatentWorkspaceSection[] {
+  const merged = [...current];
+  for (const item of incoming) {
+    const index = merged.findIndex((existing) => existing.id === item.id);
+    if (index >= 0) {
+      merged[index] = { ...merged[index], content: item.content || merged[index].content };
+    } else if (item.content) {
+      merged.push(item);
+    }
+  }
+  return merged;
+}
+
+function mergePatentWorkspaceInfo(
+  base: PatentWorkspaceInfo,
+  incoming?: Partial<PatentWorkspaceInfo> | null,
+): PatentWorkspaceInfo {
+  if (!incoming) return base;
+  return {
+    patentTitle: incoming.patentTitle || base.patentTitle,
+    patentType: incoming.patentType || base.patentType,
+    miningRule: incoming.miningRule || base.miningRule,
+    closestPriorArt: incoming.closestPriorArt || base.closestPriorArt,
+    mainClaim: incoming.mainClaim || base.mainClaim,
+    directions: mergeDirections(base.directions, incoming.directions || []),
+    sections: mergeSections(base.sections, incoming.sections || []),
+  };
+}
+
+function sectionText(title: string, value: unknown): string {
+  if (!isRecord(value)) return '';
+  const parts = [
+    ['技术领域', value.technical_field],
+    ['背景技术', value.background_art],
+    ['发明内容', value.summary_of_invention],
+    ['附图说明', value.description_of_drawings],
+    ['具体实施方式', value.detailed_description],
+  ]
+    .map(([label, content]) => {
+      const text = asString(content);
+      return text ? `【${label}】\n${text}` : '';
+    })
+    .filter(Boolean);
+  return parts.length ? `${title}\n\n${parts.join('\n\n')}` : '';
+}
+
+function extractPatentWorkspaceInfoFromRecord(record: Record<string, unknown>): Partial<PatentWorkspaceInfo> {
+  const wrappedPreflight = nestedRecord(record, 'patent_preflight')
+    || nestedRecord(record, 'preflight');
+  const wrappedFacts = nestedRecord(record, 'shared_facts')
+    || nestedRecord(record, 'shared_agent_context');
+  const preflight = wrappedPreflight
+    || wrappedFacts
+    || (isConsensusPatentRecord(record) ? record : undefined);
+  if (!preflight) return {};
+  const result = nestedRecord(record, 'result');
+  const output = nestedRecord(record, 'output');
+  const stateDelta = nestedRecord(record, 'state_delta');
+  const stateFacts = stateDelta ? nestedRecord(stateDelta, 'shared_facts') : undefined;
+  const claims = nestedRecord(preflight, 'claims') || nestedRecord(record, 'claims') || (result ? nestedRecord(result, 'claims') : undefined);
+  const draft = nestedRecord(record, 'patent_draft') || nestedRecord(preflight, 'patent_draft') || (result ? nestedRecord(result, 'patent_draft') : undefined);
+  const draftClaims = draft ? nestedRecord(draft, 'claims') : undefined;
+  const source = stateFacts || preflight;
+  const sections: PatentWorkspaceSection[] = [];
+  const description = sectionText(
+    '说明书',
+    nestedRecord(source, 'description') || nestedRecord(record, 'description') || (draft ? nestedRecord(draft, 'description') : undefined),
+  );
+  if (description) sections.push({ id: 'description', label: '说明书', content: description });
+
+  const abstractText = firstString(source.abstract, record.abstract, draft?.abstract);
+  if (abstractText) sections.push({ id: 'abstract', label: '说明书摘要', content: abstractText });
+
+  const abstractDrawing = firstString(source.abstract_drawing, source.abstract_figure, draft?.abstract_drawing, draft?.abstract_figure);
+  if (abstractDrawing) sections.push({ id: 'abstract-drawing', label: '摘要附图', content: abstractDrawing });
+
+  const drawings = asRecordArray(source.drawings || draft?.drawings || record.drawings);
+  if (drawings.length > 0) {
+    const drawingText = drawings
+      .map((drawing, index) => {
+        const number = firstString(drawing.figure_number, drawing.number) || `图${index + 1}`;
+        const title = firstString(drawing.title, drawing.name);
+        const desc = firstString(drawing.description, drawing.prompt);
+        return [number, title, desc].filter(Boolean).join(' · ');
+      })
+      .join('\n');
+    if (drawingText) sections.push({ id: 'drawings', label: '说明书附图', content: drawingText });
+  }
+
+  const directions = normalizeDirections(
+    source.invention_directions
+    || source.distinguishing_points
+    || source.difference_points
+    || source.directions
+    || record.invention_directions
+    || result?.invention_directions
+    || output?.invention_directions,
+  );
+
+  return {
+    patentTitle: firstString(source.patent_title, source.title, source.invention_title, record.patent_title, result?.patent_title),
+    patentType: firstString(source.patent_type, source.application_type, record.patent_type, result?.patent_type),
+    miningRule: firstString(source.mining_rule, source.mining_principle, record.mining_rule, result?.mining_rule),
+    closestPriorArt: firstString(source.closest_prior_art, source.prior_art, source.nearest_prior_art, record.closest_prior_art, result?.closest_prior_art),
+    mainClaim: firstString(
+      source.independent_claim,
+      source.main_claim,
+      source.claim_1,
+      claims?.independent_claim,
+      draftClaims?.independent_claim,
+      record.independent_claim,
+      result?.independent_claim,
+    ),
+    directions,
+    sections,
+  };
+}
+
+function extractPatentWorkspaceInfo(value: unknown): Partial<PatentWorkspaceInfo> | null {
+  if (!isRecord(value)) return null;
+  let info = extractPatentWorkspaceInfoFromRecord(value);
+  for (const key of ['data', 'result', 'output', 'state_delta', 'shared_facts', 'shared_agent_context', 'patent_preflight']) {
+    const nested = nestedRecord(value, key);
+    if (nested) {
+      info = mergePatentWorkspaceInfo(
+        { ...emptyPatentWorkspaceInfo, ...info, directions: info.directions || [], sections: info.sections || [] },
+        extractPatentWorkspaceInfoFromRecord(nested),
+      );
+    }
+  }
+  return info;
+}
+
+function buildPatentWorkspaceInfo(
+  messages: ChatMessage[],
+  workflow?: WorkflowResponse | null,
+  liveInfo?: PatentWorkspaceInfo,
+): PatentWorkspaceInfo {
+  const preflight = latestPatentPreflight(messages);
+  const draft = workflow?.outputs?.patent_draft;
+  const draftClaims = isRecord(draft?.claims) ? draft.claims : undefined;
+  const draftDescription = isRecord(draft?.description) ? draft.description : undefined;
+  const drawings = Array.isArray(draft?.drawings) ? draft.drawings : [];
+  const sections: PatentWorkspaceSection[] = [];
+
+  const description = sectionText('说明书', draftDescription);
+  if (description) {
+    sections.push({ id: 'description', label: '说明书', content: description });
+  }
+
+  if (drawings.length > 0) {
+    const drawingText = drawings
+      .filter(isRecord)
+      .map((drawing, index) => {
+        const number = asString(drawing.figure_number) || `图${index + 1}`;
+        const title = asString(drawing.title);
+        const desc = asString(drawing.description);
+        return [number, title, desc].filter(Boolean).join(' · ');
+      })
+      .filter(Boolean)
+      .join('\n');
+    if (drawingText) {
+      sections.push({ id: 'drawings', label: '说明书附图', content: drawingText });
+    }
+  }
+
+  const abstractText = asString(draft?.abstract);
+  if (abstractText) {
+    sections.push({ id: 'abstract', label: '说明书摘要', content: abstractText });
+  }
+
+  const abstractDrawing = asString(draft?.abstract_drawing) || asString(draft?.abstract_figure);
+  if (abstractDrawing) {
+    sections.push({ id: 'abstract-drawing', label: '摘要附图', content: abstractDrawing });
+  }
+
+  let info = mergePatentWorkspaceInfo(emptyPatentWorkspaceInfo, extractPatentWorkspaceInfo(workflow?.shared_agent_context));
+  for (const rounds of Object.values(workflow?.phase_rounds || {})) {
+    if (Array.isArray(rounds)) {
+      for (const round of rounds) {
+        info = mergePatentWorkspaceInfo(info, extractPatentWorkspaceInfo(round));
+      }
+    }
+  }
+  info = mergePatentWorkspaceInfo(info, {
+    patentTitle: asString(preflight?.patent_title) || workflow?.title,
+    patentType: asString(preflight?.patent_type),
+    miningRule: asString(preflight?.mining_rule),
+    closestPriorArt: asString(preflight?.closest_prior_art),
+    mainClaim: asString(draftClaims?.independent_claim) || asString(preflight?.independent_claim),
+    directions: normalizeDirections(preflight?.invention_directions || preflight?.distinguishing_points),
+    sections,
+  });
+  return mergePatentWorkspaceInfo(info, liveInfo);
+}
+
+function PatentWorkspacePanel({ info }: { info: PatentWorkspaceInfo }) {
+  const [activeId, setActiveId] = useState('main-claim');
+  const hasMainClaim = Boolean(info.mainClaim);
+  const activeSection = info.sections.find((section) => section.id === activeId);
+  const showEmpty = !info.patentTitle && !hasMainClaim && info.sections.length === 0;
+
+  useEffect(() => {
+    if (activeId === 'main-claim' && !hasMainClaim && info.sections[0]) {
+      setActiveId(info.sections[0].id);
+    }
+  }, [activeId, hasMainClaim, info.sections]);
+
+  return (
+    <aside className="hidden h-full min-h-0 min-w-0 flex-col border-l border-hairline bg-canvas/95 xl:flex">
+      <div className="flex-shrink-0 border-b border-hairline px-4 py-3">
+        <p className="text-sm font-semibold text-ink">专利信息</p>
+        <p className="mt-0.5 text-xs text-slate">展示所有 Agent 已确认的公共共识</p>
+      </div>
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        {showEmpty ? (
+          <div className="rounded-xl border border-dashed border-hairline-strong bg-surface/60 p-4 text-sm text-slate">
+            这里会展示已确认的专利名称、主权要，以及流程中生成的说明书、附图和摘要。
+          </div>
+        ) : null}
+
+        {info.patentTitle ? (
+          <section className="rounded-xl border border-hairline bg-surface p-3">
+            <p className="text-xs font-medium text-slate">专利名称</p>
+            <p className="mt-1 text-sm font-semibold leading-relaxed text-ink">{info.patentTitle}</p>
+          </section>
+        ) : null}
+
+        {(info.patentType || info.miningRule || info.closestPriorArt) ? (
+          <section className="space-y-2 rounded-xl border border-hairline bg-surface p-3 text-xs text-slate">
+            {info.patentType ? <p><span className="font-medium text-ink">类型：</span>{info.patentType}</p> : null}
+            {info.miningRule ? <p><span className="font-medium text-ink">挖掘规则：</span>{info.miningRule}</p> : null}
+            {info.closestPriorArt ? <p><span className="font-medium text-ink">最接近现有技术：</span>{info.closestPriorArt}</p> : null}
+          </section>
+        ) : null}
+
+        {(hasMainClaim || info.sections.length > 0) ? (
+          <section className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              {hasMainClaim ? (
+                <button
+                  type="button"
+                  onClick={() => setActiveId('main-claim')}
+                  className={clsx(
+                    'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                    activeId === 'main-claim'
+                      ? 'border-brand-cyan bg-brand-cyan text-white'
+                      : 'border-hairline bg-white text-slate hover:border-brand-cyan/50 hover:text-ink'
+                  )}
+                >
+                  主权要
+                </button>
+              ) : null}
+              {info.sections.map((section) => (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => setActiveId(section.id)}
+                  className={clsx(
+                    'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                    activeId === section.id
+                      ? 'border-brand-cyan bg-brand-cyan text-white'
+                      : 'border-hairline bg-white text-slate hover:border-brand-cyan/50 hover:text-ink'
+                  )}
+                >
+                  {section.label}
+                </button>
+              ))}
+            </div>
+            <div className="max-h-[48vh] overflow-y-auto rounded-xl border border-hairline bg-white p-3 text-sm leading-relaxed text-ink">
+              <pre className="whitespace-pre-wrap break-words font-sans">
+                {activeId === 'main-claim' ? info.mainClaim : activeSection?.content}
+              </pre>
+            </div>
+          </section>
+        ) : null}
+
+        {info.directions.length > 0 ? (
+          <section className="space-y-2">
+            <p className="text-xs font-semibold text-ink">发明方向 / 区别点</p>
+            <div className="space-y-2">
+              {info.directions.map((direction, index) => (
+                <details key={`${direction.name}-${index}`} className="rounded-xl border border-hairline bg-surface p-3">
+                  <summary className="cursor-pointer text-sm font-medium text-ink">{direction.name}</summary>
+                  <div className="mt-2 space-y-1 text-xs leading-relaxed text-slate">
+                    {direction.prior_art_gap ? <p><span className="font-medium text-ink">现有技术缺口：</span>{direction.prior_art_gap}</p> : null}
+                    {direction.technical_problem ? <p><span className="font-medium text-ink">技术问题：</span>{direction.technical_problem}</p> : null}
+                    {direction.technical_solution ? <p><span className="font-medium text-ink">技术手段：</span>{direction.technical_solution}</p> : null}
+                    {direction.technical_effect ? <p><span className="font-medium text-ink">技术效果：</span>{direction.technical_effect}</p> : null}
+                    {direction.patent_value ? <p><span className="font-medium text-ink">申请价值：</span>{direction.patent_value}</p> : null}
+                    {direction.claim_step ? <p><span className="font-medium text-ink">主权要步骤：</span>{direction.claim_step}</p> : null}
+                    {direction.risk ? <p><span className="font-medium text-ink">风险/补充：</span>{direction.risk}</p> : null}
+                    {direction.detail ? <pre className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-white p-2 font-sans">{direction.detail}</pre> : null}
+                  </div>
+                </details>
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </div>
+    </aside>
+  );
+}
+
 function isWorkflowStartRecommendation(message?: ChatMessage | null): boolean {
   if (!message || message.role !== 'assistant') return false;
   return message.metadata?.recommend_create_patent === true && Boolean(getSuggestedPatentTitle(message));
@@ -381,6 +793,7 @@ function ChatPageContent() {
   // Workflow state
   const [workflowTaskId, setWorkflowTaskId] = useState<string | null>(null);
   const [workflowState, setWorkflowState] = useState<string | null>(null);
+  const [workflowDetail, setWorkflowDetail] = useState<WorkflowResponse | null>(null);
   const [isStartingWorkflow, setIsStartingWorkflow] = useState(false);
 
   // Recommendations from backend
@@ -389,6 +802,7 @@ function ChatPageContent() {
 
   // Dispatch activities (CEO → specialist calls)
   const [dispatchActivities, setDispatchActivities] = useState<DispatchActivity[]>([]);
+  const [livePatentInfo, setLivePatentInfo] = useState<PatentWorkspaceInfo>(emptyPatentWorkspaceInfo);
 
   // Pending confirmation from agent
   const [pendingConfirmation, setPendingConfirmation] = useState<{
@@ -417,6 +831,16 @@ function ChatPageContent() {
   }, [messages, searchQuery]);
   const visibleWorkflowTaskId = activeConvId ? workflowTaskId : null;
   const visibleWorkflowState = activeConvId ? workflowState : null;
+  const patentWorkspaceInfo = useMemo(
+    () => buildPatentWorkspaceInfo(messages, workflowDetail, livePatentInfo),
+    [messages, workflowDetail, livePatentInfo],
+  );
+
+  const mergeLivePatentInfo = useCallback((value: unknown) => {
+    const extracted = extractPatentWorkspaceInfo(value);
+    if (!extracted) return;
+    setLivePatentInfo((current) => mergePatentWorkspaceInfo(current, extracted));
+  }, []);
 
   useLayoutEffect(() => {
     const composer = composerRef.current;
@@ -555,6 +979,7 @@ function ChatPageContent() {
     conversationLoadSeqRef.current = loadSeq;
     setIsLoadingConv(true);
     setError(null);
+    setLivePatentInfo(emptyPatentWorkspaceInfo);
     try {
       const detail = await conversationApi.get(convId);
       if (conversationLoadSeqRef.current !== loadSeq) return;
@@ -571,15 +996,24 @@ function ChatPageContent() {
       ));
       setWorkflowTaskId(detail.linked_workflow_id ?? null);
       setWorkflowState(detail.status ?? null);
+      setWorkflowDetail(null);
       setPendingConfirmation(nextActiveReply ? null : restoredUiState.pendingConfirmation);
       setRecommendStartWorkflow(nextActiveReply ? false : restoredUiState.recommendStartWorkflow);
       setSuggestedTitle(restoredUiState.suggestedTitle);
+      mergeLivePatentInfo({ shared_facts: detail.shared_facts });
+      persistedMessages.forEach((message) => {
+        mergeLivePatentInfo(message);
+        mergeLivePatentInfo(message.metadata);
+      });
 
       if (detail.linked_workflow_id) {
         try {
           const workflow = await workflowApi.get(detail.linked_workflow_id);
           if (conversationLoadSeqRef.current === loadSeq) {
             setWorkflowState(workflow.current_state);
+            setWorkflowDetail(workflow);
+            mergeLivePatentInfo(workflow);
+            mergeLivePatentInfo(workflow.shared_agent_context);
           }
         } catch {
         }
@@ -593,11 +1027,13 @@ function ChatPageContent() {
         setIsLoadingConv(false);
       }
     }
-  }, []);
+  }, [mergeLivePatentInfo]);
 
   useEffect(() => {
     void loadConversations();
-    const interval = setInterval(() => { void loadConversations(); }, 30000);
+    const interval = setInterval(() => {
+      void loadConversations();
+    }, POLLING_INTERVALS.conversationListMs);
     return () => clearInterval(interval);
   }, [loadConversations]);
 
@@ -627,6 +1063,8 @@ function ChatPageContent() {
     setIsLoadingConv(false);
     setWorkflowTaskId(null);
     setWorkflowState(null);
+    setWorkflowDetail(null);
+    setLivePatentInfo(emptyPatentWorkspaceInfo);
     setRecommendStartWorkflow(false);
     setSuggestedTitle(null);
     setPendingConfirmation(null);
@@ -660,11 +1098,15 @@ function ChatPageContent() {
 
     setWorkflowTaskId(taskIdFromParam);
     setWorkflowState(null);
+    setWorkflowDetail(null);
 
     workflowApi.get(taskIdFromParam).then((workflow) => {
       setWorkflowState(workflow.current_state);
+      setWorkflowDetail(workflow);
+      mergeLivePatentInfo(workflow);
+      mergeLivePatentInfo(workflow.shared_agent_context);
     }).catch(() => {});
-  }, [activeConvId, conversations, convIdFromParam, loadConversation, taskIdFromParam]);
+  }, [activeConvId, conversations, convIdFromParam, loadConversation, mergeLivePatentInfo, taskIdFromParam]);
 
   useEffect(() => {
     const shouldStreamConversationEvents = Boolean(
@@ -678,6 +1120,7 @@ function ChatPageContent() {
 
     const stream = conversationApi.eventStream(activeConvId, {
       onConversationState: (event) => {
+        mergeLivePatentInfo(event);
         const nextActiveReply = event.active_reply?.active ? event.active_reply : null;
         const wasReplying = Boolean(activeReply?.active);
         setActiveReply(nextActiveReply);
@@ -691,12 +1134,15 @@ function ChatPageContent() {
         }
       },
       onAgentWork: (event) => {
+        mergeLivePatentInfo(event);
         setDispatchActivities((current) => updateDispatchActivities(current, event));
         if (event.event_type === 'agent.work.failed') {
           setWorkflowState('failed');
         }
       },
       onAgentActivity: (event) => {
+        mergeLivePatentInfo(event);
+        mergeLivePatentInfo(event.data);
         if (workflowTaskId) {
           setMessages((current) => updateWorkflowActivityMessage(current, workflowTaskId, event));
         } else {
@@ -712,6 +1158,8 @@ function ChatPageContent() {
         }
       },
       onConversationMessage: (message) => {
+        mergeLivePatentInfo(message);
+        mergeLivePatentInfo(message.metadata);
         setMessages((current) => applyActiveReplyToMessages(upsertMessage(current, message), activeReply));
       },
       onDone: () => {
@@ -721,7 +1169,7 @@ function ChatPageContent() {
     });
 
     return () => stream.abort();
-  }, [activeConvId, activeReply, loadConversation, workflowState, workflowTaskId]);
+  }, [activeConvId, activeReply, loadConversation, mergeLivePatentInfo, workflowState, workflowTaskId]);
 
   useEffect(() => {
     if (!activeConvId || !workflowTaskId) return;
@@ -734,6 +1182,9 @@ function ChatPageContent() {
         const workflow = await workflowApi.get(workflowTaskId);
         if (stopped) return;
         setWorkflowState(workflow.current_state);
+        setWorkflowDetail(workflow);
+        mergeLivePatentInfo(workflow);
+        mergeLivePatentInfo(workflow.shared_agent_context);
         setConversations((current) => current.map((conversation) => (
           conversation.id === activeConvId
           || conversation.linked_workflow_id === workflowTaskId
@@ -750,13 +1201,13 @@ function ChatPageContent() {
     };
 
     void syncWorkflowState();
-    interval = setInterval(syncWorkflowState, 3000);
+    interval = setInterval(syncWorkflowState, POLLING_INTERVALS.workflowSyncMs);
 
     return () => {
       stopped = true;
       if (interval) clearInterval(interval);
     };
-  }, [activeConvId, workflowTaskId]);
+  }, [activeConvId, mergeLivePatentInfo, workflowTaskId]);
 
   // Create new conversation
   const handleNewConversation = async () => {
@@ -768,6 +1219,8 @@ function ChatPageContent() {
     setMessages([createWelcomeMessage()]);
     setWorkflowTaskId(null);
     setWorkflowState(null);
+    setWorkflowDetail(null);
+    setLivePatentInfo(emptyPatentWorkspaceInfo);
     setRecommendStartWorkflow(false);
     setSuggestedTitle(null);
     setPendingConfirmation(null);
@@ -786,6 +1239,8 @@ function ChatPageContent() {
     setIsLoading(false);
     setWorkflowTaskId(null);
     setWorkflowState(null);
+    setWorkflowDetail(null);
+    setLivePatentInfo(emptyPatentWorkspaceInfo);
     setRecommendStartWorkflow(false);
     setSuggestedTitle(null);
     setPendingConfirmation(null);
@@ -841,7 +1296,7 @@ function ChatPageContent() {
     if (!content) {
       // File-only upload: auto-trigger AI analysis instead of waiting for text input
       if (fileUpload) {
-        content = '请分析我上传的技术交底文件，先进行头脑风暴和方案确认，不要直接启动专利申请流程';
+        content = '请分析我上传的技术交底文件，先按“专利类型确认 → 挖掘规则确认 → 最接近现有技术 → 发明方向/区别点挖掘 → 主权要草案确认”的顺序进行头脑风暴，不要直接启动专利申请流程。';
         isAutoAnalysis = true;
         appendSystemMessage('正在分析文件：AI 正在解读您上传的交底书...');
       } else {
@@ -917,6 +1372,8 @@ function ChatPageContent() {
       // Use streaming API
       conversationApi.chatStream(convId, { content }, {
         onAgentActivity: (event: AgentEvent) => {
+          mergeLivePatentInfo(event);
+          mergeLivePatentInfo(event.data);
           setMessages((prev) => prev.map((m) =>
             m.id === streamMsgId
               ? {
@@ -928,6 +1385,7 @@ function ChatPageContent() {
           ));
         },
         onThinking: (_data) => {
+          mergeLivePatentInfo(_data);
           setMessages((prev) => {
             const now = new Date().toISOString();
             return prev.map((m) =>
@@ -952,6 +1410,7 @@ function ChatPageContent() {
           });
         },
         onSkillUse: (data) => {
+          mergeLivePatentInfo(data);
           setMessages((prev) => {
             const now = new Date().toISOString();
             return prev.map((m) =>
@@ -976,6 +1435,7 @@ function ChatPageContent() {
           });
         },
         onToolCallStart: (data) => {
+          mergeLivePatentInfo(data);
           setMessages((prev) => {
             const now = new Date().toISOString();
             return prev.map((m) =>
@@ -1017,6 +1477,8 @@ function ChatPageContent() {
           }
         },
         onToolCallEnd: (data) => {
+          mergeLivePatentInfo(data);
+          mergeLivePatentInfo(data.result);
           setMessages((prev) => {
             const now = new Date().toISOString();
             return prev.map((m) => {
@@ -1061,6 +1523,7 @@ function ChatPageContent() {
           }
         },
         onStreamDelta: (data) => {
+          mergeLivePatentInfo(data);
           setMessages((prev) => prev.map((m) =>
             m.id === streamMsgId
               ? { ...m, content: (m.content || '') + data.content, isStreaming: true }
@@ -1068,6 +1531,7 @@ function ChatPageContent() {
           ));
         },
         onContent: (data) => {
+          mergeLivePatentInfo(data);
           setMessages((prev) => prev.map((m) =>
             m.id === streamMsgId
               ? { ...m, content: data.content, isStreaming: true }
@@ -1078,6 +1542,7 @@ function ChatPageContent() {
           }
         },
         onConfirmation: (data) => {
+          mergeLivePatentInfo(data);
           setPendingConfirmation({
             question: data.question,
             options: data.options,
@@ -1085,6 +1550,7 @@ function ChatPageContent() {
           });
         },
         onStatus: (data) => {
+          mergeLivePatentInfo(data);
           setMessages((prev) => {
             const now = new Date().toISOString();
             return prev.map((m) =>
@@ -1108,6 +1574,9 @@ function ChatPageContent() {
           });
         },
         onDone: (data) => {
+          mergeLivePatentInfo(data);
+          mergeLivePatentInfo(data.message);
+          mergeLivePatentInfo(data.message?.metadata);
           setConnectionStatus('idle');
           // Replace streaming message with final persisted message
           setMessages((prev) => prev.map((m) =>
@@ -1237,7 +1706,7 @@ function ChatPageContent() {
       addToast({
         type: 'error',
         title: '缺少专利名称',
-        message: '启动专利申请前需要先由 Agent 明确专利名并完成方案确认。',
+        message: '启动专利申请前需要先由 Agent 明确专利名并完成主权要确认。',
       });
       return;
     }
@@ -1248,8 +1717,10 @@ function ChatPageContent() {
       const result = await conversationApi.createWorkflow(conversationId, patentTitle);
       setWorkflowTaskId(result.task_id);
       setWorkflowState(result.status);
+      setWorkflowDetail(null);
       setRecommendStartWorkflow(false);
       setPendingConfirmation(null);
+      workflowApi.get(result.task_id).then(setWorkflowDetail).catch(() => {});
 
       const processMsg: ChatMessage = {
         id: `workflow-${Date.now()}`,
@@ -1402,6 +1873,7 @@ function ChatPageContent() {
       </aside>
 
       {/* Main Chat Area */}
+      <div className="grid h-full min-h-0 min-w-0 grid-cols-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
         {/* Header */}
         <div className="flex-shrink-0 border-b border-hairline bg-canvas/95 px-6 py-3 backdrop-blur">
@@ -1817,8 +2289,8 @@ function ChatPageContent() {
                 <Sparkles className="w-5 h-5 text-green-600" />
                 <p className="text-sm text-green-800">
                   {suggestedTitle
-                    ? `启动前方案已确认，专利名称：「${suggestedTitle}」。确认后进入正式专利申请流程。`
-                    : '启动前方案还未确认完整。请先让 Agent 补齐专利名称、保护主题、独权骨架、公开状态和附图需求。'}
+                    ? `主权要已确认，专利名称：「${suggestedTitle}」。确认后进入正式专利申请流程。`
+                    : '主权要还未确认完整。请先让 Agent 补齐专利名称、专利类型、挖掘规则、最接近现有技术、发明方向和主权要。'}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -1991,6 +2463,8 @@ function ChatPageContent() {
           </div>
         </div>
       </div>
+      <PatentWorkspacePanel info={patentWorkspaceInfo} />
+    </div>
     </div>
       <ConfirmDialog
         open={deleteConfirmId !== null}

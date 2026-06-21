@@ -19,7 +19,10 @@ import type {
 const LLM_PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
+  deepseek: 'DeepSeek',
+  openrouter: 'OpenRouter',
   spark: '讯飞星火',
+  'openai-spark': '讯飞星火（OpenAI兼容）',
 };
 
 const IMG_PROVIDER_LABELS: Record<string, string> = {
@@ -77,7 +80,6 @@ export default function AgentModelConfigPanel(props: Props) {
   const title = isLLM ? '文字 LLM 配置' : '生图配置';
   const providerLabels = isLLM ? LLM_PROVIDER_LABELS : IMG_PROVIDER_LABELS;
   const modelField = isLLM ? 'model' : 'model_id';
-  const defaultModel = isLLM ? 'gpt-4-turbo-preview' : 'gpt-image-2';
   const { addToast } = useToast();
 
   const [providers, setProviders] = useState<Record<string, { configured: boolean; base_url: string; model_id: string }>>({});
@@ -88,6 +90,11 @@ export default function AgentModelConfigPanel(props: Props) {
   const [testResult, setTestResult] = useState<{ success: boolean; latency_ms: number; error?: string | null } | null>(null);
 
   const lastInitialKeyRef = useRef<string>('');
+  const providerDefaultModel = draft.provider
+    ? providers[draft.provider]?.model_id || ''
+    : initial
+      ? (isLLM ? (initial as ResolvedLLMConfig).model : (initial as ResolvedImageGenConfig).model_id)
+      : '';
 
   const loadProviders = useCallback(async () => {
     try {
@@ -314,7 +321,7 @@ export default function AgentModelConfigPanel(props: Props) {
             <Input
               value={draft.model}
               onChange={(e) => setField('model', e.target.value)}
-              placeholder={defaultModel}
+              placeholder={providerDefaultModel || '留空使用全局模型'}
               mono
             />
           </div>

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { workflowApi } from '@/lib/api';
+import { POLLING_INTERVALS } from '@/lib/constants/runtime';
 import type { WorkflowPhaseResult } from '@/lib/api';
 import type { DispatchActivity } from './DispatchPanel';
 
@@ -213,7 +214,7 @@ export function WorkflowProgressStrip({
     };
 
     void fetchWorkflow();
-    const interval = setInterval(fetchWorkflow, 3000);
+    const interval = setInterval(fetchWorkflow, POLLING_INTERVALS.workflowSyncMs);
     return () => {
       cancelled = true;
       clearInterval(interval);

@@ -1,36 +1,38 @@
 ## backend/src/ — Module Map
 
-### Structure (8 modules)
-```
+### Structure
+
+```text
 src/
-├── api/          → REST routes, request/response models, auth
-├── agents/       → Multi-agent system (Hermes framework, profiles, service)
-├── core/         → Foundation: config, DI, events, tasks, middleware, exceptions
-├── models/       → SQLAlchemy ORM models + Pydantic schemas
-├── data_sources/ → External patent DB connectors, web scraping
-├── knowledge/    → Vector store, retrieval, knowledge base, docx parser
-├── prompts/      → Prompt templates for each agent role
-└── tools/        → Agent tool definitions (search, db, web)
+├── api/             REST/SSE routes by domain
+├── agents/          Hermes Agent configuration, adapters, tools
+├── core/            config, constants, LLM, workflow runtime, events, tasks
+├── data/            local application data helpers
+├── data_sources/    external patent/paper/web/authority connectors
+├── document_gen/    DOCX, drawing, template generation
+├── infrastructure/  integration and runtime infrastructure helpers
+├── knowledge/       retrieval and knowledge-base helpers
+├── models/          ORM and Pydantic models
+├── repositories/    persistence access
+├── services/        business services
+└── utils/           narrow utility helpers
 ```
 
 ### Dependency Direction
+
+```text
+api → services → repositories/models
+api → core/workflow → agents → hermes tools
+core/config/constants/llm are foundation modules
+data_sources/document_gen/knowledge are called through services, workflow nodes, or Hermes tools
 ```
-api ← core ← agents ← (hermes, profiles, service)
-                    ↘ tools, prompts, knowledge, data_sources
-```
-**core** has zero internal deps — everything depends on it.
+
+Keep cross-module imports intentional. Avoid introducing new monolithic files; workflow code belongs under `core/workflow/`, route code under `api/routers/`, provider metadata under `core/llm/providers/`, and constants under `core/constants/`.
 
 ### Key Patterns
-- **DI**: `core/container.py` wires all modules via dependency-injector
-- **Config**: `core/config.py` is singleton settings object used everywhere
-- **Events**: SSE streams flow from agents → core/events.py → API → frontend
-- **Tasks**: Long workflows in `core/workflow_engine.py` orchestrate agents
 
-### File Distribution
-| Module | Files | Lines | Critical File |
-|--------|-------|-------|---------------|
-| agents | 13 | ~4,500 | `profiles/default_profiles.py` (826) |
-| core | 11 | ~2,500 | `workflow_engine.py` (917) |
-| api | 2 | ~1,000 | `routes.py` (934) |
-| models | 2 | <200 | — |
-| others | 12 | ~1,000 | — |
+- Hermes `run_agent.AIAgent` remains the professional Agent execution base.
+- LangGraph `StateGraph` owns patent workflow routing and recovery.
+- AG-UI-compatible events flow from workflow/agent/tool execution to frontend SSE reducers.
+- All accepted phase facts merge into shared workflow facts; temporary round output must not overwrite history.
+- No mock content, no case-specific fallback logic, and no hardcoded patent examples as generic rules.

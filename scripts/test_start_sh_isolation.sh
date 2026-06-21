@@ -23,7 +23,7 @@ PORT=8000
 ENV
 cat > "$PROJECT/backend/.env.testing" <<'ENV'
 ENVIRONMENT=testing
-PORT=8000
+PORT=8100
 ENV
 cat > "$PROJECT/backend/.env.production" <<'ENV'
 ENVIRONMENT=production
@@ -33,7 +33,7 @@ cat > "$PROJECT/frontend/.env.development" <<'ENV'
 NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 ENV
 cat > "$PROJECT/frontend/.env.production" <<'ENV'
-NEXT_PUBLIC_API_URL=https://patent-api.lene.fun/api/v1
+NEXT_PUBLIC_API_URL=http://localhost:10002/api/v1
 ENV
 
 cat > "$PROJECT/bin/python" <<'SH'
@@ -41,7 +41,8 @@ cat > "$PROJECT/bin/python" <<'SH'
 set -euo pipefail
 if [ "${1:-}" = "main.py" ]; then
     echo "${PATENT_AGENTS_ENV_FILE:-<missing>}" >> "$FAKE_LOG/backend_env_files.log"
-    echo "backend $$ ${PATENT_AGENTS_ENV_FILE:-<missing>}" >> "$FAKE_LOG/processes.log"
+    echo "${ENVIRONMENT:-<missing>} ${PATENT_AGENTS_ENV_FILE:-<missing>}" >> "$FAKE_LOG/backend_runtime_env.log"
+    echo "backend $$ ${ENVIRONMENT:-<missing>} ${PATENT_AGENTS_ENV_FILE:-<missing>}" >> "$FAKE_LOG/processes.log"
     trap 'exit 0' TERM INT
     while true; do sleep 1; done
 fi
@@ -54,6 +55,7 @@ cat > "$PROJECT/bin/npx" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 echo "$*" >> "$FAKE_LOG/npx_commands.log"
+echo "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-<missing>} NEXT_DIST_DIR=${NEXT_DIST_DIR:-<missing>} $*" >> "$FAKE_LOG/frontend_runtime_env.log"
 if [ "${1:-}" = "next" ] && [ "${2:-}" = "build" ]; then
     exit 0
 fi
@@ -109,6 +111,10 @@ wait_for_file() {
     [ -f "$PROJECT/logs/production.out" ] && cat "$PROJECT/logs/production.out" >&2
     echo "--- production.err ---" >&2
     [ -f "$PROJECT/logs/production.err" ] && cat "$PROJECT/logs/production.err" >&2
+    echo "--- testing.out ---" >&2
+    [ -f "$PROJECT/logs/testing.out" ] && cat "$PROJECT/logs/testing.out" >&2
+    echo "--- testing.err ---" >&2
+    [ -f "$PROJECT/logs/testing.err" ] && cat "$PROJECT/logs/testing.err" >&2
     return 1
 }
 
@@ -133,27 +139,37 @@ assert_dead() {
 
 start_env dev
 DEV_WRAPPER=$STARTED_PID
+start_env testing
+TEST_WRAPPER=$STARTED_PID
 start_env production
 PROD_WRAPPER=$STARTED_PID
 
 wait_for_file "$PROJECT/.runtime/start.sh/dev/backend.pid" "dev backend pid"
 wait_for_file "$PROJECT/.runtime/start.sh/dev/frontend.pid" "dev frontend pid"
+wait_for_file "$PROJECT/.runtime/start.sh/testing/backend.pid" "testing backend pid"
+wait_for_file "$PROJECT/.runtime/start.sh/testing/frontend.pid" "testing frontend pid"
 wait_for_file "$PROJECT/.runtime/start.sh/production/backend.pid" "production backend pid"
 wait_for_file "$PROJECT/.runtime/start.sh/production/frontend.pid" "production frontend pid"
 
 DEV_BACKEND=$(cat "$PROJECT/.runtime/start.sh/dev/backend.pid")
 DEV_FRONTEND=$(cat "$PROJECT/.runtime/start.sh/dev/frontend.pid")
+TEST_BACKEND=$(cat "$PROJECT/.runtime/start.sh/testing/backend.pid")
+TEST_FRONTEND=$(cat "$PROJECT/.runtime/start.sh/testing/frontend.pid")
 PROD_BACKEND=$(cat "$PROJECT/.runtime/start.sh/production/backend.pid")
 PROD_FRONTEND=$(cat "$PROJECT/.runtime/start.sh/production/frontend.pid")
 
 assert_alive "$DEV_BACKEND" "dev backend"
 assert_alive "$DEV_FRONTEND" "dev frontend"
+assert_alive "$TEST_BACKEND" "testing backend"
+assert_alive "$TEST_FRONTEND" "testing frontend"
 assert_alive "$PROD_BACKEND" "production backend"
 assert_alive "$PROD_FRONTEND" "production frontend"
 
 (cd "$PROJECT" && ./start.sh stop dev >/dev/null)
 assert_dead "$DEV_BACKEND" "dev backend"
 assert_dead "$DEV_FRONTEND" "dev frontend"
+assert_alive "$TEST_BACKEND" "testing backend after stop dev"
+assert_alive "$TEST_FRONTEND" "testing frontend after stop dev"
 assert_alive "$PROD_BACKEND" "production backend after stop dev"
 assert_alive "$PROD_FRONTEND" "production frontend after stop dev"
 
@@ -167,8 +183,14 @@ DEV_FRONTEND=$(cat "$PROJECT/.runtime/start.sh/dev/frontend.pid")
 (cd "$PROJECT" && ./start.sh stop production >/dev/null)
 assert_dead "$PROD_BACKEND" "production backend"
 assert_dead "$PROD_FRONTEND" "production frontend"
+assert_alive "$TEST_BACKEND" "testing backend after stop production"
+assert_alive "$TEST_FRONTEND" "testing frontend after stop production"
 assert_alive "$DEV_BACKEND" "dev backend after stop production"
 assert_alive "$DEV_FRONTEND" "dev frontend after stop production"
+
+(cd "$PROJECT" && ./start.sh stop testing >/dev/null)
+assert_dead "$TEST_BACKEND" "testing backend"
+assert_dead "$TEST_FRONTEND" "testing frontend"
 
 if [ -e "$PROJECT/frontend/.env.local" ]; then
     echo "frontend/.env.local must not be created" >&2
@@ -176,13 +198,25 @@ if [ -e "$PROJECT/frontend/.env.local" ]; then
 fi
 
 grep -F "$PROJECT/backend/.env" "$PROJECT/logs/backend_env_files.log" >/dev/null
+grep -F "$PROJECT/backend/.env.testing" "$PROJECT/logs/backend_env_files.log" >/dev/null
 grep -F "$PROJECT/backend/.env.production" "$PROJECT/logs/backend_env_files.log" >/dev/null
+grep -F "development $PROJECT/backend/.env" "$PROJECT/logs/backend_runtime_env.log" >/dev/null
+grep -F "testing $PROJECT/backend/.env.testing" "$PROJECT/logs/backend_runtime_env.log" >/dev/null
+grep -F "production $PROJECT/backend/.env.production" "$PROJECT/logs/backend_runtime_env.log" >/dev/null
 grep -F "next dev -p 3000" "$PROJECT/logs/npx_commands.log" >/dev/null
+grep -F "next dev -p 3100" "$PROJECT/logs/npx_commands.log" >/dev/null
 grep -F "next build" "$PROJECT/logs/npx_commands.log" >/dev/null
 grep -F "next start -p 10001" "$PROJECT/logs/npx_commands.log" >/dev/null
+grep -F "NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1 NEXT_DIST_DIR=.next-dev" "$PROJECT/logs/frontend_runtime_env.log" >/dev/null
+grep -F "NEXT_PUBLIC_API_URL=http://localhost:8100/api/v1 NEXT_DIST_DIR=.next-testing" "$PROJECT/logs/frontend_runtime_env.log" >/dev/null
+grep -F "NEXT_PUBLIC_API_URL=http://localhost:10002/api/v1 NEXT_DIST_DIR=.next-production" "$PROJECT/logs/frontend_runtime_env.log" >/dev/null
+grep -F "构建目录: .next-dev" "$PROJECT/logs/dev.out" >/dev/null
+grep -F "构建目录: .next-testing" "$PROJECT/logs/testing.out" >/dev/null
+grep -F "构建目录: .next-production" "$PROJECT/logs/production.out" >/dev/null
 
 (cd "$PROJECT" && ./start.sh stop all >/dev/null)
 wait "$DEV_WRAPPER" 2>/dev/null || true
+wait "$TEST_WRAPPER" 2>/dev/null || true
 wait "$PROD_WRAPPER" 2>/dev/null || true
 
-echo "PASS start.sh dev/production isolation"
+echo "PASS start.sh dev/testing/production isolated config and dist dirs"

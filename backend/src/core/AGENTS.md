@@ -1,27 +1,46 @@
-## core/ — Foundation Services
+## core/ — Foundation And Workflow Runtime
 
-### Files
-| File | Lines | Responsibility |
-|------|-------|----------------|
-| `config.py` | — | pydantic-settings: DB, Redis, LLM, Security, Workflow configs |
-| `logging.py` | — | structlog + loguru, request-id context middleware |
-| `exceptions.py` | — | 20+ exception types (3 severity levels, error codes) |
-| `container.py` | — | dependency-injector: DI container with 3 providers |
-| `middleware.py` | — | JWT auth, rate limiting (slowapi), SSE connection manager |
-| `events.py` | — | InMemoryEventBus / RedisEventBus + event types |
-| `tasks.py` | — | Celery app + LocalTaskExecutor (dev local executor) |
-| `workflow_engine.py` | — | Compatibility facade for the modular workflow engine |
-| `workflow/` | — | Patent workflow runtime, LangGraph adapter, phase contracts, artifacts, AG-UI protocol |
-| `llm/` | — | Unified LLM client and retry logic |
-| `patent/` | — | Deterministic patent compliance helpers |
-| `security/` | — | Secret encryption helpers |
+### Modules
 
-### Dependency Rule
-`core/` imports zero `src` modules — it is the bottom layer. Everything else depends on it.
+| Path | Responsibility |
+| --- | --- |
+| `config.py` | pydantic-settings application configuration and runtime reload |
+| `constants/` | environment names, patent hard rules, workflow thresholds/timeouts |
+| `llm/client.py` | unified LLM client/service and provider-specific client creation |
+| `llm/providers/` | built-in text LLM and image generation provider catalog |
+| `workflow/` | LangGraph workflow runtime, nodes, contracts, gates, checkpoints, events, artifacts |
+| `workflow_engine.py` | thin compatibility facade for legacy imports only |
+| `patent/` | deterministic patent compliance helpers |
+| `events.py` | event bus abstractions |
+| `tasks.py` | background task executors |
+| `middleware.py` | request/SSE middleware |
+| `security/` | secret encryption helpers |
 
-### Key Patterns
-- **Config**: Singleton `settings` object loaded at startup. All modules access via `from src.core.config import settings`
-- **DI**: `ApplicationContainer` wired in `backend/main.py`. Override for testing via `container.override()`
-- **Events**: SSE streaming for real-time agent thinking. Two implementations: InMemoryEventBus (dev) and RedisEventBus (prod)
-- **Tasks**: Celery for background tasks. LocalTaskExecutor is the explicit dev local executor
-- **Workflow**: Modular patent workflow package; `workflow_engine.py` exists only as the legacy import facade
+### Rules
+
+- Add new cross-cutting constants to `constants/`, not inline inside workflow/API/frontend code.
+- Add new LLM or image providers to `llm/providers/catalog.py`, not directly inside `config.py` or UI code.
+- Do not put professional patent judgments in deterministic helpers. Local checks are for hard rules only.
+- Do not expand `workflow_engine.py`; move workflow behavior into `workflow/` modules.
+- Runtime config reload must reset cached LLM clients so changed provider settings take effect immediately.
+
+### Workflow Ownership
+
+LangGraph owns:
+
+- node sequence
+- quality gate routing
+- user interrupts
+- route history
+- phase round persistence
+- shared facts merging
+
+Hermes Agents own:
+
+- professional analysis
+- retrieval reasoning
+- patent drafting
+- quality review
+- tool/skill use
+
+CEO owns only orchestration, routing, and shared context maintenance.

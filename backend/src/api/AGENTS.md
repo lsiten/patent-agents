@@ -1,30 +1,36 @@
-# api/ — REST Endpoints
+# api/ — REST And SSE Routes
 
 ## Structure
-Single-file router at `routes.py` (934L). No route splitting — all endpoints in one file.
 
-## Endpoint Groups
-| Prefix | Purpose |
-|--------|---------|
-| `/api/auth/*` | Login, register, refresh token |
-| `/api/patents/*` | CRUD patent applications + workflow trigger |
-| `/api/agents/*` | Agent interaction, streaming, history |
-| `/api/knowledge/*` | Prior art search, knowledge base queries |
-| `/api/users/*` | User profile, settings |
-| `/api/documents/*` | Generated document download/manage |
+Routes are split by domain under `api/routers/`. Do not add new endpoint groups to a monolithic catch-all route file.
 
-## SSE Streaming
-Agent thinking updates stream via SSE at `/api/agents/{id}/stream`.
-Consumer: `frontend/app/agents/page.tsx` reads `EventSource` or fetch + ReadableStream.
+Common domains:
 
-## Auth
-JWT via `python-jose`. Middleware in `core/middleware.py`:
-- `get_current_user` — required auth
-- `get_current_user_optional` — optional (for public routes)
-- `require_role` / `require_admin` — role-based guards
+| Domain | Purpose |
+| --- | --- |
+| conversations | Chat conversations, messages, active reply state, conversation event streams |
+| workflows | Patent workflow creation, status, SSE stream, user continuation, artifact download |
+| agents | Agent list, profile details, per-Agent LLM/image configuration |
+| system | System status and global LLM/image configuration |
+| search/knowledge | Search and knowledge endpoints when exposed directly |
 
-## Request Flow
-```
-HTTP Request → CORS middleware → Auth middleware → Rate limiter → Route handler
-                                                   ↘ SSE connection manager (for streaming)
-```
+## Streaming
+
+Workflow and conversation streams use SSE. Backend events should be normalized into the AG-UI-compatible protocol fields before the frontend consumes them:
+
+- `agui_type`
+- `run_id`
+- `message_id`
+- `tool_call_id`
+- `parent_message_id`
+- `state_delta`
+
+Frontend state is restored through `WorkflowProtocolStore`, not by guessing from ad-hoc legacy fields.
+
+## Route Rules
+
+- Keep endpoint handlers thin; business behavior belongs in `services/`, `core/workflow/`, repositories, or Hermes tools.
+- Do not bypass the workflow runtime to generate patent content directly.
+- Do not trigger formal patent generation without the required brainstorm/title/user-confirmation state.
+- Do not hardcode provider lists in route modules; use `src.core.llm.providers.catalog`.
+- System config saves should call runtime reload so cached LLM/image clients pick up the new values.

@@ -6,11 +6,14 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
+from src.core.llm.providers import TEXT_LLM_PROVIDER_DEFINITIONS
+
 from . import paths
 from .registry import get_agent_config_registry
 from .skills import build_profile_skill_prompt
 
 logger = logging.getLogger(__name__)
+DEFAULT_TEXT_MODEL = TEXT_LLM_PROVIDER_DEFINITIONS["openai"].default_model
 
 
 def _wrap_status_callback(callback):
@@ -68,7 +71,7 @@ def create_ai_agent(
     resolved_llm = settings.llm.resolve_for_agent(merged_llm)
     base_url = resolved_llm.get("base_url") or ""
     api_key = resolved_llm.get("api_key") or ""
-    default_model = resolved_llm.get("model_id") or "gpt-4-turbo-preview"
+    default_model = resolved_llm.get("model_id") or DEFAULT_TEXT_MODEL
     api_mode = settings.llm.api_mode
 
     merged_image_gen: Dict[str, Any] = {**(config.image_gen or {}), **image_gen_runtime}
