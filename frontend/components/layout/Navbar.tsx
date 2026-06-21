@@ -9,6 +9,7 @@ import { clsx } from 'clsx';
 
 const navLinks = [
   { href: '/chat', label: '对话', icon: MessageSquare },
+  { href: '/tools', label: '工具集', icon: Zap },
   { href: '/patents', label: '专利管理', icon: FolderKanban },
   { href: '/agents', label: 'Agent管理', icon: Settings },
   { href: '/organization', label: '组织架构', icon: GitBranch },

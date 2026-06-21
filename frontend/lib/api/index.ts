@@ -1301,6 +1301,39 @@ export const conversationApi = {
   },
 };
 
+// ============ Tools API ============
+export interface ToolMetadata {
+  name: string;
+  description: string;
+  version: string;
+  tags: string[];
+  agent: string;
+  category: string;
+  user_type: string[];
+}
+
+export interface Tool {
+  name: string;
+  description: string;
+  version: string;
+  metadata: ToolMetadata;
+  content: string;
+}
+
+export const toolsApi = {
+  list: () =>
+    request<Tool[]>('/tools'),
+
+  get: (tool_name: string) =>
+    request<Tool>(`/tools/${encodeURIComponent(tool_name)}`),
+
+  categories: () =>
+    request<string[]>('/tools/categories'),
+
+  byCategory: (category: string) =>
+    request<Tool[]>(`/tools/category/${encodeURIComponent(category)}`),
+};
+
 // ============ React Query Hooks (Optional) ============
 // These can be used with @tanstack/react-query for caching and state management
 

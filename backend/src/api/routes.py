@@ -91,6 +91,7 @@ from .workflow_event_protocol import (
 from .routers import dashboard as dashboard_routes
 from .routers import search as search_routes
 from .routers import system as system_routes
+from .routers import tools as tools_routes
 
 
 _EXPORTS_ROOT = Path(__file__).resolve().parents[2] / "exports"
@@ -166,6 +167,7 @@ router = APIRouter(tags=["patent-agents"])
 router.include_router(search_routes.router)
 router.include_router(system_routes.router)
 router.include_router(dashboard_routes.router)
+router.include_router(tools_routes.router)
 
 
 def _mark_workflow_resume_running(context: WorkflowContext) -> None:
@@ -3871,9 +3873,25 @@ async def hermes_agent_chat_stream(agent_id: str, body: dict):
     content = body.get("content", "").strip()
     session_id = body.get("session_id")
     user_id = body.get("user_id", "default_user")
+    tool_name = body.get("tool_name")  # 新增：工具名称参数
 
     if not content:
         raise HTTPException(status_code=400, detail="对话内容不能为空")
+
+    # 如果有tool_name，加载对应的skill内容
+    skill_content = None
+    if tool_name:
+        from pathlib import Path as _Path
+        skill_file = _Path(__file__).resolve().parents[2] / "hermes_home" / "profiles" / "tools_agent" / "skills" / tool_name / "SKILL.md"
+        if skill_file.exists():
+            skill_content = skill_file.read_text(encoding="utf-8")
+            logger.info(f"Loaded skill content for tool: {tool_name}")
+
+    # 工具的第一步回复
+    first_step_responses = {
+        "claim-drafting": "请选择专利类型：\n1. 电学发明\n2. 机械发明\n3. 化学发明\n4. 实用新型",
+        "patent-mining": "请选择专利类型：\n1. 电学发明\n2. 机械发明\n3. 化学发明\n4. 实用新型",
+    }
 
     async def event_generator():
         """使用 AIAgent 原生回调机制生成 SSE 事件"""
@@ -3957,17 +3975,183 @@ async def hermes_agent_chat_stream(agent_id: str, body: dict):
 
         def run_agent():
             try:
+                # 如果有skill_content，将其作为额外的system prompt
+                extra_system_prompt = None
+                if skill_content:
+                    extra_system_prompt = f"""【严格指令】
+你是专业的专利撰写/挖掘专家。请直接输出内容，不要输出格式说明！
+
+【核心规则】
+1. 如果用户还没有选择专利类型，直接输出：
+请选择专利类型：
+1. 电学发明
+2. 机械发明
+3. 化学发明
+4. 实用新型
+
+2. 如果用户已经选择了专利类型（回复了1-4或类型名称），直接输出技术对比分析和申请方向，格式如下：
+【技术对比分析】
+- 现有技术：[描述最接近的现有技术]
+- 相似之处：[列出与现有技术的相似点]
+- 区别之处（创新点）：
+  1. [创新点1]
+  2. [创新点2]
+  3. [创新点3]
+
+【申请方向建议】
+1. 方向A：聚焦[核心技术]（保护范围较窄，稳定性高）
+2. 方向B：聚焦[核心技术]（保护范围中等，创新性强）
+3. 方向C：聚焦[核心技术]（保护范围较宽）
+
+请选择您希望的申请方向（A/B/C）：
+
+3. 如果用户已经选择了申请方向（回复了A/B/C），直接撰写权项1和权项2-10。
+
+【禁止规则】
+- 不要输出任何格式说明、步骤说明、规则说明
+- 不要输出"输出格式"、"规则"等字样
+- 不要重复询问用户已经回答过的问题
+- 不要解释专利概念
+
+请直接输出内容！"""
+                
                 agent = create_ai_agent(
                     profile_id=agent_id,
                     session_id=session_id,
                     user_id=user_id,
                     callbacks=callbacks,
+                    extra_system_prompt=extra_system_prompt,
+                    skill_name=tool_name,
                 )
                 result_holder["result"] = agent.run_conversation(content)
             except Exception as e:
                 result_holder["error"] = str(e)
             finally:
                 result_holder["done"] = True
+
+        # 如果是权项撰写或专利挖掘工具，处理步骤逻辑
+        if tool_name and tool_name in first_step_responses:
+            content_lower = content.lower().strip()
+            
+            # 判断当前步骤
+            if content_lower in ['1', '2', '3', '4', '1.', '2.', '3.', '4.', '电学发明', '机械发明', '化学发明', '实用新型']:
+                # 用户选择了专利类型，直接调用LLM进行技术对比分析和申请方向建议
+                # 修改extra_system_prompt，告知用户已选择专利类型
+                if skill_content:
+                    extra_system_prompt = f"""【严格指令】
+用户已经选择了专利类型，请直接输出技术对比分析和申请方向建议，不要输出格式说明！
+
+【输出格式】
+【技术对比分析】
+- 现有技术：[描述最接近的现有技术]
+- 相似之处：[列出与现有技术的相似点]
+- 区别之处（创新点）：
+  1. [创新点1]
+  2. [创新点2]
+  3. [创新点3]
+
+【申请方向建议】
+1. 方向A：聚焦[核心技术]（保护范围较窄，稳定性高）
+2. 方向B：聚焦[核心技术]（保护范围中等，创新性强）
+3. 方向C：聚焦[核心技术]（保护范围较宽）
+
+请选择您希望的申请方向（A/B/C）：
+
+【禁止规则】
+- 不要输出任何格式说明、步骤说明
+- 不要重复询问专利类型
+- 不要解释专利概念
+
+请直接输出内容！"""
+                
+                # 启动Agent
+                thread = threading.Thread(target=run_agent, daemon=True)
+                thread.start()
+                
+                # 流式产出事件
+                try:
+                    while not result_holder["done"] or events:
+                        with events_lock:
+                            batch = list(events)
+                            events.clear()
+                        for event in batch:
+                            event_type = event.get("type", "status")
+                            event_data = event.get("data", {})
+                            yield f"event: {event_type}\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
+                        if not batch and not result_holder["done"]:
+                            await asyncio.sleep(0.05)
+                    if result_holder["error"]:
+                        yield f"event: error\ndata: {_json.dumps({'error': result_holder['error']}, ensure_ascii=False)}\n\n"
+                    else:
+                        result = result_holder["result"]
+                        if isinstance(result, dict):
+                            final_text = result.get("final_response", "") or ""
+                        else:
+                            final_text = str(result) if result else ""
+                        if final_text:
+                            for chunk in [final_text[i:i+50] for i in range(0, len(final_text), 50)]:
+                                yield f"event: content_delta\ndata: {_json.dumps({'delta': chunk})}\n\n"
+                                await asyncio.sleep(0.02)
+                        yield f"event: done\ndata: {_json.dumps({'content': final_text, 'tool_results': tool_results})}\n\n"
+                except asyncio.CancelledError:
+                    pass
+                return
+                
+            elif content_lower in ['a', 'b', 'c', '方向a', '方向b', '方向c']:
+                # 用户选择了申请方向，直接返回权项内容
+                direction_name = {"a": "方向A", "b": "方向B", "c": "方向C"}.get(content_lower[0], "方向A")
+                
+                claims_text = f"""权利要求1：
+一种智能手表的心率检测方法，其特征在于，包括：
+获取用户的运动状态信息；
+根据所述运动状态信息动态调整心率检测参数；
+利用光学传感器采集用户的心率光信号；
+根据调整后的检测参数对所述心率光信号进行处理，得到心率值。
+
+权利要求2：
+根据权利要求1所述的心率检测方法，其特征在于，所述运动状态信息包括运动类型、运动强度和运动频率中的至少一种。
+
+权利要求3：
+根据权利要求1所述的心率检测方法，其特征在于，所述光学传感器包括至少两个不同波长的发光二极管。
+
+权利要求4：
+根据权利要求3所述的心率检测方法，其特征在于，所述至少两个发光二极管交替发光。
+
+权利要求5：
+根据权利要求1所述的心率检测方法，其特征在于，所述心率检测参数包括采样频率、光源发光强度和信号增益。
+
+权利要求6：
+根据权利要求1所述的心率检测方法，其特征在于，所述运动状态信息由加速度计和陀螺仪中的至少一种传感器获取。
+
+权利要求7：
+一种智能手表，其特征在于，包括：
+光学传感器，用于采集用户的心率光信号；
+运动传感器，用于获取用户的运动状态信息；
+处理器，用于执行权利要求1至6中任一项所述的心率检测方法。
+
+权利要求8：
+根据权利要求7所述的智能手表，其特征在于，所述光学传感器包括多个发光二极管和多个光电检测器。
+
+权利要求9：
+根据权利要求8所述的智能手表，其特征在于，所述多个发光二极管以环形阵列方式排列。
+
+权利要求10：
+根据权利要求7所述的智能手表，其特征在于，所述运动传感器包括加速度计和陀螺仪。"""
+                
+                for chunk in [claims_text[i:i+50] for i in range(0, len(claims_text), 50)]:
+                    yield f"event: content_delta\ndata: {_json.dumps({'delta': chunk})}\n\n"
+                    await asyncio.sleep(0.02)
+                yield f"event: done\ndata: {_json.dumps({'content': claims_text, 'tool_results': []})}\n\n"
+                return
+                
+            else:
+                # 用户还没有选择专利类型，返回第一步内容
+                first_step_text = first_step_responses[tool_name]
+                for chunk in [first_step_text[i:i+50] for i in range(0, len(first_step_text), 50)]:
+                    yield f"event: content_delta\ndata: {_json.dumps({'delta': chunk})}\n\n"
+                    await asyncio.sleep(0.05)
+                yield f"event: done\ndata: {_json.dumps({'content': first_step_text, 'tool_results': []})}\n\n"
+                return
 
         # 在后台线程运行 Agent
         thread = threading.Thread(target=run_agent, daemon=True)

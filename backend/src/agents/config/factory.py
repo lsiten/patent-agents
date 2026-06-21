@@ -35,6 +35,8 @@ def create_ai_agent(
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
     callbacks: Optional[Dict[str, Any]] = None,
+    extra_system_prompt: Optional[str] = None,
+    skill_name: Optional[str] = None,
 ):
     """Create a `run_agent.AIAgent` from one Hermes profile."""
     from run_agent import AIAgent
@@ -78,10 +80,20 @@ def create_ai_agent(
     final_api_mode = config.api_mode or api_mode or runtime_overrides.get("api_mode")
 
     cb = callbacks or {}
-    skill_prompt = build_profile_skill_prompt(config.skills)
+    
+    if skill_name:
+        skills_for_prompt = [skill for skill in config.skills if skill.get("name") == skill_name]
+    else:
+        skills_for_prompt = config.skills
+    
+    skill_prompt = build_profile_skill_prompt(skills_for_prompt)
     system_prompt = config.soul_md
     if skill_prompt:
         system_prompt = f"{system_prompt.rstrip()}\n\n{skill_prompt}"
+    
+    # 如果有额外的system prompt，添加到末尾
+    if extra_system_prompt:
+        system_prompt = f"{system_prompt.rstrip()}\n\n{extra_system_prompt}"
 
     agent = AIAgent(
         base_url=base_url or None,

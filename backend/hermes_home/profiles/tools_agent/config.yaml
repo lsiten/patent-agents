@@ -1,0 +1,26 @@
+profile_id: patent.tools_agent.v1
+name: 工具集 Agent
+description: 提供多种独立的专利工具服务，每个工具单独通过 skills 实现，与主流程解耦
+role: assistant
+model: default
+temperature: 0.1
+max_tokens: 8192
+enabled_toolsets:
+- patent
+enabled_tools:
+- claim_drafter
+- description_writer
+- quality_assessor
+- patent_search
+- prior_art_comparator
+- similarity_analyzer
+- ipc_classifier
+- patentability_scorer
+- oa_predictor
+- patent_docx_generator
+- creative_thinking
+- patent_strategy_guide
+memory:
+  short_term: true
+  long_term: false
+  knowledge_base: true
