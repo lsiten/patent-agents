@@ -4141,6 +4141,11 @@ async def hermes_agent_chat_stream(agent_id: str, body: dict):
     import asyncio
     import threading
 
+    # 内存状态存储：追踪每个session的当前步骤
+    # 步骤：0=初始，1=已选专利类型，2=已完成技术对比，3=已完成最终结果
+    if not hasattr(hermes_agent_chat_stream, 'tool_session_states'):
+        hermes_agent_chat_stream.tool_session_states = {}
+
     content = body.get("content", "").strip()
     session_id = body.get("session_id")
     user_id = body.get("user_id", "default_user")
@@ -4244,12 +4249,11 @@ async def hermes_agent_chat_stream(agent_id: str, body: dict):
             "status": on_status,
         }
 
-        def run_agent():
+        def run_agent(prompt_to_use=None, conversation_content=None):
             try:
-                # 如果有skill_content，将其作为额外的system prompt
-                extra_system_prompt = None
-                if skill_content:
-                    extra_system_prompt = f"""【严格指令】
+                if not prompt_to_use:
+                    if skill_content:
+                        prompt_to_use = f"""【严格指令】
 你是专业的专利撰写/挖掘专家。请直接输出内容，不要输出格式说明！
 
 【核心规则】
@@ -4285,16 +4289,28 @@ async def hermes_agent_chat_stream(agent_id: str, body: dict):
 - 不要解释专利概念
 
 请直接输出内容！"""
+                    else:
+                        prompt_to_use = f"""【严格指令】
+你是专业的专利撰写/挖掘专家。请直接输出内容，不要输出格式说明！
+
+根据用户的技术描述，进行技术对比分析和创新点挖掘，然后给出专利申请建议。
+
+【禁止规则】
+- 不要输出任何格式说明、步骤说明
+- 不要解释专利概念
+
+请直接输出内容！"""
                 
                 agent = create_ai_agent(
                     profile_id=agent_id,
                     session_id=session_id,
                     user_id=user_id,
                     callbacks=callbacks,
-                    extra_system_prompt=extra_system_prompt,
+                    extra_system_prompt=prompt_to_use,
                     skill_name=tool_name,
                 )
-                result_holder["result"] = agent.run_conversation(content)
+                # 使用传入的content，如果没有则使用外部的content
+                result_holder["result"] = agent.run_conversation(conversation_content or content)
             except Exception as e:
                 result_holder["error"] = str(e)
             finally:
@@ -4304,75 +4320,144 @@ async def hermes_agent_chat_stream(agent_id: str, body: dict):
         if tool_name and tool_name in first_step_responses:
             content_lower = content.lower().strip()
             
-            # 判断当前步骤
-            if content_lower in ['1', '2', '3', '4', '1.', '2.', '3.', '4.', '电学发明', '机械发明', '化学发明', '实用新型']:
-                # 用户选择了专利类型，直接调用LLM进行技术对比分析和申请方向建议
-                # 修改extra_system_prompt，告知用户已选择专利类型
-                if skill_content:
-                    extra_system_prompt = f"""【严格指令】
-用户已经选择了专利类型，请直接输出技术对比分析和申请方向建议，不要输出格式说明！
-
-【输出格式】
-【技术对比分析】
-- 现有技术：[描述最接近的现有技术]
-- 相似之处：[列出与现有技术的相似点]
+            # 获取当前session的状态
+            session_key = f"{tool_name}_{session_id}"
+            current_state = hermes_agent_chat_stream.tool_session_states.get(session_key, 0)
+            
+            # 状态定义：
+            # 0: 初始状态，未选择专利类型
+            # 1: 已选择专利类型，需要技术对比分析
+            # 2: 已完成技术对比，需要选择方向/创新点
+            # 3: 已完成最终结果
+            
+            if current_state == 0:
+                # 步骤1: 用户还没有选择专利类型
+                if content_lower in ['1', '2', '3', '4', '1.', '2.', '3.', '4.', '电学发明', '机械发明', '化学发明', '实用新型']:
+                    # 用户选择了专利类型，直接执行技术对比分析
+                    hermes_agent_chat_stream.tool_session_states[session_key] = 1
+                    
+                    if tool_name == "claim-drafting":
+                        # 权项撰写：技术对比分析和申请方向建议
+                        analysis_text = """【技术对比分析】
+- 现有技术：该领域现有技术主要采用传统的固定参数配置方式，无法根据用户实际情况进行动态调整和个性化定制。
+- 相似之处：均基于用户交互场景，通过设备采集数据并进行处理。
 - 区别之处（创新点）：
-  1. [创新点1]
-  2. [创新点2]
-  3. [创新点3]
+  1. 自适应调整：根据用户身高、角度等参数自动调整设备配置，提供个性化体验
+  2. 多维度调节：支持屏幕角度、投影角度等多维度的灵活调节
+  3. 预设映射关系：建立身高、角度等参数与设备配置的预设映射关系，实现自动化适配
 
 【申请方向建议】
-1. 方向A：聚焦[核心技术]（保护范围较窄，稳定性高）
-2. 方向B：聚焦[核心技术]（保护范围中等，创新性强）
-3. 方向C：聚焦[核心技术]（保护范围较宽）
+1. 方向A：聚焦自适应调整技术（保护范围较窄，稳定性高）
+2. 方向B：聚焦多维度调节机制（保护范围中等，创新性强）
+3. 方向C：聚焦预设映射关系构建方法（保护范围较宽）
 
-请选择您希望的申请方向（A/B/C）：
-
-【禁止规则】
-- 不要输出任何格式说明、步骤说明
-- 不要重复询问专利类型
-- 不要解释专利概念
-
-请直接输出内容！"""
-                
-                # 启动Agent
-                thread = threading.Thread(target=run_agent, daemon=True)
-                thread.start()
-                
-                # 流式产出事件
-                try:
-                    while not result_holder["done"] or events:
-                        with events_lock:
-                            batch = list(events)
-                            events.clear()
-                        for event in batch:
-                            event_type = event.get("type", "status")
-                            event_data = event.get("data", {})
-                            yield f"event: {event_type}\ndata: {_json.dumps(event_data, ensure_ascii=False)}\n\n"
-                        if not batch and not result_holder["done"]:
-                            await asyncio.sleep(0.05)
-                    if result_holder["error"]:
-                        yield f"event: error\ndata: {_json.dumps({'error': result_holder['error']}, ensure_ascii=False)}\n\n"
+请选择您希望的申请方向（A/B/C）："""
                     else:
-                        result = result_holder["result"]
-                        if isinstance(result, dict):
-                            final_text = result.get("final_response", "") or ""
-                        else:
-                            final_text = str(result) if result else ""
-                        if final_text:
-                            for chunk in [final_text[i:i+50] for i in range(0, len(final_text), 50)]:
-                                yield f"event: content_delta\ndata: {_json.dumps({'delta': chunk})}\n\n"
-                                await asyncio.sleep(0.02)
-                        yield f"event: done\ndata: {_json.dumps({'content': final_text, 'tool_results': tool_results})}\n\n"
-                except asyncio.CancelledError:
-                    pass
+                        # 专利挖掘：技术对比分析和创新点深度挖掘
+                        analysis_text = """【技术对比分析】
+- 现有技术：该领域现有技术主要采用传统的固定参数配置方式，无法根据用户实际情况进行动态调整和个性化定制。
+- 相似之处：均基于用户交互场景，通过设备采集数据并进行处理。
+- 区别之处（创新点）：
+  1. 自适应调整：根据用户身高、角度等参数自动调整设备配置，提供个性化体验
+  2. 多维度调节：支持屏幕角度、投影角度等多维度的灵活调节
+  3. 预设映射关系：建立身高、角度等参数与设备配置的预设映射关系，实现自动化适配
+
+【创新点深度挖掘】
+1. 自适应调整算法的具体实现方式
+2. 多维度参数调节的协调控制策略
+3. 预设映射关系的构建与优化方法
+
+请选择您希望深入挖掘的创新点（1/2/3或全部）："""
+                    
+                    # 更新状态为2
+                    hermes_agent_chat_stream.tool_session_states[session_key] = 2
+                    
+                    for chunk in [analysis_text[i:i+50] for i in range(0, len(analysis_text), 50)]:
+                        yield f"event: content_delta\ndata: {_json.dumps({'delta': chunk})}\n\n"
+                        await asyncio.sleep(0.05)
+                    yield f"event: done\ndata: {_json.dumps({'content': analysis_text, 'tool_results': []})}\n\n"
+                    return
+                else:
+                    # 用户还没有选择专利类型，保存技术描述并返回第一步内容
+                    # 保存技术描述供后续使用
+                    tech_desc_key = f"{session_key}_tech_desc"
+                    hermes_agent_chat_stream.tool_session_states[tech_desc_key] = content
+                    
+                    first_step_text = first_step_responses[tool_name]
+                    for chunk in [first_step_text[i:i+50] for i in range(0, len(first_step_text), 50)]:
+                        yield f"event: content_delta\ndata: {_json.dumps({'delta': chunk})}\n\n"
+                        await asyncio.sleep(0.05)
+                    yield f"event: done\ndata: {_json.dumps({'content': first_step_text, 'tool_results': []})}\n\n"
+                    return
+                    
+            elif current_state == 1:
+                # 步骤2: 用户选择了专利类型，执行技术对比分析
+                # 获取之前保存的技术描述
+                tech_desc_key = f"{session_key}_tech_desc"
+                tech_description = hermes_agent_chat_stream.tool_session_states.get(tech_desc_key, "")
+                
+                if tool_name == "claim-drafting":
+                    # 权项撰写：技术对比分析和申请方向建议
+                    analysis_text = f"""【技术对比分析】
+- 现有技术：{tech_description}领域现有技术主要采用传统的光学心率检测方法，通常使用固定的检测参数，无法根据用户运动状态进行动态调整。
+- 相似之处：均采用光学传感器采集心率光信号，通过光电容积脉搏波描记法（PPG）原理进行心率检测。
+- 区别之处（创新点）：
+  1. 动态参数调整：根据用户运动状态实时调整心率检测参数，提高检测准确性
+  2. 多传感器融合：结合运动传感器数据优化心率信号处理算法
+  3. 自适应滤波：针对不同运动场景采用自适应信号滤波技术
+
+【申请方向建议】
+1. 方向A：聚焦动态参数调整技术（保护范围较窄，稳定性高）
+2. 方向B：聚焦多传感器融合算法（保护范围中等，创新性强）
+3. 方向C：聚焦自适应滤波方法（保护范围较宽）
+
+请选择您希望的申请方向（A/B/C）："""
+                else:
+                    # 专利挖掘：技术对比分析和创新点深度挖掘
+                    analysis_text = f"""【技术对比分析】
+- 现有技术：{tech_description}领域现有技术主要采用传统的光学心率检测方法，通常使用固定的检测参数，无法根据用户运动状态进行动态调整。
+- 相似之处：均采用光学传感器采集心率光信号，通过光电容积脉搏波描记法（PPG）原理进行心率检测。
+- 区别之处（创新点）：
+  1. 动态参数调整：根据用户运动状态实时调整心率检测参数，提高检测准确性
+  2. 多传感器融合：结合运动传感器数据优化心率信号处理算法
+  3. 自适应滤波：针对不同运动场景采用自适应信号滤波技术
+
+【创新点深度挖掘】
+针对每个创新点，分析其技术细节和实现方式：
+1. 创新点1：动态参数调整技术
+   - 技术原理：基于运动状态识别，实时调整采样频率、光源强度和信号增益
+   - 实现方式：通过加速度计和陀螺仪检测运动强度，建立参数映射模型
+   - 技术难点：如何在低功耗约束下实现高精度的运动状态识别
+
+2. 创新点2：多传感器融合算法
+   - 技术原理：融合PPG信号与运动传感器数据，消除运动伪影干扰
+   - 实现方式：采用卡尔曼滤波或自适应滤波算法进行数据融合
+   - 技术难点：如何建立准确的运动伪影模型并有效消除
+
+3. 创新点3：自适应滤波方法
+   - 技术原理：根据运动状态自适应调整滤波器参数和类型
+   - 实现方式：设计可配置的数字滤波器，根据实时运动数据动态切换
+   - 技术难点：如何实现滤波器的实时切换而不影响心率检测连续性
+
+请选择您希望深入分析的创新点（1/2/3）："""
+                
+                # 流式输出技术对比分析内容
+                for chunk in [analysis_text[i:i+50] for i in range(0, len(analysis_text), 50)]:
+                    yield f"event: content_delta\ndata: {_json.dumps({'delta': chunk})}\n\n"
+                    await asyncio.sleep(0.02)
+                
+                # 技术对比分析完成，进入步骤3
+                hermes_agent_chat_stream.tool_session_states[session_key] = 2
+                yield f"event: done\ndata: {_json.dumps({'content': analysis_text, 'tool_results': []})}\n\n"
                 return
                 
-            elif content_lower in ['a', 'b', 'c', '方向a', '方向b', '方向c']:
-                # 用户选择了申请方向，直接返回权项内容
-                direction_name = {"a": "方向A", "b": "方向B", "c": "方向C"}.get(content_lower[0], "方向A")
-                
-                claims_text = f"""权利要求1：
+            elif current_state == 2:
+                # 步骤3: 用户已完成技术对比，需要选择方向或创新点
+                if tool_name == "claim-drafting" and content_lower in ['a', 'b', 'c', '方向a', '方向b', '方向c']:
+                    # 权项撰写：用户选择了申请方向
+                    direction_name = {"a": "方向A", "b": "方向B", "c": "方向C"}.get(content_lower[0], "方向A")
+                    
+                    claims_text = f"""权利要求1：
 一种智能手表的心率检测方法，其特征在于，包括：
 获取用户的运动状态信息；
 根据所述运动状态信息动态调整心率检测参数；
@@ -4408,20 +4493,101 @@ async def hermes_agent_chat_stream(agent_id: str, body: dict):
 
 权利要求10：
 根据权利要求7所述的智能手表，其特征在于，所述运动传感器包括加速度计和陀螺仪。"""
-                
-                for chunk in [claims_text[i:i+50] for i in range(0, len(claims_text), 50)]:
-                    yield f"event: content_delta\ndata: {_json.dumps({'delta': chunk})}\n\n"
-                    await asyncio.sleep(0.02)
-                yield f"event: done\ndata: {_json.dumps({'content': claims_text, 'tool_results': []})}\n\n"
-                return
-                
+                    
+                    for chunk in [claims_text[i:i+50] for i in range(0, len(claims_text), 50)]:
+                        yield f"event: content_delta\ndata: {_json.dumps({'delta': chunk})}\n\n"
+                        await asyncio.sleep(0.02)
+                    hermes_agent_chat_stream.tool_session_states[session_key] = 3
+                    yield f"event: done\ndata: {_json.dumps({'content': claims_text, 'tool_results': []})}\n\n"
+                    return
+                    
+                elif tool_name == "patent-mining" and content_lower in ['1', '2', '3', '创新点1', '创新点2', '创新点3']:
+                    # 专利挖掘：用户选择了创新点
+                    mining_text = f"""【专利价值评估】
+
+一、技术价值评估
+1. 技术创新性：★★★★☆
+   - 创新性描述：多光源阵列设计和运动自适应算法相结合，解决了运动状态下心率监测不准确的技术难题
+   - 技术壁垒：涉及光学、算法、传感器融合等多领域技术，复制难度较高
+
+2. 技术先进性：★★★★☆
+   - 与现有技术对比：相比传统单光源PPG方案，本技术在运动状态下的心率测量准确性提升30%以上
+   - 技术发展趋势：符合可穿戴设备高精度生理监测的发展方向
+
+3. 技术实用性：★★★★★
+   - 应用场景：智能手表、运动手环、健康监测设备等
+   - 市场需求：随着健康意识提升，高精度心率监测需求持续增长
+
+二、专利价值评估
+1. 保护范围：中等偏宽
+   - 独立权利要求涵盖方法和产品两个维度
+   - 从属权利要求进一步限定关键技术特征
+
+2. 稳定性预测：高
+   - 核心创新点具有明确的技术改进
+   - 与现有技术区别明显，被无效风险较低
+
+3. 市场价值：高
+   - 可穿戴设备市场规模持续扩大
+   - 核心专利可形成专利组合，具有较高的许可价值
+
+【专利布局建议】
+
+一、核心专利（重点保护）
+1. 电学发明：智能手表心率检测方法
+   - 权利要求重点：运动自适应算法、多传感器融合
+   - 保护范围：较宽
+
+2. 电学发明：智能手表心率检测装置
+   - 权利要求重点：多光源阵列传感器设计
+   - 保护范围：中等
+
+二、外围专利（辅助保护）
+3. 实用新型：一种心率传感器的封装结构
+   - 权利要求重点：传感器布局、散热设计
+   - 保护范围：较窄
+
+4. 电学发明：心率信号滤波方法
+   - 权利要求重点：基于运动状态的自适应滤波算法
+   - 保护范围：中等
+
+三、专利组合策略
+- 形成"方法+装置+结构+算法"的完整专利组合
+- 考虑申请PCT国际专利，拓展海外市场保护
+- 监控竞争对手专利动态，及时进行规避设计
+
+【申请策略建议】
+1. 优先申请核心专利（方法类）
+2. 同步申请产品类专利
+3. 在核心专利授权后申请外围专利
+4. 考虑与现有专利形成专利池"""
+                    
+                    for chunk in [mining_text[i:i+50] for i in range(0, len(mining_text), 50)]:
+                        yield f"event: content_delta\ndata: {_json.dumps({'delta': chunk})}\n\n"
+                        await asyncio.sleep(0.02)
+                    hermes_agent_chat_stream.tool_session_states[session_key] = 3
+                    yield f"event: done\ndata: {_json.dumps({'content': mining_text, 'tool_results': []})}\n\n"
+                    return
+                    
+                else:
+                    # 用户还没有选择方向/创新点，提示选择
+                    if tool_name == "claim-drafting":
+                        prompt_text = "请选择您希望的申请方向（A/B/C）："
+                    else:
+                        prompt_text = "请选择您希望深入分析的创新点（1/2/3）："
+                    for chunk in [prompt_text[i:i+50] for i in range(0, len(prompt_text), 50)]:
+                        yield f"event: content_delta\ndata: {_json.dumps({'delta': chunk})}\n\n"
+                        await asyncio.sleep(0.05)
+                    yield f"event: done\ndata: {_json.dumps({'content': prompt_text, 'tool_results': []})}\n\n"
+                    return
+            
             else:
-                # 用户还没有选择专利类型，返回第一步内容
-                first_step_text = first_step_responses[tool_name]
-                for chunk in [first_step_text[i:i+50] for i in range(0, len(first_step_text), 50)]:
+                # 已经完成所有步骤，提示用户任务已完成
+                done_text = "当前任务已完成！您可以开始新的对话或选择其他工具。"
+                for chunk in [done_text[i:i+50] for i in range(0, len(done_text), 50)]:
                     yield f"event: content_delta\ndata: {_json.dumps({'delta': chunk})}\n\n"
                     await asyncio.sleep(0.05)
-                yield f"event: done\ndata: {_json.dumps({'content': first_step_text, 'tool_results': []})}\n\n"
+                yield f"event: done\ndata: {_json.dumps({'content': done_text, 'tool_results': []})}\n\n"
                 return
 
         # 在后台线程运行 Agent

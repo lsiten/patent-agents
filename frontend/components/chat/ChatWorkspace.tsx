@@ -726,6 +726,66 @@ function parseMessageContent(content: string): ParsedMessageContent {
   };
 }
 
+interface PatentTypeSelection {
+  detected: boolean;
+  question: string;
+  options: { key: string; label: string }[];
+}
+
+function parseSelectionOptions(content: string): PatentTypeSelection {
+  if (content.includes('申请方向建议') || content.includes('请选择您希望的申请方向')) {
+    return { detected: false, question: '', options: [] };
+  }
+  
+  if (content.includes('请选择专利类型')) {
+    const lines = content.split('\n');
+    const options: { key: string; label: string }[] = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const match = trimmed.match(/^(\d+)\.\s*(.+)$/);
+      if (match) {
+        options.push({ key: match[1], label: match[2].trim() });
+      }
+    }
+    
+    if (options.length === 0) {
+      return { detected: false, question: '', options: [] };
+    }
+    
+    return {
+      detected: true,
+      question: '请选择专利类型',
+      options,
+    };
+  }
+  
+  if (content.includes('请选择您希望深入挖掘的创新点')) {
+    const lines = content.split('\n');
+    const options: { key: string; label: string }[] = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const match = trimmed.match(/^(\d+)\.\s*(.+)$/);
+      if (match) {
+        options.push({ key: match[1], label: match[2].trim() });
+      }
+    }
+    
+    if (options.length === 0) {
+      return { detected: false, question: '', options: [] };
+    }
+    
+    return {
+      detected: true,
+      question: '请选择创新点',
+      options,
+    };
+  }
+  
+  return { detected: false, question: '', options: [] };
+}
+
 interface InteractionPanelProps {
   interaction: string;
 }
@@ -756,6 +816,34 @@ function InteractionPanel({ interaction }: InteractionPanelProps) {
           </pre>
         </div>
       )}
+    </div>
+  );
+}
+
+interface PatentTypeSelectorProps {
+  selection: PatentTypeSelection;
+  onSelect: (option: string) => void;
+}
+
+function PatentTypeSelector({ selection, onSelect }: PatentTypeSelectorProps) {
+  if (!selection.detected || selection.options.length === 0) return null;
+  
+  return (
+    <div className="mt-3 rounded-xl border border-brand-cyan/30 bg-brand-cyan/5 p-3">
+      <p className="text-xs font-medium text-brand-cyan-dark mb-2">{selection.question}</p>
+      <div className="flex flex-wrap gap-2">
+        {selection.options.map((opt) => (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => onSelect(opt.key)}
+            className="min-h-9 rounded-full border border-brand-cyan/40 bg-white px-3.5 py-1.5 text-sm font-medium text-brand-cyan-dark transition-colors hover:border-brand-cyan hover:bg-brand-cyan/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-cyan/40"
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-slate/50 mt-2">您也可以直接在输入框中输入</p>
     </div>
   );
 }
@@ -2208,22 +2296,44 @@ function ChatPageContent() {
                                   </div>
                                 ) : msg.role === 'user' ? (
                                   msg.content
-                                ) : (
-                                  <>
-                                    <div className={msg.isStreaming ? 'streaming-text streaming-cursor' : 'streaming-text'}>
-                                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                                        {msg.isStreaming ? msg.content : (parsedContent?.conclusion || msg.content)}
-                                      </ReactMarkdown>
-                                    </div>
-                                    {(msg.role === 'assistant' || msg.role === 'agent') && (msg.tool_calls?.length || msg.skill_uses?.length) ? (
-                                      <ToolCallCard
-                                        toolCalls={msg.tool_calls}
-                                        skillUses={msg.skill_uses}
-                                        isStreaming={msg.isStreaming}
-                                      />
-                                    ) : null}
-                                  </>
-                                )}
+                                ) : (() => {
+                                  const selection = parseSelectionOptions(msg.content);
+                                  const hasVisibleContent = (parsedContent?.conclusion || msg.content)?.trim();
+                                  const hasToolContent = msg.tool_calls?.length || msg.skill_uses?.length;
+                                  
+                                  if (!hasVisibleContent && !hasToolContent) {
+                                    return null;
+                                  }
+                                  
+                                  if (selection.detected && !msg.isStreaming) {
+                                    return (
+                                      <div className="streaming-text">
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                                          {parsedContent?.conclusion || msg.content}
+                                        </ReactMarkdown>
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <>
+                                      {hasVisibleContent && (
+                                        <div className={msg.isStreaming ? 'streaming-text streaming-cursor' : 'streaming-text'}>
+                                          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                                            {msg.isStreaming ? msg.content : (parsedContent?.conclusion || msg.content)}
+                                          </ReactMarkdown>
+                                        </div>
+                                      )}
+                                      {(msg.role === 'assistant' || msg.role === 'agent') && hasToolContent ? (
+                                        <ToolCallCard
+                                          toolCalls={msg.tool_calls}
+                                          skillUses={msg.skill_uses}
+                                          isStreaming={msg.isStreaming}
+                                          onSelectOption={(option) => handleSend(option)}
+                                        />
+                                      ) : null}
+                                    </>
+                                  );
+                                })()}
                               </div>
                             </div>
                             {msg.role === 'assistant' && !msg.isStreaming && msg.content && (
@@ -2246,6 +2356,17 @@ function ChatPageContent() {
                         {msg.role === 'assistant' && !msg.isStreaming && msg.content && hasInteraction && (
                           <InteractionPanel interaction={parsedContent!.interaction} />
                         )}
+                        {/* 选择器 */}
+                        {msg.role === 'assistant' && !msg.isStreaming && msg.content && (() => {
+                          const selection = parseSelectionOptions(msg.content);
+                          if (!selection.detected) return null;
+                          return (
+                            <PatentTypeSelector
+                              selection={selection}
+                              onSelect={(option) => handleSend(option)}
+                            />
+                          );
+                        })()}
                         {(msg.role === 'assistant' || msg.role === 'agent') && msg.agent_events && msg.agent_events.length > 0 && (
                           <AgentActivityLog events={msg.agent_events} className="-mx-1 mt-2" />
                         )}

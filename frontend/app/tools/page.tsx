@@ -50,6 +50,10 @@ export default function ToolsPage() {
     'claim-drafting': '权项撰写',
     'patent-mining': '专利挖掘',
   };
+  
+  const getDisplayName = (tool: Tool) => {
+    return displayNameMap[tool.name] || tool.display_name || tool.name.replace(/-/g, ' ');
+  };
 
   return (
     <div className="min-h-screen bg-canvas">
@@ -72,7 +76,7 @@ export default function ToolsPage() {
               const Icon = toolIcons[tool.name] || Target;
               const colorClass = toolColors[tool.name] || 'bg-gradient-to-br from-blue-500/20 to-blue-500/5 text-blue-600';
               const iconBg = iconBgColors[tool.name] || 'bg-blue-100 text-blue-600';
-              const displayName = displayNameMap[tool.name] || tool.name.replace(/-/g, ' ');
+              const displayName = getDisplayName(tool);
 
               return (
                 <Card

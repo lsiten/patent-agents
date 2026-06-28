@@ -1312,19 +1312,15 @@ export const conversationApi = {
 
 // ============ Tools API ============
 export interface ToolMetadata {
-  name: string;
-  description: string;
-  version: string;
-  tags: string[];
-  agent: string;
   category: string;
   user_type: string[];
+  version: string;
 }
 
 export interface Tool {
   name: string;
+  display_name: string;
   description: string;
-  version: string;
   metadata: ToolMetadata;
   content: string;
 }

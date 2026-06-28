@@ -36,6 +36,113 @@ interface ChatMessage {
   isStreaming?: boolean;
 }
 
+interface SelectionOptions {
+  detected: boolean;
+  question: string;
+  options: { key: string; label: string }[];
+}
+
+function parseSelectionOptions(content: string): SelectionOptions {
+  if (content.includes('请选择专利类型')) {
+    const lines = content.split('\n');
+    const options: { key: string; label: string }[] = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const match = trimmed.match(/^(\d+)\.\s*(.+)$/);
+      if (match) {
+        options.push({ key: match[1], label: match[2].trim() });
+      }
+    }
+    
+    if (options.length === 0) {
+      return { detected: false, question: '', options: [] };
+    }
+    
+    return {
+      detected: true,
+      question: '请选择专利类型',
+      options,
+    };
+  }
+  
+  if (content.includes('请选择您希望的申请方向')) {
+    const lines = content.split('\n');
+    const options: { key: string; label: string }[] = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const match = trimmed.match(/^方向([ABC])：\s*(.+)$/);
+      if (match) {
+        options.push({ key: match[1], label: match[2].trim() });
+      }
+    }
+    
+    if (options.length === 0) {
+      return { detected: false, question: '', options: [] };
+    }
+    
+    return {
+      detected: true,
+      question: '请选择申请方向',
+      options,
+    };
+  }
+  
+  if (content.includes('请选择您希望深入挖掘的创新点')) {
+    const lines = content.split('\n');
+    const options: { key: string; label: string }[] = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const match = trimmed.match(/^(\d+)\.\s*(.+)$/);
+      if (match) {
+        options.push({ key: match[1], label: match[2].trim() });
+      }
+    }
+    
+    if (options.length === 0) {
+      return { detected: false, question: '', options: [] };
+    }
+    
+    return {
+      detected: true,
+      question: '请选择创新点',
+      options,
+    };
+  }
+  
+  return { detected: false, question: '', options: [] };
+}
+
+interface SelectionSelectorProps {
+  selection: SelectionOptions;
+  onSelect: (option: string) => void;
+}
+
+function SelectionSelector({ selection, onSelect }: SelectionSelectorProps) {
+  if (!selection.detected || selection.options.length === 0) return null;
+  
+  return (
+    <div className="mt-3 rounded-xl border border-brand-cyan/30 bg-brand-cyan/5 p-3">
+      <p className="text-xs font-medium text-brand-cyan-dark mb-2">{selection.question}</p>
+      <div className="flex flex-wrap gap-2">
+        {selection.options.map((opt) => (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => onSelect(opt.label)}
+            className="min-h-9 rounded-full border border-brand-cyan/40 bg-white px-3.5 py-1.5 text-sm font-medium text-brand-cyan-dark transition-colors hover:border-brand-cyan hover:bg-brand-cyan/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-cyan/40"
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-slate/50 mt-2">您也可以直接在输入框中输入</p>
+    </div>
+  );
+}
+
 export default function ToolChatWorkspace() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -309,17 +416,18 @@ export default function ToolChatWorkspace() {
                   )}
                 </div>
               )}
-              <div
-                className={clsx(
-                  'rounded-xl px-4 py-3 max-w-[80%]',
-                  message.role === 'user'
-                    ? 'bg-brand-cyan text-white'
-                    : message.role === 'tool'
-                    ? 'bg-surface border border-hairline'
-                    : 'bg-surface border border-hairline'
-                )}
-              >
-                {message.role === 'tool' ? (
+              <div className="flex flex-col max-w-[80%]">
+                <div
+                  className={clsx(
+                    'rounded-xl px-4',
+                    message.role === 'user'
+                      ? 'bg-brand-cyan text-white'
+                      : message.role === 'tool'
+                      ? 'bg-surface  border-hairline'
+                      : 'bg-surface  border-hairline'
+                  )}
+                >
+                  {message.role === 'tool' ? (
                   <div>
                     <div className="flex items-center gap-2 mb-2">
                       <Zap className="w-4 h-4 text-brand-teal-deep" />
@@ -334,16 +442,34 @@ export default function ToolChatWorkspace() {
                       </div>
                     )}
                   </div>
-                ) : (
-                  <div className="prose prose-sm max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                      {message.content}
-                    </ReactMarkdown>
-                    {message.isStreaming && (
-                      <span className="inline-block w-2 h-4 bg-brand-cyan animate-pulse ml-1" />
-                    )}
-                  </div>
-                )}
+                ) : (() => {
+                  const selection = parseSelectionOptions(message.content);
+                  if (selection.detected && !message.isStreaming) return null;
+                  return (
+                    <div className="prose prose-sm max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                        {message.content}
+                      </ReactMarkdown>
+                      {message.isStreaming && (
+                        <span className="inline-block w-2 h-4 bg-brand-cyan animate-pulse ml-1" />
+                      )}
+                    </div>
+                  );
+                })()}
+                </div>
+                {message.role === 'assistant' && !message.isStreaming && (() => {
+                  const selection = parseSelectionOptions(message.content);
+                  if (!selection.detected) return null;
+                  return (
+                    <SelectionSelector
+                      selection={selection}
+                      onSelect={(option) => {
+                        setInput(option);
+                        sendMessage();
+                      }}
+                    />
+                  );
+                })()}
               </div>
               {message.role === 'user' && (
                 <div className="w-8 h-8 rounded-full bg-brand-cyan/20 text-brand-cyan-dark flex items-center justify-center flex-shrink-0">

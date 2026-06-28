@@ -22,6 +22,7 @@ interface ToolCallCardProps {
   toolCalls?: ToolCallInfo[];
   skillUses?: SkillUseInfo[];
   isStreaming?: boolean;
+  onSelectOption?: (option: string) => void;
 }
 
 const toolDisplayNames: Record<string, { label: string; icon: string }> = {
@@ -57,10 +58,32 @@ function getToolDisplay(name: string) {
   return toolDisplayNames[name] || { label: name, icon: '🔧' };
 }
 
-function SingleToolCall({ tool }: { tool: ToolCallInfo }) {
-  const [expanded, setExpanded] = useState(false);
+function parseDirectionOptions(result: unknown): { key: string; label: string }[] | null {
+  const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+  
+  if (!text.includes('申请方向建议') && !text.includes('请选择您希望的申请方向')) {
+    return null;
+  }
+  
+  const lines = text.split('\n');
+  const options: { key: string; label: string }[] = [];
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const match = trimmed.match(/^(?:\d+\.\s*)?方向([ABC])[：:]\s*(.+)$/);
+    if (match) {
+      options.push({ key: match[1], label: match[2].trim() });
+    }
+  }
+  
+  return options.length > 0 ? options : null;
+}
+
+function SingleToolCall({ tool, onSelectOption }: { tool: ToolCallInfo; onSelectOption?: (option: string) => void }) {
   const display = getToolDisplay(tool.name);
   const isLoading = tool.result === null && tool.success;
+  const directionOptions = tool.success && tool.result != null ? parseDirectionOptions(tool.result) : null;
+  const [expanded, setExpanded] = useState(!!directionOptions);
 
   return (
     <div className="overflow-hidden rounded-xl border border-hairline bg-surface/60">
@@ -107,6 +130,21 @@ function SingleToolCall({ tool }: { tool: ToolCallInfo }) {
                   ? tool.result
                   : JSON.stringify(tool.result, null, 2)}
               </pre>
+              
+              {directionOptions && directionOptions.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {directionOptions.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => onSelectOption?.(option.key)}
+                      className="px-3 py-1.5 text-xs font-medium text-white bg-brand-cyan rounded-full hover:bg-brand-cyan/80 transition-colors"
+                    >
+                      方向{option.key}：{option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -175,7 +213,7 @@ function SingleSkillUse({ skill }: { skill: SkillUseInfo }) {
   );
 }
 
-export function ToolCallCard({ toolCalls, skillUses, isStreaming }: ToolCallCardProps) {
+export function ToolCallCard({ toolCalls, skillUses, isStreaming, onSelectOption }: ToolCallCardProps) {
   const hasTools = toolCalls && toolCalls.length > 0;
   const hasSkills = skillUses && skillUses.length > 0;
 
@@ -206,7 +244,7 @@ export function ToolCallCard({ toolCalls, skillUses, isStreaming }: ToolCallCard
           </div>
           <div className="space-y-1">
             {toolCalls!.map((tool, index) => (
-              <SingleToolCall key={`${tool.name}-${index}`} tool={tool} />
+              <SingleToolCall key={`${tool.name}-${index}`} tool={tool} onSelectOption={onSelectOption} />
             ))}
           </div>
         </div>
