@@ -205,17 +205,29 @@ def validate_claim_rules(claims: Any) -> Dict[str, Any]:
 
     for idx, block in enumerate(claim_blocks, start=1):
         is_secondary_independent = idx > 1 and _is_secondary_independent_claim(block)
-        if idx > 1 and not is_secondary_independent and len(block) > DEPENDENT_CLAIM_MAX_CHARS:
-            issues.append({
-                "severity": "high",
-                "location": f"权利要求{idx}",
-                "issue": (
-                    f"从属权利要求超过{DEPENDENT_CLAIM_MAX_CHARS}字，"
-                    f"当前约{len(block)}字"
-                ),
-                "suggestion": "删减实施例细节和非必要限定，保留该从属权利要求的单一附加特征。",
-                "target_agent": "patent_writer",
-            })
+        if idx > 1 and not is_secondary_independent:
+            if len(block) < 80:
+                issues.append({
+                    "severity": "high",
+                    "location": f"权利要求{idx}",
+                    "issue": (
+                        f"从属权利要求过于简略，不足80字，"
+                        f"当前约{len(block)}字"
+                    ),
+                    "suggestion": "补充具体附加技术特征和实质性限定（参数范围、替代方案、子步骤、组合方式、结构关系或技术效果）。",
+                    "target_agent": "patent_writer",
+                })
+            if len(block) > DEPENDENT_CLAIM_MAX_CHARS:
+                issues.append({
+                    "severity": "high",
+                    "location": f"权利要求{idx}",
+                    "issue": (
+                        f"从属权利要求超过{DEPENDENT_CLAIM_MAX_CHARS}字，"
+                        f"当前约{len(block)}字"
+                    ),
+                    "suggestion": "删减实施例细节和非必要限定，保留该从属权利要求的单一附加特征。",
+                    "target_agent": "patent_writer",
+                })
         for match in CLAIM_MANDATORY_LINEBREAK_PUNCT_RE.finditer(block):
             following = block[match.end(): match.end() + 1]
             if following and following != "\n":

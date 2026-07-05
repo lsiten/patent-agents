@@ -958,7 +958,7 @@ async def test_execute_full_workflow_retries_writer_agent_failure(monkeypatch):
                                     "S4、输出至对应显示面。\n"
                                 ),
                                 "dependent_claims": [
-                                    "2. 根据权利要求1所述的方法，其特征在于，所述显示面姿态信息包括显示面位置和朝向。\n"
+                                    "2. 根据权利要求1所述的方法，其特征在于，所述显示面姿态信息包括显示面在三维空间中的位置坐标、朝向角度以及俯仰角，其中位置坐标采用笛卡尔坐标系表示，朝向角度的取值范围为0至360度。\n"
                                 ],
                             },
                         },
